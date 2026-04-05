@@ -1,13 +1,14 @@
-import React from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Card, Descriptions, Table, Tag, Button, Space, Typography, Spin, Empty, Row, Col, Statistic, Tooltip, Badge, Tabs } from 'antd'
-import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined } from '@ant-design/icons'
+import React, { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Card, Descriptions, Table, Tag, Button, Space, Typography, Spin, Empty, Row, Col, Statistic, Tooltip, Badge, Tabs, Input, message, Modal } from 'antd'
+import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined, EditOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
 import ReactECharts from 'echarts-for-react'
 
 const { Title, Text, Paragraph } = Typography
+const { TextArea } = Input
 
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   running: { color: '#faad14', label: '运行中' },
@@ -18,6 +19,13 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
 const TrainingDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const [editNameModalVisible, setEditNameModalVisible] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editMemo, setEditMemo] = useState('')
+  const [isSavingMemo, setIsSavingMemo] = useState(false)
 
   const { data: recordData, isLoading, isError } = useQuery({
     queryKey: ['training-record', id],
@@ -41,6 +49,53 @@ const TrainingDetailPage: React.FC = () => {
   const runMappings = record?.run_mappings || []
   const mergedReport = mergedReportData?.data
   const logContent = logData?.data?.log_content || ''
+
+  const updateMutation = useMutation({
+    mutationFn: (data: Record<string, unknown>) => trainingService.update(Number(id), data),
+    onSuccess: () => {
+      message.success('更新成功')
+      setEditNameModalVisible(false)
+      queryClient.invalidateQueries({ queryKey: ['training-record', id] })
+    },
+    onError: () => {
+      message.error('更新失败')
+    },
+  })
+
+  const handleOpenEditNameModal = () => {
+    if (record) {
+      setEditName(record.name)
+      setEditDescription(record.description || '')
+      setEditNameModalVisible(true)
+    }
+  }
+
+  const handleSaveName = () => {
+    if (!editName.trim()) {
+      message.warning('名称不能为空')
+      return
+    }
+    updateMutation.mutate({ name: editName.trim(), description: editDescription.trim() || null })
+  }
+
+  const handleSaveMemo = async () => {
+    setIsSavingMemo(true)
+    try {
+      await trainingService.update(Number(id), { memo: editMemo.trim() || null })
+      message.success('备忘录已保存')
+      queryClient.invalidateQueries({ queryKey: ['training-record', id] })
+    } catch {
+      message.error('保存失败')
+    } finally {
+      setIsSavingMemo(false)
+    }
+  }
+
+  useEffect(() => {
+    if (record?.memo) {
+      setEditMemo(record.memo)
+    }
+  }, [record?.memo])
 
   if (isLoading) {
     return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
@@ -223,12 +278,25 @@ const TrainingDetailPage: React.FC = () => {
       </div>
 
       <Row gutter={[20, 20]} style={{ marginBottom: 20 }}>
-        <Col xs={24} lg={16}>
+        <Col xs={24} lg={12}>
           <Card
-            title={<><InfoCircleOutlined style={{ marginRight: 8, color: '#1677ff' }} />基本信息</>}
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span><InfoCircleOutlined style={{ marginRight: 8, color: '#1677ff' }} />基本信息</span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={handleOpenEditNameModal}
+                  style={{ color: '#1677ff' }}
+                >
+                  编辑
+                </Button>
+              </div>
+            }
             size="small"
           >
-            <Descriptions column={{ xxl: 3, xl: 2, lg: 2, md: 1 }} bordered size="small">
+            <Descriptions column={{ xxl: 2, xl: 2, lg: 1, md: 1 }} bordered size="small">
               <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
               <Descriptions.Item label="类型">{record.category === 'rolling' ? '滚动训练' : '单次训练'}</Descriptions.Item>
               <Descriptions.Item label="状态">
@@ -249,29 +317,60 @@ const TrainingDetailPage: React.FC = () => {
               <Descriptions.Item label="完成时间">
                 {record.completed_at ? dayjs(record.completed_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="命令行">
+              <Descriptions.Item label="命令行" span={2}>
                 <Text copyable style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace" }}>
                   {record.command_line || '-'}
                 </Text>
               </Descriptions.Item>
             </Descriptions>
           </Card>
+
+          <Card
+            title={<><FileTextOutlined style={{ marginRight: 8, color: '#722ed1' }} />备忘录</>}
+            size="small"
+            style={{ marginTop: 20 }}
+            extra={
+              <Button
+                type="primary"
+                size="small"
+                icon={<SaveOutlined />}
+                onClick={handleSaveMemo}
+                loading={isSavingMemo}
+              >
+                保存
+              </Button>
+            }
+          >
+            <TextArea
+              value={editMemo}
+              onChange={(e) => setEditMemo(e.target.value)}
+              placeholder="在此记录备忘信息，如训练参数说明、注意事项等..."
+              rows={6}
+              style={{ marginBottom: 8 }}
+            />
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              备忘录内容会自动保存到数据库
+            </Text>
+          </Card>
         </Col>
 
-        <Col xs={24} lg={8}>
+        <Col xs={24} lg={12}>
           <Card
             title={<><SettingOutlined style={{ marginRight: 8, color: '#fa8c16' }} />配置快照</>}
             size="small"
+            style={{ height: '100%' }}
+            styles={{ body: { height: 'calc(100% - 57px)', overflow: 'auto' } }}
           >
             {configSnapshot ? (
-              <div style={{ maxHeight: 280, overflow: 'auto' }}>
+              <div>
                 {Object.entries(configSnapshot).map(([key, val]) => (
-                  <div key={key} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #f0f0f0' }}>
+                  <div key={key} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
                     <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>{key}</Text>
                     <div style={{
-                      fontSize: 12, color: '#374151', marginTop: 2,
+                      fontSize: 12, color: '#374151', marginTop: 4,
                       fontFamily: typeof val === 'object' ? "'SF Mono', 'Consolas', monospace" : undefined,
                       wordBreak: 'break-all',
+                      whiteSpace: 'pre-wrap',
                     }}>
                       {typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val)}
                     </div>
@@ -288,6 +387,36 @@ const TrainingDetailPage: React.FC = () => {
       <Card size="small">
         <Tabs defaultActiveKey="runs" items={tabItems} />
       </Card>
+
+      <Modal
+        title="编辑名称和描述"
+        open={editNameModalVisible}
+        onCancel={() => setEditNameModalVisible(false)}
+        onOk={handleSaveName}
+        confirmLoading={updateMutation.isPending}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text style={{ marginBottom: 8, display: 'block' }}>名称 <Text type="danger">*</Text></Text>
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="请输入训练记录名称"
+            maxLength={255}
+          />
+        </div>
+        <div>
+          <Text style={{ marginBottom: 8, display: 'block' }}>描述</Text>
+          <TextArea
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+            placeholder="请输入描述（可选）"
+            rows={4}
+            maxLength={1000}
+          />
+        </div>
+      </Modal>
     </div>
   )
 }
@@ -307,6 +436,25 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
   }
 
   const drawdown = merged_report?.cumulative_return ? calcDrawdown(merged_report.cumulative_return) : []
+
+  const allCumValues: number[] = []
+  if (merged_report?.cumulative_return) {
+    allCumValues.push(...merged_report.cumulative_return.filter((v: number) => v !== null && !isNaN(v)))
+  }
+  if (merged_report?.benchmark_cum_return) {
+    allCumValues.push(...merged_report.benchmark_cum_return.filter((v: number) => v !== null && !isNaN(v)))
+  }
+
+  let cumYAxisMin: number | undefined = undefined
+  let cumYAxisMax: number | undefined = undefined
+  if (allCumValues.length > 0) {
+    const dataMin = Math.min(...allCumValues)
+    const dataMax = Math.max(...allCumValues)
+    const range = dataMax - dataMin
+    const padding = range * 0.05 || 0.01
+    cumYAxisMin = dataMin - padding
+    cumYAxisMax = dataMax + padding
+  }
 
   return (
     <div>
@@ -378,6 +526,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                 },
                 yAxis: {
                   type: 'value',
+                  min: cumYAxisMin,
+                  max: cumYAxisMax,
                   axisLabel: {
                     color: '#9ca3af',
                     formatter: (value: number) => `${((value - 1) * 100).toFixed(0)}%`,

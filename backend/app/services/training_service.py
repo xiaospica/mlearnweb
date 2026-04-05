@@ -266,6 +266,7 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False) -> Di
             "summary_metrics": record.summary_metrics,
             "tags": record.tags or [],
             "category": record.category,
+            "memo": record.memo,
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }

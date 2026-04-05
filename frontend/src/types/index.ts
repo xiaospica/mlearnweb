@@ -165,6 +165,7 @@ export interface TrainingRecord {
   summary_metrics: Record<string, unknown> | null
   tags: string[]
   category: string | null
+  memo: string | null
   created_at: string | null
   updated_at: string | null
   run_mappings?: RunMapping[]

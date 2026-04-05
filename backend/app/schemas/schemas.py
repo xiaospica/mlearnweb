@@ -85,6 +85,7 @@ class TrainingRecordUpdate(BaseModel):
     duration_seconds: Optional[float] = None
     summary_metrics: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
+    memo: Optional[str] = None
 
 
 class TrainingRecordResponse(BaseModel):
@@ -105,6 +106,7 @@ class TrainingRecordResponse(BaseModel):
     summary_metrics: Optional[Dict[str, Any]] = None
     tags: List[str] = []
     category: Optional[str] = None
+    memo: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

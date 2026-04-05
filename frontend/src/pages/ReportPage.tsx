@@ -120,6 +120,25 @@ const CumulativeReturnChart: React.FC<{ data: ReportData['portfolio_data'] }> = 
     }
   }
 
+  const allValues: number[] = []
+  if (data.cumulative_return.strategy_with_cost) {
+    allValues.push(...(data.cumulative_return.strategy_with_cost.filter((v): v is number => v !== null && v !== undefined && !isNaN(v))))
+  }
+  if (data.cumulative_return.benchmark) {
+    allValues.push(...(data.cumulative_return.benchmark.filter((v): v is number => v !== null && v !== undefined && !isNaN(v))))
+  }
+
+  let yAxisMin: number | undefined = undefined
+  let yAxisMax: number | undefined = undefined
+  if (allValues.length > 0) {
+    const dataMin = Math.min(...allValues)
+    const dataMax = Math.max(...allValues)
+    const range = dataMax - dataMin
+    const padding = range * 0.05 || 0.01
+    yAxisMin = dataMin - padding
+    yAxisMax = dataMax + padding
+  }
+
   return (
     <ReactECharts
       option={{
@@ -143,6 +162,8 @@ const CumulativeReturnChart: React.FC<{ data: ReportData['portfolio_data'] }> = 
         xAxis: { type: 'category', data: data.dates, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { show: false } },
         yAxis: { 
           type: 'value', 
+          min: yAxisMin,
+          max: yAxisMax,
           axisLabel: { 
             color: '#9ca3af', 
             formatter: formatPercent

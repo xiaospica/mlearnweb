@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, message, Popconfirm, Segmented } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined } from '@ant-design/icons'
+import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, message, Popconfirm, Segmented, Popover } from 'antd'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -9,6 +9,7 @@ import { trainingService } from '@/services/trainingService'
 import type { TrainingRecord } from '@/types'
 
 const { Title, Text, Paragraph } = Typography
+const { TextArea } = Input
 
 const CATEGORY_CONFIG: Record<string, { color: string; label: string; icon: string }> = {
   single: { color: '#1677ff', label: '单次训练', icon: '📊' },
@@ -151,6 +152,10 @@ const TrainingRecordsPage: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined)
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card')
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [editModalVisible, setEditModalVisible] = useState(false)
+  const [editingRecord, setEditingRecord] = useState<TrainingRecord | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -172,6 +177,39 @@ const TrainingRecordsPage: React.FC = () => {
       message.error('删除失败')
     },
   })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: Record<string, unknown> }) => trainingService.update(id, data),
+    onSuccess: () => {
+      message.success('更新成功')
+      setEditModalVisible(false)
+      setEditingRecord(null)
+      queryClient.invalidateQueries({ queryKey: ['training-records'] })
+    },
+    onError: () => {
+      message.error('更新失败')
+    },
+  })
+
+  const handleOpenEditModal = (record: TrainingRecord, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingRecord(record)
+    setEditName(record.name)
+    setEditDescription(record.description || '')
+    setEditModalVisible(true)
+  }
+
+  const handleSaveEdit = () => {
+    if (!editingRecord) return
+    if (!editName.trim()) {
+      message.warning('名称不能为空')
+      return
+    }
+    updateMutation.mutate({
+      id: editingRecord.id,
+      data: { name: editName.trim(), description: editDescription.trim() || null },
+    })
+  }
 
   const records = recordsData?.data?.items || []
   const total = recordsData?.data?.total || 0
@@ -268,11 +306,31 @@ const TrainingRecordsPage: React.FC = () => {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
-      width: 220,
+      width: 280,
       render: (name: string, record: TrainingRecord) => (
-        <a onClick={() => navigate(`/training/${record.id}`)} style={{ color: '#1677ff', fontWeight: 500, fontSize: 13 }}>
-          {name}
-        </a>
+        <Space size={4}>
+          <a onClick={() => navigate(`/training/${record.id}`)} style={{ color: '#1677ff', fontWeight: 500, fontSize: 13 }}>
+            {name}
+          </a>
+          <Tooltip title="编辑名称和描述">
+            <EditOutlined
+              style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+              onClick={(e) => handleOpenEditModal(record, e)}
+            />
+          </Tooltip>
+          {record.memo && (
+            <Popover
+              content={<div style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
+              title="备忘录"
+              trigger="click"
+            >
+              <FileTextOutlined
+                style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer' }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Popover>
+          )}
+        </Space>
       ),
     },
     {
@@ -597,9 +655,29 @@ const TrainingRecordsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3 }}>
-                      {record.name}
-                    </Title>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {record.name}
+                      </Title>
+                      <Tooltip title="编辑名称和描述">
+                        <EditOutlined
+                          style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                          onClick={(e) => handleOpenEditModal(record, e)}
+                        />
+                      </Tooltip>
+                      {record.memo && (
+                        <Popover
+                          content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
+                          title="备忘录"
+                          trigger="click"
+                        >
+                          <FileTextOutlined
+                            style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </Popover>
+                      )}
+                    </div>
 
                     {record.description && (
                       <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
@@ -665,6 +743,39 @@ const TrainingRecordsPage: React.FC = () => {
           })}
         </Row>
       )}
+
+      <Modal
+        title="编辑训练记录"
+        open={editModalVisible}
+        onCancel={() => {
+          setEditModalVisible(false)
+          setEditingRecord(null)
+        }}
+        onOk={handleSaveEdit}
+        confirmLoading={updateMutation.isPending}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Text style={{ marginBottom: 8, display: 'block' }}>名称 <Text type="danger">*</Text></Text>
+          <Input
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="请输入训练记录名称"
+            maxLength={255}
+          />
+        </div>
+        <div>
+          <Text style={{ marginBottom: 8, display: 'block' }}>描述</Text>
+          <TextArea
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+            placeholder="请输入描述（可选）"
+            rows={4}
+            maxLength={1000}
+          />
+        </div>
+      </Modal>
     </div>
   )
 }

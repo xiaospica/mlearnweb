@@ -29,6 +29,7 @@ class TrainingRecord(Base):
     tags = Column(JSON, default=list)
     category = Column(String(64), nullable=True, index=True)
     log_content = Column(Text, nullable=True)
+    memo = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -56,6 +57,30 @@ class TrainingRunMapping(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_add_log_content()
+    _migrate_add_memo()
+
+
+def _migrate_add_memo():
+    """数据库迁移：添加 memo 字段"""
+    import sqlite3
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(training_records)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "memo" not in columns:
+            cursor.execute("ALTER TABLE training_records ADD COLUMN memo TEXT")
+            conn.commit()
+            print("[DB Migration] Added memo column to training_records table")
+        
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] Warning: {e}")
 
 
 def _migrate_add_log_content():
