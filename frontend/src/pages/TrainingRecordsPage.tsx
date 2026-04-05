@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, message, Popconfirm, Segmented, Popover } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined } from '@ant-design/icons'
+import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, message, Popconfirm, Segmented, Popover, Collapse } from 'antd'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -10,6 +10,7 @@ import type { TrainingRecord } from '@/types'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
+const { Panel } = Collapse
 
 const CATEGORY_CONFIG: Record<string, { color: string; label: string; icon: string }> = {
   single: { color: '#1677ff', label: '单次训练', icon: '📊' },
@@ -31,7 +32,7 @@ const MiniReturnChart: React.FC<{ data?: { values: number[]; final_return: numbe
   const isPositive = final_return >= 1
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
       <ReactECharts
         option={{
           grid: { left: 0, right: 0, top: 4, bottom: 4 },
@@ -46,9 +47,9 @@ const MiniReturnChart: React.FC<{ data?: { values: number[]; final_return: numbe
             areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: isPositive ? 'rgba(82,196,26,0.2)' : 'rgba(255,77,79,0.2)' }, { offset: 1, color: 'rgba(0,0,0,0)' }] } },
           }],
         }}
-        style={{ width: 80, height: 28 }}
+        style={{ width: '100%', height: 28, flex: 1 }}
       />
-      <Text style={{ fontSize: 12, fontWeight: 600, color: isPositive ? '#52c41a' : '#ff4d4f', fontFamily: "'SF Mono', 'Consolas', monospace" }}>
+      <Text style={{ fontSize: 12, fontWeight: 600, color: isPositive ? '#52c41a' : '#ff4d4f', fontFamily: "'SF Mono', 'Consolas', monospace", whiteSpace: 'nowrap' }}>
         {((final_return - 1) * 100).toFixed(2)}%
       </Text>
     </div>
@@ -191,6 +192,22 @@ const TrainingRecordsPage: React.FC = () => {
     },
   })
 
+  const favoriteMutation = useMutation({
+    mutationFn: ({ id, is_favorite }: { id: number; is_favorite: boolean }) => 
+      trainingService.update(id, { is_favorite }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['training-records'] })
+    },
+    onError: () => {
+      message.error('收藏操作失败')
+    },
+  })
+
+  const handleToggleFavorite = (record: TrainingRecord, e: React.MouseEvent) => {
+    e.stopPropagation()
+    favoriteMutation.mutate({ id: record.id, is_favorite: !record.is_favorite })
+  }
+
   const handleOpenEditModal = (record: TrainingRecord, e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingRecord(record)
@@ -213,8 +230,10 @@ const TrainingRecordsPage: React.FC = () => {
 
   const records = recordsData?.data?.items || []
   const total = recordsData?.data?.total || 0
-  const singleCount = records.filter(r => r.category === 'single').length
-  const rollingCount = records.filter(r => r.category === 'rolling').length
+  const favoriteRecords = records.filter(r => r.is_favorite)
+  const normalRecords = records.filter(r => !r.is_favorite)
+  const singleCount = records.filter(r => (r.run_count || 0) <= 1).length
+  const rollingCount = records.filter(r => (r.run_count || 0) > 1).length
   const completedCount = records.filter(r => r.status === 'completed').length
 
   const handleSelectAll = () => {
@@ -236,6 +255,12 @@ const TrainingRecordsPage: React.FC = () => {
   const handleDelete = () => {
     if (selectedIds.length === 0) {
       message.warning('请先选择要删除的记录')
+      return
+    }
+    const selectedRecords = records.filter(r => selectedIds.includes(r.id))
+    const favoriteSelected = selectedRecords.filter(r => r.is_favorite)
+    if (favoriteSelected.length > 0) {
+      message.warning(`选中的记录中有 ${favoriteSelected.length} 条已收藏，请先取消收藏后再删除`)
       return
     }
     Modal.confirm({
@@ -338,8 +363,9 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'category',
       key: 'category',
       width: 110,
-      render: (category: string) => {
-        const cfg = CATEGORY_CONFIG[category || 'single'] || CATEGORY_CONFIG.single
+      render: (_: string, record: TrainingRecord) => {
+        const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
+        const cfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
         return <Tag color={cfg.color} style={{ fontSize: 11 }}>{cfg.label}</Tag>
       },
     },
@@ -588,160 +614,359 @@ const TrainingRecordsPage: React.FC = () => {
       ) : isError ? null : records.length === 0 ? (
         <UsageGuide />
       ) : viewMode === 'list' ? (
-        <Card size="small" style={{ borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
-          <Table
-            dataSource={records}
-            columns={listColumns}
-            rowKey="id"
-            pagination={false}
-            size="middle"
-            onRow={(record) => ({
-              onClick: () => navigate(`/training/${record.id}`),
-              style: { cursor: 'pointer', transition: 'all 0.2s' },
-            })}
-          />
-        </Card>
+        <Collapse
+          defaultActiveKey={['favorite', 'normal']}
+          bordered={false}
+          style={{ background: 'transparent' }}
+        >
+          {favoriteRecords.length > 0 && (
+            <Panel
+              header={
+                <Space>
+                  <StarFilled style={{ color: '#faad14' }} />
+                  <span style={{ fontWeight: 600 }}>收藏</span>
+                  <Tag color="#faad14" style={{ marginLeft: 8 }}>{favoriteRecords.length}</Tag>
+                </Space>
+              }
+              key="favorite"
+              style={{ marginBottom: 16, background: '#fffbe6', borderRadius: 8, border: '1px solid #ffe58f' }}
+            >
+              <Table
+                dataSource={favoriteRecords}
+                columns={listColumns}
+                rowKey="id"
+                pagination={false}
+                size="middle"
+                onRow={(record) => ({
+                  onClick: () => navigate(`/training/${record.id}`),
+                  style: { cursor: 'pointer', transition: 'all 0.2s' },
+                })}
+              />
+            </Panel>
+          )}
+          <Panel
+            header={
+              <Space>
+                <FolderOutlined />
+                <span style={{ fontWeight: 600 }}>普通</span>
+                <Tag color="#1677ff" style={{ marginLeft: 8 }}>{normalRecords.length}</Tag>
+              </Space>
+            }
+            key="normal"
+            style={{ marginBottom: 16, background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}
+          >
+            {normalRecords.length === 0 ? (
+              <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <Table
+                dataSource={normalRecords}
+                columns={listColumns}
+                rowKey="id"
+                pagination={false}
+                size="middle"
+                onRow={(record) => ({
+                  onClick: () => navigate(`/training/${record.id}`),
+                  style: { cursor: 'pointer', transition: 'all 0.2s' },
+                })}
+              />
+            )}
+          </Panel>
+        </Collapse>
       ) : (
-        <Row gutter={[20, 20]}>
-          {records.map((record: TrainingRecord) => {
-            const catCfg = CATEGORY_CONFIG[record.category || 'single'] || CATEGORY_CONFIG.single
-            const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
-            const isSelected = selectedIds.includes(record.id)
-            return (
-              <Col xs={24} sm={12} lg={8} xl={6} key={record.id}>
-                <Card
-                  hoverable
-                  onClick={() => navigate(`/training/${record.id}`)}
-                  style={{
-                    height: '100%',
-                    background: isSelected ? '#f0f7ff' : '#ffffff',
-                    border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
-                    borderRadius: 8,
-                    transition: 'all 0.2s ease',
-                    cursor: 'pointer',
-                    boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
-                  }}
-                  styles={{ body: { padding: 16 } }}
-                >
-                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <Tag color={catCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
-                          {catCfg.label}
-                        </Tag>
-                        <Tag color={stCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
-                          {stCfg.label}
-                        </Tag>
-                      </div>
-                      <div
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleSelect(record.id, !isSelected)
-                        }}
+        <Collapse
+          defaultActiveKey={['favorite', 'normal']}
+          bordered={false}
+          style={{ background: 'transparent' }}
+        >
+          {favoriteRecords.length > 0 && (
+            <Panel
+              header={
+                <Space>
+                  <StarFilled style={{ color: '#faad14' }} />
+                  <span style={{ fontWeight: 600 }}>收藏</span>
+                  <Tag color="#faad14" style={{ marginLeft: 8 }}>{favoriteRecords.length}</Tag>
+                </Space>
+              }
+              key="favorite"
+              style={{ marginBottom: 16, background: '#fffbe6', borderRadius: 8, border: '1px solid #ffe58f' }}
+            >
+              <Row gutter={[20, 20]}>
+                {favoriteRecords.map((record: TrainingRecord) => {
+                  const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
+                  const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
+                  const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
+                  const isSelected = selectedIds.includes(record.id)
+                  return (
+                    <Col xs={24} sm={12} lg={8} xl={6} key={record.id}>
+                      <Card
+                        hoverable
+                        onClick={() => navigate(`/training/${record.id}`)}
                         style={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          border: isSelected ? 'none' : '2px solid #d1d5db',
-                          background: isSelected ? '#1677ff' : 'transparent',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          height: '100%',
+                          background: isSelected ? '#f0f7ff' : '#ffffff',
+                          border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                          borderRadius: 8,
+                          transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          transition: 'all 0.2s',
+                          boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
                         }}
+                        styles={{ body: { padding: 16 } }}
                       >
-                        {isSelected && <CheckCircleOutlined style={{ color: '#ffffff', fontSize: 12 }} />}
-                      </div>
-                    </div>
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Tag color={catCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                {catCfg.label}
+                              </Tag>
+                              <Tag color={stCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                {stCfg.label}
+                              </Tag>
+                            </div>
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSelect(record.id, !isSelected)
+                              }}
+                              style={{
+                                width: 20,
+                                height: 20,
+                                borderRadius: 4,
+                                border: isSelected ? 'none' : '2px solid #d1d5db',
+                                background: isSelected ? '#1677ff' : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                            >
+                              {isSelected && <CheckCircleOutlined style={{ color: '#ffffff', fontSize: 12 }} />}
+                            </div>
+                          </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {record.name}
-                      </Title>
-                      <Tooltip title="编辑名称和描述">
-                        <EditOutlined
-                          style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
-                          onClick={(e) => handleOpenEditModal(record, e)}
-                        />
-                      </Tooltip>
-                      {record.memo && (
-                        <Popover
-                          content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
-                          title="备忘录"
-                          trigger="click"
-                        >
-                          <FileTextOutlined
-                            style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        </Popover>
-                      )}
-                    </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />
+                            <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {record.name}
+                            </Title>
+                            <Tooltip title="取消收藏">
+                              <StarFilled
+                                style={{ color: '#faad14', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                onClick={(e) => handleToggleFavorite(record, e)}
+                              />
+                            </Tooltip>
+                            <Tooltip title="编辑名称和描述">
+                              <EditOutlined
+                                style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                onClick={(e) => handleOpenEditModal(record, e)}
+                              />
+                            </Tooltip>
+                            {record.memo && (
+                              <Popover
+                                content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
+                                title="备忘录"
+                                trigger="click"
+                              >
+                                <FileTextOutlined
+                                  style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </Popover>
+                            )}
+                          </div>
 
-                    {record.description && (
-                      <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
-                        {record.description}
-                      </Text>
-                    )}
+                          {record.description && (
+                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                              {record.description}
+                            </Text>
+                          )}
 
-                    {record.cumulative_return_preview && (
-                      <div style={{
-                        padding: '10px 12px',
-                        background: '#fafafa',
-                        borderRadius: 6,
-                        border: '1px solid #f0f0f0',
-                      }}>
-                        <MiniReturnChart data={record.cumulative_return_preview} />
-                      </div>
-                    )}
+                          {record.cumulative_return_preview && (
+                            <div style={{
+                              padding: '10px 12px',
+                              background: '#fafafa',
+                              borderRadius: 6,
+                              border: '1px solid #f0f0f0',
+                            }}>
+                              <MiniReturnChart data={record.cumulative_return_preview} />
+                            </div>
+                          )}
 
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}>
-                      <Tooltip title={`关联 ${record.run_count || record.run_ids?.length || 0} 个运行`}>
-                        <Badge
-                          count={record.run_count || record.run_ids?.length || 0}
-                          overflowCount={9999}
-                          style={{
-                            background: '#1677ff',
-                            fontFamily: "'SF Mono', 'Consolas', monospace",
-                            fontSize: 11,
-                          }}
-                        />
-                      </Tooltip>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        <ClockCircleOutlined style={{ marginRight: 4 }} />
-                        {record.created_at ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm') : '-'}
-                      </Text>
-                    </div>
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}>
+                            <Tooltip title={`关联 ${record.run_count || record.run_ids?.length || 0} 个运行`}>
+                              <Badge
+                                count={record.run_count || record.run_ids?.length || 0}
+                                overflowCount={9999}
+                                style={{
+                                  background: '#1677ff',
+                                  fontFamily: "'SF Mono', 'Consolas', monospace",
+                                  fontSize: 11,
+                                }}
+                              />
+                            </Tooltip>
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              <ClockCircleOutlined style={{ marginRight: 4 }} />
+                              {record.created_at ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm') : '-'}
+                            </Text>
+                          </div>
+                        </Space>
+                      </Card>
+                    </Col>
+                  )
+                })}
+              </Row>
+            </Panel>
+          )}
+          
+          <Panel
+            header={
+              <Space>
+                <FolderOutlined />
+                <span style={{ fontWeight: 600 }}>普通</span>
+                <Tag color="#1677ff" style={{ marginLeft: 8 }}>{normalRecords.length}</Tag>
+              </Space>
+            }
+            key="normal"
+            style={{ marginBottom: 16, background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}
+          >
+            {normalRecords.length === 0 ? (
+              <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <Row gutter={[20, 20]}>
+                {normalRecords.map((record: TrainingRecord) => {
+                  const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
+                  const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
+                  const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
+                  const isSelected = selectedIds.includes(record.id)
+                  return (
+                    <Col xs={24} sm={12} lg={8} xl={6} key={record.id}>
+                      <Card
+                        hoverable
+                        onClick={() => navigate(`/training/${record.id}`)}
+                        style={{
+                          height: '100%',
+                          background: isSelected ? '#f0f7ff' : '#ffffff',
+                          border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                          borderRadius: 8,
+                          transition: 'all 0.2s ease',
+                          cursor: 'pointer',
+                          boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
+                        }}
+                        styles={{ body: { padding: 16 } }}
+                      >
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Tag color={catCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                {catCfg.label}
+                              </Tag>
+                              <Tag color={stCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                {stCfg.label}
+                              </Tag>
+                            </div>
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSelect(record.id, !isSelected)
+                              }}
+                              style={{
+                                width: 20,
+                                height: 20,
+                                borderRadius: 4,
+                                border: isSelected ? 'none' : '2px solid #d1d5db',
+                                background: isSelected ? '#1677ff' : 'transparent',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                              }}
+                            >
+                              {isSelected && <CheckCircleOutlined style={{ color: '#ffffff', fontSize: 12 }} />}
+                            </div>
+                          </div>
 
-                    <div style={{
-                      height: 3,
-                      background: '#f0f0f0',
-                      borderRadius: 2,
-                      position: 'relative',
-                      overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        height: 2,
-                        background: '#1677ff',
-                        opacity: 0.6,
-                        borderRadius: 2,
-                      }} />
-                    </div>
-                  </Space>
-                </Card>
-              </Col>
-            )
-          })}
-        </Row>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {record.name}
+                            </Title>
+                            <Tooltip title="收藏">
+                              <StarOutlined
+                                style={{ color: '#9ca3af', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                onClick={(e) => handleToggleFavorite(record, e)}
+                              />
+                            </Tooltip>
+                            <Tooltip title="编辑名称和描述">
+                              <EditOutlined
+                                style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                onClick={(e) => handleOpenEditModal(record, e)}
+                              />
+                            </Tooltip>
+                            {record.memo && (
+                              <Popover
+                                content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
+                                title="备忘录"
+                                trigger="click"
+                              >
+                                <FileTextOutlined
+                                  style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              </Popover>
+                            )}
+                          </div>
+
+                          {record.description && (
+                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                              {record.description}
+                            </Text>
+                          )}
+
+                          {record.cumulative_return_preview && (
+                            <div style={{
+                              padding: '10px 12px',
+                              background: '#fafafa',
+                              borderRadius: 6,
+                              border: '1px solid #f0f0f0',
+                            }}>
+                              <MiniReturnChart data={record.cumulative_return_preview} />
+                            </div>
+                          )}
+
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}>
+                            <Tooltip title={`关联 ${record.run_count || record.run_ids?.length || 0} 个运行`}>
+                              <Badge
+                                count={record.run_count || record.run_ids?.length || 0}
+                                overflowCount={9999}
+                                style={{
+                                  background: '#1677ff',
+                                  fontFamily: "'SF Mono', 'Consolas', monospace",
+                                  fontSize: 11,
+                                }}
+                              />
+                            </Tooltip>
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              <ClockCircleOutlined style={{ marginRight: 4 }} />
+                              {record.created_at ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm') : '-'}
+                            </Text>
+                          </div>
+                        </Space>
+                      </Card>
+                    </Col>
+                  )
+                })}
+              </Row>
+            )}
+          </Panel>
+        </Collapse>
       )}
 
       <Modal

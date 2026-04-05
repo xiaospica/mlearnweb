@@ -166,6 +166,8 @@ export interface TrainingRecord {
   tags: string[]
   category: string | null
   memo: string | null
+  group_name: string
+  is_favorite: boolean
   created_at: string | null
   updated_at: string | null
   run_mappings?: RunMapping[]

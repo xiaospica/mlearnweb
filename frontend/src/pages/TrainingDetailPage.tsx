@@ -265,8 +265,8 @@ const TrainingDetailPage: React.FC = () => {
             <Tag color={statusInfo.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
               {statusInfo.label}
             </Tag>
-            <Tag color={record.category === 'rolling' ? '#722ed1' : '#1677ff'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-              {record.category === 'rolling' ? '滚动训练' : '单次训练'}
+            <Tag color={(record.run_mappings?.length || record.run_count || 0) > 1 ? '#722ed1' : '#1677ff'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+              {(record.run_mappings?.length || record.run_count || 0) > 1 ? '滚动训练' : '单次训练'}
             </Tag>
             {record.duration_seconds && (
               <Text type="secondary" style={{ fontSize: 11 }}>
@@ -298,7 +298,7 @@ const TrainingDetailPage: React.FC = () => {
           >
             <Descriptions column={{ xxl: 2, xl: 2, lg: 1, md: 1 }} bordered size="small">
               <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
-              <Descriptions.Item label="类型">{record.category === 'rolling' ? '滚动训练' : '单次训练'}</Descriptions.Item>
+              <Descriptions.Item label="类型">{(record.run_mappings?.length || record.run_count || 0) > 1 ? '滚动训练' : '单次训练'}</Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
               </Descriptions.Item>

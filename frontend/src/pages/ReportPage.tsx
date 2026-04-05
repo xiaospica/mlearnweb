@@ -783,6 +783,55 @@ const QLibAnalysisPanel: React.FC<{ expId: string; runId: string }> = ({ expId, 
 
   const figures = data.data
 
+  const fixFigureXAxis = (fig: any, index: number): any => {
+    if (!fig || !fig.data) return fig
+    
+    const fixedData = fig.data.map((trace: any) => {
+      if (!trace) return trace
+      
+      const fixedTrace = { ...trace }
+      
+      if (trace.x && Array.isArray(trace.x)) {
+        const hasDateLikeValues = trace.x.some((v: any) => 
+          typeof v === 'string' && (v.includes('-') || v.includes('/') || v.match(/^\d{4}/))
+        )
+        
+        if (!hasDateLikeValues) {
+          if (trace.text && Array.isArray(trace.text) && trace.text.length > 0) {
+            const textSample = trace.text[0]
+            if (typeof textSample === 'string' && (textSample.includes('-') || textSample.match(/^\d{4}/))) {
+              fixedTrace.x = trace.text
+            }
+          }
+        }
+      }
+      
+      return fixedTrace
+    })
+    
+    const fixedLayout = { ...fig.layout }
+    if (fixedLayout.xaxis) {
+      fixedLayout.xaxis = {
+        ...fixedLayout.xaxis,
+        type: 'category',
+        tickangle: -45,
+        tickfont: { size: 10 },
+      }
+    } else {
+      fixedLayout.xaxis = {
+        type: 'category',
+        tickangle: -45,
+        tickfont: { size: 10 },
+      }
+    }
+    
+    return {
+      ...fig,
+      data: fixedData,
+      layout: fixedLayout,
+    }
+  }
+
   return (
     <Row gutter={[16, 16]}>
       {figures.report_figures?.map((fig, i) => (
@@ -818,17 +867,20 @@ const QLibAnalysisPanel: React.FC<{ expId: string; runId: string }> = ({ expId, 
           </Card>
         </Col>
       ))}
-      {figures.model_figures?.map((fig, i) => (
-        <Col xs={24} lg={12} key={`model-${i}`}>
-          <Card title={`模型性能 ${i + 1}`} size="small">
-            <Plot 
-              data={fig.data} 
-              layout={{ ...fig.layout, height: 350, autosize: true }} 
-              style={{ width: '100%', minHeight: 350 }} 
-            />
-          </Card>
-        </Col>
-      ))}
+      {figures.model_figures?.map((fig, i) => {
+        const fixedFig = fixFigureXAxis(fig, i)
+        return (
+          <Col xs={24} lg={12} key={`model-${i}`}>
+            <Card title={`模型性能 ${i + 1}`} size="small">
+              <Plot 
+                data={fixedFig.data} 
+                layout={{ ...fixedFig.layout, height: 350, autosize: true }} 
+                style={{ width: '100%', minHeight: 350 }} 
+              />
+            </Card>
+          </Col>
+        )
+      })}
     </Row>
   )
 }

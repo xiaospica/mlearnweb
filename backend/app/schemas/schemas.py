@@ -86,6 +86,8 @@ class TrainingRecordUpdate(BaseModel):
     summary_metrics: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
     memo: Optional[str] = None
+    group_name: Optional[str] = None
+    is_favorite: Optional[bool] = None
 
 
 class TrainingRecordResponse(BaseModel):
@@ -107,6 +109,8 @@ class TrainingRecordResponse(BaseModel):
     tags: List[str] = []
     category: Optional[str] = None
     memo: Optional[str] = None
+    group_name: Optional[str] = "default"
+    is_favorite: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

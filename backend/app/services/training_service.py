@@ -4,6 +4,7 @@ import socket
 import platform
 import sys
 import numpy as np
+import pandas as pd
 
 from sqlalchemy.orm import Session
 
@@ -40,27 +41,61 @@ def _get_cumulative_return_preview(experiment_id: str, run_id: str) -> Optional[
 
 
 def _get_merged_cumulative_return_preview(experiment_id: str, run_ids: List[str]) -> Optional[Dict[str, Any]]:
-    """合并多个子运行的收益率预览"""
+    """合并多个子运行的收益率预览
+    
+    按时间顺序正确衔接多个子运行的累计收益率
+    """
     if not run_ids or not experiment_id:
         return None
     
-    all_returns = []
+    reports_data = []
     for run_id in run_ids:
         try:
             report_df = mlflow_reader.load_portfolio_report(experiment_id, run_id)
             if report_df is not None and not report_df.empty and "return" in report_df.columns:
-                all_returns.extend(report_df["return"].dropna().tolist())
+                if not isinstance(report_df.index, (pd.DatetimeIndex, pd.Index)):
+                    continue
+                dates = [str(d)[:10] for d in report_df.index]
+                returns = report_df["return"].dropna().tolist()
+                if len(returns) > 0 and len(dates) > 0:
+                    reports_data.append({
+                        "run_id": run_id,
+                        "dates": dates,
+                        "returns": returns,
+                        "start_date": dates[0] if dates else "",
+                    })
         except Exception as e:
             print(f"[TrainingService] _get_merged_cumulative_return_preview error for run {run_id}: {e}")
             continue
     
-    if not all_returns:
+    if not reports_data:
+        return None
+    
+    reports_data.sort(key=lambda x: x.get("start_date", ""))
+    
+    all_cum_returns = []
+    prev_base = 1.0
+    
+    for report in reports_data:
+        returns = report["returns"]
+        if not returns:
+            continue
+        
+        cum_ret_local = np.cumprod(1 + np.array(returns))
+        
+        if all_cum_returns:
+            base = all_cum_returns[-1]
+            cum_ret_adjusted = cum_ret_local * base / cum_ret_local[0]
+        else:
+            cum_ret_adjusted = cum_ret_local
+        
+        all_cum_returns.extend(cum_ret_adjusted.tolist())
+    
+    if not all_cum_returns:
         return None
     
     try:
-        returns_arr = np.array(all_returns)
-        cum_ret = np.cumprod(1 + returns_arr)
-        
+        cum_ret = np.array(all_cum_returns)
         total_points = len(cum_ret)
         max_points = 50
         if total_points > max_points:
@@ -138,11 +173,48 @@ class TrainingService:
             .limit(page_size)
             .all()
         )
+        
+        record_ids = [r.id for r in records]
+        mapping_counts = {}
+        mapping_run_ids = {}
+        if record_ids:
+            from sqlalchemy import func
+            counts_query = (
+                db.query(
+                    TrainingRunMapping.training_record_id,
+                    func.count(TrainingRunMapping.id).label("count")
+                )
+                .filter(TrainingRunMapping.training_record_id.in_(record_ids))
+                .group_by(TrainingRunMapping.training_record_id)
+                .all()
+            )
+            mapping_counts = {item[0]: item[1] for item in counts_query}
+            
+            run_ids_query = (
+                db.query(
+                    TrainingRunMapping.training_record_id,
+                    TrainingRunMapping.run_id,
+                    TrainingRunMapping.rolling_index,
+                )
+                .filter(TrainingRunMapping.training_record_id.in_(record_ids))
+                .order_by(TrainingRunMapping.training_record_id, TrainingRunMapping.rolling_index.asc().nullslast())
+                .all()
+            )
+            for item in run_ids_query:
+                if item[0] not in mapping_run_ids:
+                    mapping_run_ids[item[0]] = []
+                mapping_run_ids[item[0]].append(item[1])
+        
         return {
             "total": total,
             "page": page,
             "page_size": page_size,
-            "items": [_record_to_dict(r, include_preview=include_preview) for r in records],
+            "items": [_record_to_dict(
+                r, 
+                include_preview=include_preview, 
+                run_mapping_count=mapping_counts.get(r.id),
+                actual_run_ids=mapping_run_ids.get(r.id)
+            ) for r in records],
         }
 
     @staticmethod
@@ -244,9 +316,11 @@ class TrainingService:
         return mapping
 
 
-def _record_to_dict(record: TrainingRecord, include_preview: bool = False) -> Dict[str, Any]:
+def _record_to_dict(record: TrainingRecord, include_preview: bool = False, run_mapping_count: Optional[int] = None, actual_run_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     try:
         run_ids = record.run_ids or []
+        actual_run_count = run_mapping_count if run_mapping_count is not None else len(run_ids)
+        effective_run_ids = actual_run_ids if actual_run_ids else run_ids
         data = {
             "id": record.id,
             "name": record.name,
@@ -254,7 +328,7 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False) -> Di
             "experiment_id": record.experiment_id,
             "experiment_name": record.experiment_name,
             "run_ids": run_ids,
-            "run_count": len(run_ids),
+            "run_count": actual_run_count,
             "config_snapshot": record.config_snapshot,
             "status": record.status,
             "started_at": record.started_at.isoformat() if record.started_at else None,
@@ -267,16 +341,18 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False) -> Di
             "tags": record.tags or [],
             "category": record.category,
             "memo": record.memo,
+            "group_name": getattr(record, 'group_name', 'default') or 'default',
+            "is_favorite": getattr(record, 'is_favorite', False) or False,
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }
 
-        if include_preview and run_ids and record.experiment_id:
+        if include_preview and effective_run_ids and record.experiment_id:
             try:
-                if len(run_ids) > 1:
-                    preview = _get_merged_cumulative_return_preview(record.experiment_id, run_ids)
+                if len(effective_run_ids) > 1:
+                    preview = _get_merged_cumulative_return_preview(record.experiment_id, effective_run_ids)
                 else:
-                    preview = _get_cumulative_return_preview(record.experiment_id, run_ids[0])
+                    preview = _get_cumulative_return_preview(record.experiment_id, effective_run_ids[0])
                 if preview:
                     data["cumulative_return_preview"] = preview
             except Exception as e:

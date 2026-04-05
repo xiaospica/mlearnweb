@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 
@@ -30,6 +30,8 @@ class TrainingRecord(Base):
     category = Column(String(64), nullable=True, index=True)
     log_content = Column(Text, nullable=True)
     memo = Column(Text, nullable=True)
+    group_name = Column(String(64), nullable=True, index=True, default="default")
+    is_favorite = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -58,6 +60,35 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _migrate_add_log_content()
     _migrate_add_memo()
+    _migrate_add_group_favorite()
+
+
+def _migrate_add_group_favorite():
+    """数据库迁移：添加 group_name 和 is_favorite 字段"""
+    import sqlite3
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(training_records)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "group_name" not in columns:
+            cursor.execute("ALTER TABLE training_records ADD COLUMN group_name TEXT DEFAULT 'default'")
+            conn.commit()
+            print("[DB Migration] Added group_name column to training_records table")
+        
+        if "is_favorite" not in columns:
+            cursor.execute("ALTER TABLE training_records ADD COLUMN is_favorite INTEGER DEFAULT 0")
+            conn.commit()
+            print("[DB Migration] Added is_favorite column to training_records table")
+        
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] Warning: {e}")
 
 
 def _migrate_add_memo():
