@@ -783,24 +783,57 @@ const QLibAnalysisPanel: React.FC<{ expId: string; runId: string }> = ({ expId, 
 
   const figures = data.data
 
+  const nanoToDateString = (ns: number): string => {
+    try {
+      const ms = ns / 1e6
+      const date = new Date(ms)
+      if (isNaN(date.getTime())) return String(ns)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    } catch {
+      return String(ns)
+    }
+  }
+
+  const isNanoTimestamp = (value: any): boolean => {
+    if (typeof value !== 'number') return false
+    return value > 1e15 && value < 2e18
+  }
+
   const fixFigureXAxis = (fig: any, index: number): any => {
     if (!fig || !fig.data) return fig
+    
+    const hasHistogram = fig.data.some((trace: any) => trace?.type === 'histogram')
     
     const fixedData = fig.data.map((trace: any) => {
       if (!trace) return trace
       
       const fixedTrace = { ...trace }
       
+      if (trace.type === 'histogram') {
+        return fixedTrace
+      }
+      
       if (trace.x && Array.isArray(trace.x)) {
-        const hasDateLikeValues = trace.x.some((v: any) => 
-          typeof v === 'string' && (v.includes('-') || v.includes('/') || v.match(/^\d{4}/))
-        )
+        const sampleValue = trace.x.find((v: any) => v !== null && v !== undefined)
         
-        if (!hasDateLikeValues) {
-          if (trace.text && Array.isArray(trace.text) && trace.text.length > 0) {
-            const textSample = trace.text[0]
-            if (typeof textSample === 'string' && (textSample.includes('-') || textSample.match(/^\d{4}/))) {
-              fixedTrace.x = trace.text
+        if (isNanoTimestamp(sampleValue)) {
+          fixedTrace.x = trace.x.map((v: any) => 
+            v !== null && v !== undefined ? nanoToDateString(v) : v
+          )
+        } else {
+          const hasDateLikeValues = trace.x.some((v: any) => 
+            typeof v === 'string' && (v.includes('-') || v.includes('/') || v.match(/^\d{4}/))
+          )
+          
+          if (!hasDateLikeValues) {
+            if (trace.text && Array.isArray(trace.text) && trace.text.length > 0) {
+              const textSample = trace.text[0]
+              if (typeof textSample === 'string' && (textSample.includes('-') || textSample.match(/^\d{4}/))) {
+                fixedTrace.x = trace.text
+              }
             }
           }
         }
@@ -810,18 +843,45 @@ const QLibAnalysisPanel: React.FC<{ expId: string; runId: string }> = ({ expId, 
     })
     
     const fixedLayout = { ...fig.layout }
-    if (fixedLayout.xaxis) {
-      fixedLayout.xaxis = {
-        ...fixedLayout.xaxis,
-        type: 'category',
-        tickangle: -45,
-        tickfont: { size: 10 },
+    
+    if (!hasHistogram) {
+      if (fixedLayout.xaxis) {
+        fixedLayout.xaxis = {
+          ...fixedLayout.xaxis,
+          type: 'category',
+          tickangle: -45,
+          tickfont: { size: 10 },
+        }
+      } else {
+        fixedLayout.xaxis = {
+          type: 'category',
+          tickangle: -45,
+          tickfont: { size: 10 },
+        }
       }
-    } else {
-      fixedLayout.xaxis = {
-        type: 'category',
-        tickangle: -45,
-        tickfont: { size: 10 },
+      if (fixedLayout.xaxis2) {
+        fixedLayout.xaxis2 = {
+          ...fixedLayout.xaxis2,
+          type: 'category',
+          tickangle: -45,
+          tickfont: { size: 10 },
+        }
+      }
+      if (fixedLayout.xaxis3) {
+        fixedLayout.xaxis3 = {
+          ...fixedLayout.xaxis3,
+          type: 'category',
+          tickangle: -45,
+          tickfont: { size: 10 },
+        }
+      }
+      if (fixedLayout.xaxis4) {
+        fixedLayout.xaxis4 = {
+          ...fixedLayout.xaxis4,
+          type: 'category',
+          tickangle: -45,
+          tickfont: { size: 10 },
+        }
       }
     }
     
@@ -856,17 +916,20 @@ const QLibAnalysisPanel: React.FC<{ expId: string; runId: string }> = ({ expId, 
           </Card>
         </Col>
       ))}
-      {figures.ic_figures?.map((fig, i) => (
-        <Col xs={24} lg={12} key={`ic-${i}`}>
-          <Card title={`IC分析 ${i + 1}`} size="small">
-            <Plot 
-              data={fig.data} 
-              layout={{ ...fig.layout, height: 350, autosize: true }} 
-              style={{ width: '100%', minHeight: 350 }} 
-            />
-          </Card>
-        </Col>
-      ))}
+      {figures.ic_figures?.map((fig, i) => {
+        const fixedFig = fixFigureXAxis(fig, i)
+        return (
+          <Col xs={24} lg={12} key={`ic-${i}`}>
+            <Card title={`IC分析 ${i + 1}`} size="small">
+              <Plot 
+                data={fixedFig.data} 
+                layout={{ ...fixedFig.layout, height: 350, autosize: true }} 
+                style={{ width: '100%', minHeight: 350 }} 
+              />
+            </Card>
+          </Col>
+        )
+      })}
       {figures.model_figures?.map((fig, i) => {
         const fixedFig = fixFigureXAxis(fig, i)
         return (
