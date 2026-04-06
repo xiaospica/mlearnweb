@@ -13,7 +13,24 @@ class ReportService:
         if not run_detail:
             return {"error": f"Run {run_id} not found"}
 
+        # 从 MLflow metrics 中提取指标
         key_metrics = _extract_key_metrics(run_detail.get("metrics", {}))
+        
+        # 从 port_analysis_1day.pkl 中提取风险指标并合并
+        port_analysis = mlflow_reader.load_port_analysis(experiment_id, run_id)
+        if port_analysis:
+            # 合并风险指标到 key_metrics
+            for key, value in port_analysis.items():
+                # 提取指标名称映射
+                if "max_drawdown" in key and ("max_drawdown" not in key_metrics or key_metrics.get("max_drawdown") is None):
+                    key_metrics["max_drawdown"] = value
+                elif "annualized_return" in key and ("annualized_return" not in key_metrics or key_metrics.get("annualized_return") is None):
+                    key_metrics["annualized_return"] = value
+                elif "information_ratio" in key and ("information_ratio" not in key_metrics or key_metrics.get("information_ratio") is None):
+                    key_metrics["information_ratio"] = value
+                elif "sharpe" in key and ("sharpe_ratio" not in key_metrics or key_metrics.get("sharpe_ratio") is None):
+                    key_metrics["sharpe_ratio"] = value
+        
         model_params_structured = run_detail.get("params", {})
         portfolio_data = ReportService._get_portfolio_chart_data(experiment_id, run_id)
         ic_analysis_data = ReportService._get_ic_chart_data(experiment_id, run_id)
@@ -22,6 +39,7 @@ class ReportService:
         pred_label_data = ReportService._get_pred_label_data(experiment_id, run_id)
         rolling_stats = ReportService._get_rolling_stats(experiment_id, run_id)
         monthly_returns = ReportService._get_monthly_returns(experiment_id, run_id)
+        annual_returns = ReportService._get_annual_returns(experiment_id, run_id)
         qlib_analysis = ReportService._get_qlib_analysis(experiment_id, run_id)
 
         if portfolio_data.get("available") and portfolio_data.get("daily_return"):
@@ -60,8 +78,13 @@ class ReportService:
             "pred_label_data": pred_label_data,
             "rolling_stats": rolling_stats,
             "monthly_returns": monthly_returns,
+            "annual_returns": annual_returns,
             "qlib_analysis": qlib_analysis,
-            "all_metrics_raw": run_detail.get("metrics", {}),
+            "all_metrics_raw": {
+                **run_detail.get("metrics", {}), 
+                **(port_analysis or {}),
+                **(mlflow_reader.load_indicator_analysis(experiment_id, run_id) or {}),
+            },
             "tags": run_detail.get("tags", {}),
         }
 
@@ -157,7 +180,27 @@ class ReportService:
     def _get_risk_metrics(experiment_id: str, run_id: str) -> Dict[str, Any]:
         port_analysis = mlflow_reader.load_port_analysis(experiment_id, run_id)
         if port_analysis:
-            return {"available": True, "metrics": port_analysis}
+            # 映射字段名到前端期望的格式
+            metrics = {}
+            for key, value in port_analysis.items():
+                if "max_drawdown" in key:
+                    metrics["max_drawdown"] = value
+                elif "annualized_return" in key:
+                    metrics["annualized_return"] = value
+                elif "information_ratio" in key:
+                    metrics["information_ratio"] = value
+                elif "sharpe" in key and "ratio" not in key:
+                    metrics["sharpe_ratio"] = value
+                elif "mean" in key and "annualized" not in key:
+                    metrics["mean"] = value
+                elif "std" in key:
+                    metrics["std"] = value
+            
+            # 如果没有找到任何指标，使用原始数据
+            if not metrics:
+                metrics = port_analysis
+            
+            return {"available": True, "metrics": metrics}
 
         report_df = mlflow_reader.load_portfolio_report(experiment_id, run_id)
         if report_df is None or report_df.empty or "return" not in report_df.columns:
@@ -169,7 +212,7 @@ class ReportService:
             "std": float(returns.std()),
             "annualized_return": float(returns.mean() * 252),
             "max_drawdown": float(returns.min()) if len(returns) > 0 else None,
-            "sharpe": float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else None,
+            "sharpe_ratio": float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else None,
             "win_rate": float((returns > 0).mean()),
             "total_days": int(len(returns)),
         }
@@ -309,6 +352,50 @@ class ReportService:
                 "values": [d["return"] for d in monthly_data],
                 "labels": [d["month"] for d in monthly_data],
             },
+        }
+
+    @staticmethod
+    def _get_annual_returns(experiment_id: str, run_id: str) -> Dict[str, Any]:
+        report_df = mlflow_reader.load_portfolio_report(experiment_id, run_id)
+        if report_df is None or report_df.empty or "return" not in report_df.columns:
+            return {"available": False}
+
+        if not isinstance(report_df.index, pd.DatetimeIndex):
+            try:
+                report_df = report_df.copy()
+                report_df.index = pd.to_datetime(report_df.index)
+            except Exception:
+                return {"available": False}
+
+        returns = report_df["return"].dropna()
+        if len(returns) == 0:
+            return {"available": False}
+
+        annual_returns = returns.resample('YE').apply(lambda x: (1 + x).prod() - 1)
+        
+        annual_data = []
+        for date, ret in annual_returns.items():
+            if pd.notna(ret):
+                annual_data.append({
+                    "year": date.year,
+                    "return": float(ret),
+                })
+
+        annual_dict = {str(d["year"]): d["return"] for d in annual_data}
+        
+        benchmark_annual = {}
+        if "bench" in report_df.columns:
+            bench_returns = report_df["bench"].dropna()
+            bench_annual = bench_returns.resample('YE').apply(lambda x: (1 + x).prod() - 1)
+            for date, ret in bench_annual.items():
+                if pd.notna(ret):
+                    benchmark_annual[str(date.year)] = float(ret)
+
+        return {
+            "available": True,
+            "annual_returns": annual_dict,
+            "benchmark_annual_returns": benchmark_annual,
+            "annual_list": annual_data,
         }
 
     @staticmethod

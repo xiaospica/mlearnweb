@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 from app.models.database import get_db_session, init_db
-from app.services.training_service import TrainingService
+from app.services.training_service import TrainingService, InSampleBacktestService
 from app.services.report_service import ReportService
 from app.utils.mlflow_reader import mlflow_reader
 from app.schemas.schemas import (
@@ -15,6 +15,12 @@ from app.schemas.schemas import (
     TrainingRecordResponse,
     RunMappingCreate,
     ApiResponse,
+    InSampleBacktestRequest,
+    InSampleBacktestResponse,
+    GroupCreate,
+    GroupUpdate,
+    BatchGroupUpdate,
+    GroupInfoResponse,
 )
 
 router = APIRouter(prefix="/api/training-records", tags=["training-records"])
@@ -72,6 +78,150 @@ def list_training_records(
         )
 
 
+@router.post("/batch-delete", response_model=ApiResponse)
+def batch_delete_training_records(ids: List[int] = Body(..., embed=True), db: Session = Depends(get_db_session)):
+    deleted_count = 0
+    failed_ids = []
+    for record_id in ids:
+        success = TrainingService.delete_record(db, record_id)
+        if success:
+            deleted_count += 1
+        else:
+            failed_ids.append(record_id)
+    if failed_ids:
+        return ApiResponse(success=True, message=f"已删除 {deleted_count} 条记录，{len(failed_ids)} 条不存在", data={"deleted": deleted_count, "failed_ids": failed_ids})
+    return ApiResponse(success=True, message=f"已删除 {deleted_count} 条记录", data={"deleted": deleted_count})
+
+
+@router.get("/groups", response_model=ApiResponse)
+def list_groups(db: Session = Depends(get_db_session)):
+    from app.models.database import TrainingRecord
+    from sqlalchemy import func
+    
+    system_groups = ["favorite", "default"]
+    
+    groups = []
+    
+    for group_name in system_groups:
+        count = db.query(func.count(TrainingRecord.id)).filter(
+            TrainingRecord.group_name == group_name if group_name != "default" else (
+                (TrainingRecord.group_name.is_(None) | (TrainingRecord.group_name == "default"))
+                & (TrainingRecord.is_favorite == False)
+            )
+        ).scalar()
+        groups.append(GroupInfoResponse(
+            name="收藏" if group_name == "favorite" else "普通",
+            count=count,
+            is_system=True,
+        ))
+    
+    custom_groups = db.query(
+        TrainingRecord.group_name,
+        func.count(TrainingRecord.id).label("count")
+    ).filter(
+        TrainingRecord.group_name.notin_(system_groups),
+        TrainingRecord.group_name.isnot(None)
+    ).group_by(TrainingRecord.group_name).all()
+    
+    for row in custom_groups:
+        groups.append(GroupInfoResponse(
+            name=row[0],
+            count=row[1],
+            is_system=False,
+        ))
+    
+    return ApiResponse(success=True, data=groups)
+
+
+@router.put("/batch-group", response_model=ApiResponse)
+def batch_update_group(body: BatchGroupUpdate, db: Session = Depends(get_db_session)):
+    from app.models.database import TrainingRecord
+    
+    if not body.record_ids or len(body.record_ids) == 0:
+        return ApiResponse(success=False, message="请选择要分组的记录")
+    
+    if not body.group_name or not body.group_name.strip():
+        return ApiResponse(success=False, message="分组名称不能为空")
+    
+    updated = 0
+    for record_id in body.record_ids:
+        record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
+        if record and not record.is_favorite:
+            record.group_name = body.group_name.strip()
+            updated += 1
+    
+    if updated == 0:
+        return ApiResponse(success=False, message="收藏的记录不能移至其他分组，请取消收藏后再操作")
+    
+    db.commit()
+    return ApiResponse(success=True, message=f"已将 {updated} 条记录移至 '{body.group_name}' 分组")
+
+
+@router.put("/groups/{old_name}", response_model=ApiResponse)
+def rename_group(old_name: str, body: GroupUpdate, db: Session = Depends(get_db_session)):
+    from app.models.database import TrainingRecord
+    
+    if old_name in ("收藏", "普通", "favorite", "default"):
+        return ApiResponse(success=False, message="系统分组不可重命名")
+    
+    records = db.query(TrainingRecord).filter(TrainingRecord.group_name == old_name).all()
+    count = len(records)
+    
+    for record in records:
+        record.group_name = body.name
+    
+    db.commit()
+    return ApiResponse(success=True, message=f"已将分组 '{old_name}' 重命名为 '{body.name}'，影响 {count} 条记录")
+
+
+@router.delete("/groups/{group_name}", response_model=ApiResponse)
+def dissolve_group(group_name: str, db: Session = Depends(get_db_session)):
+    from app.models.database import TrainingRecord
+    
+    if group_name in ("收藏", "普通", "favorite", "default"):
+        return ApiResponse(success=False, message="系统分组不可解散")
+    
+    records = db.query(TrainingRecord).filter(TrainingRecord.group_name == group_name).all()
+    count = len(records)
+    
+    for record in records:
+        if not record.is_favorite:
+            record.group_name = "default"
+    
+    db.commit()
+    return ApiResponse(success=True, message=f"已解散分组 '{group_name}'，{count} 条记录归回普通")
+
+
+@router.post("/insample-backtest", response_model=InSampleBacktestResponse)
+def run_insample_backtest(request: InSampleBacktestRequest):
+    result = InSampleBacktestService.run_insample_backtest(
+        experiment_id=request.experiment_id,
+        run_id=request.run_id,
+        segments=request.segments,
+        topk=request.topk,
+        n_drop=request.n_drop,
+        save_figures=request.save_figures,
+    )
+    return InSampleBacktestResponse(
+        success=result.get("success", False),
+        message=result.get("message", ""),
+        data=result.get("data"),
+    )
+
+
+@router.get("/insample-backtest/{experiment_id}/{run_id}", response_model=InSampleBacktestResponse)
+def get_existing_insample_results(experiment_id: str, run_id: str):
+    result = InSampleBacktestService.load_existing_results(
+        experiment_id=experiment_id,
+        run_id=run_id,
+    )
+    return InSampleBacktestResponse(
+        success=result.get("success", False),
+        message=result.get("message", ""),
+        data=result.get("data"),
+    )
+
+
 @router.get("/{record_id}", response_model=ApiResponse)
 def get_training_record(record_id: int, db: Session = Depends(get_db_session)):
     record = TrainingService.get_record(db, record_id)
@@ -97,21 +247,6 @@ def delete_training_record(record_id: int, db: Session = Depends(get_db_session)
     if not success:
         return ApiResponse(success=False, message=f"训练记录 {record_id} 不存在", data=None)
     return ApiResponse(success=True, message="删除成功")
-
-
-@router.post("/batch-delete", response_model=ApiResponse)
-def batch_delete_training_records(ids: List[int] = Body(..., embed=True), db: Session = Depends(get_db_session)):
-    deleted_count = 0
-    failed_ids = []
-    for record_id in ids:
-        success = TrainingService.delete_record(db, record_id)
-        if success:
-            deleted_count += 1
-        else:
-            failed_ids.append(record_id)
-    if failed_ids:
-        return ApiResponse(success=True, message=f"已删除 {deleted_count} 条记录，{len(failed_ids)} 条不存在", data={"deleted": deleted_count, "failed_ids": failed_ids})
-    return ApiResponse(success=True, message=f"已删除 {deleted_count} 条记录", data={"deleted": deleted_count})
 
 
 @router.post("/{record_id}/runs", response_model=ApiResponse)
@@ -142,11 +277,6 @@ def add_run_mapping(
 
 @router.get("/{record_id}/merged-report", response_model=ApiResponse)
 def get_merged_report(record_id: int, db: Session = Depends(get_db_session)):
-    """获取滚动训练的合并报告
-
-    收集该训练记录下所有子 run 的 portfolio 数据，
-    按时间轴拼接各次训练的收益曲线，返回合并后的报告数据。
-    """
     record = TrainingService.get_record(db, record_id)
     if not record:
         raise HTTPException(status_code=404, detail=f"训练记录 {record_id} 不存在")
@@ -188,6 +318,7 @@ def get_merged_report(record_id: int, db: Session = Depends(get_db_session)):
     
     ic_analysis = _merge_ic_analysis(experiment_id, [m["run_id"] for m in run_mappings])
     monthly_returns = _compute_monthly_returns(merged_data)
+    annual_returns = _compute_annual_returns(merged_data)
     rolling_stats = _compute_rolling_stats(merged_data)
 
     return ApiResponse(
@@ -204,6 +335,7 @@ def get_merged_report(record_id: int, db: Session = Depends(get_db_session)):
             "merged_metrics": merged_metrics,
             "ic_analysis": ic_analysis,
             "monthly_returns": monthly_returns,
+            "annual_returns": annual_returns,
             "rolling_stats": rolling_stats,
             "individual_runs": [
                 {
@@ -219,16 +351,52 @@ def get_merged_report(record_id: int, db: Session = Depends(get_db_session)):
     )
 
 
+@router.get("/{record_id}/log", response_model=ApiResponse)
+def get_training_log(record_id: int, db: Session = Depends(get_db_session)):
+    from app.models.database import TrainingRecord
+    
+    record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"训练记录 {record_id} 不存在")
+    
+    return ApiResponse(
+        success=True,
+        data={
+            "log_content": record.log_content or "",
+            "has_log": bool(record.log_content),
+        }
+    )
+
+
+@router.put("/{record_id}/log", response_model=ApiResponse)
+def update_training_log(
+    record_id: int,
+    log_content: str = Body(..., embed=True),
+    append: bool = Body(False, embed=True),
+    db: Session = Depends(get_db_session)
+):
+    from app.models.database import TrainingRecord
+    
+    record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"训练记录 {record_id} 不存在")
+    
+    if append and record.log_content:
+        record.log_content = record.log_content + "\n" + log_content
+    else:
+        record.log_content = log_content
+    
+    db.commit()
+    db.refresh(record)
+    
+    return ApiResponse(
+        success=True,
+        message="日志已更新",
+        data={"log_length": len(record.log_content or "")}
+    )
+
+
 def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
-    """合并多个滚动训练的收益数据
-
-    Args:
-        reports: 包含各子运行 portfolio 数据的列表
-
-    Returns:
-        合并后的收益数据和日期信息
-    """
-    # 按 rolling_index 或 test_start 排序
     sorted_reports = sorted(
         reports,
         key=lambda x: (x.get("rolling_index") or 0, x.get("test_start") or "")
@@ -237,14 +405,13 @@ def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
     all_dates = []
     all_returns = []
     all_cum_returns = []
-    run_boundaries = []  # 记录每个 run 的边界，用于可视化
+    run_boundaries = []
 
-    prev_base = 1.0  # 前一个 run 的最终累计收益，用于衔接
+    prev_base = 1.0
 
     for idx, report in enumerate(sorted_reports):
         df = report["report_df"].copy()
 
-        # 确保索引是 datetime
         if not isinstance(df.index, pd.DatetimeIndex):
             try:
                 df.index = pd.to_datetime(df.index)
@@ -257,19 +424,14 @@ def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
         dates = [str(d)[:10] for d in df.index]
         returns = df["return"].tolist()
 
-        # 计算当前 run 的累计收益（从1开始）
         cum_ret_local = (pd.Series(returns) + 1).cumprod().tolist()
 
-        # 如果不是第一个 run，需要与前面的 run 衔接
         if idx > 0 and len(all_cum_returns) > 0:
-            # 使用前一个 run 的最终值作为基准
             base = all_cum_returns[-1] if all_cum_returns else 1.0
-            # 将当前 run 的累计收益乘以前一个 run 的最终值
             cum_ret_adjusted = [r * base / cum_ret_local[0] if cum_ret_local[0] != 0 else r * base for r in cum_ret_local]
         else:
             cum_ret_adjusted = cum_ret_local
 
-        # 记录边界信息
         if dates:
             run_boundaries.append({
                 "start_date": dates[0],
@@ -285,14 +447,12 @@ def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
     if not all_dates:
         return {"available": False, "error": "No valid data to merge"}
 
-    # 计算基准收益（如果可用）
     all_bench = []
     for report in sorted_reports:
         df = report["report_df"]
         if "bench" in df.columns:
             all_bench.extend(df["bench"].tolist())
 
-    # 计算换手率
     all_turnover = []
     for report in sorted_reports:
         df = report["report_df"]
@@ -319,14 +479,6 @@ def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
 
 
 def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
-    """计算合并后数据的统计指标
-
-    Args:
-        merged_data: 合并后的收益数据
-
-    Returns:
-        统计指标字典
-    """
     if not merged_data.get("available"):
         return {"available": False}
 
@@ -339,26 +491,21 @@ def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
     metrics = {
         "available": True,
         "total_trading_days": int(len(returns)),
-        # 收益指标
         "total_return": float((cum_ret.iloc[-1] / cum_ret.iloc[0] - 1)) if len(cum_ret) > 1 else 0,
         "annualized_return": float(returns.mean() * 252),
         "mean_daily_return": float(returns.mean()),
         "std_daily_return": float(returns.std()),
-        # 风险指标
         "max_drawdown": float(_calc_max_drawdown(cum_ret)),
         "sharpe_ratio": float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else None,
         "sortino_ratio": float(_calc_sortino_ratio(returns)),
         "calmar_ratio": float(returns.mean() * 252 / abs(_calc_max_drawdown(cum_ret))) if abs(_calc_max_drawdown(cum_ret)) > 0 else None,
-        # 其他指标
         "win_rate": float((returns > 0).mean()),
         "profit_loss_ratio": float(abs(returns[returns > 0].mean()) / abs(returns[returns < 0].mean())) if (returns < 0).any() else None,
         "max_single_day_gain": float(returns.max()),
         "max_single_day_loss": float(returns.min()),
-        # 运行信息
         "number_of_runs": len(merged_data.get("run_boundaries", [])),
     }
 
-    # 如果有基准数据，计算超额收益
     if "daily_benchmark" in merged_data:
         bench_returns = pd.Series(merged_data["daily_benchmark"]).dropna()
         excess_returns = returns - bench_returns
@@ -372,14 +519,12 @@ def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _calc_max_drawdown(cum_returns: pd.Series) -> float:
-    """计算最大回撤"""
     running_max = cum_returns.cummax()
     drawdown = (cum_returns - running_max) / running_max
     return drawdown.min()
 
 
 def _calc_sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
-    """计算 Sortino 比率"""
     excess_returns = returns - risk_free_rate
     downside_returns = returns[returns < 0]
     downside_std = downside_returns.std() if len(downside_returns) > 0 else 0.0001
@@ -387,7 +532,6 @@ def _calc_sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> floa
 
 
 def _merge_ic_analysis(experiment_id: str, run_ids: List[str]) -> Dict[str, Any]:
-    """合并多个子运行的IC分析数据"""
     all_ic = []
     all_dates = []
     
@@ -423,7 +567,6 @@ def _merge_ic_analysis(experiment_id: str, run_ids: List[str]) -> Dict[str, Any]
 
 
 def _compute_monthly_returns(merged_data: Dict[str, Any]) -> Dict[str, Any]:
-    """计算月度收益数据"""
     if not merged_data.get("available"):
         return {"available": False}
     
@@ -474,8 +617,56 @@ def _compute_monthly_returns(merged_data: Dict[str, Any]) -> Dict[str, Any]:
         return {"available": False}
 
 
+def _compute_annual_returns(merged_data: Dict[str, Any]) -> Dict[str, Any]:
+    if not merged_data.get("available"):
+        return {"available": False}
+
+    dates = merged_data.get("dates", [])
+    returns = merged_data.get("daily_return", [])
+
+    if not dates or not returns:
+        return {"available": False}
+
+    try:
+        df = pd.DataFrame({
+            "date": pd.to_datetime(dates),
+            "return": returns,
+        })
+        df = df.dropna()
+
+        annual_returns = df.groupby(df["date"].dt.year)["return"].apply(lambda x: (1 + x).prod() - 1)
+
+        annual_dict = {}
+        benchmark_annual = {}
+        annual_list = []
+
+        for year, ret in annual_returns.items():
+            if pd.notna(ret):
+                annual_dict[str(year)] = float(ret)
+                annual_list.append({"year": int(year), "return": float(ret)})
+
+        if "benchmark_daily_return" in merged_data and merged_data["benchmark_daily_return"]:
+            bench_df = pd.DataFrame({
+                "date": pd.to_datetime(dates),
+                "return": merged_data["benchmark_daily_return"],
+            })
+            bench_df = bench_df.dropna()
+            bench_annual = bench_df.groupby(bench_df["date"].dt.year)["return"].apply(lambda x: (1 + x).prod() - 1)
+            for year, ret in bench_annual.items():
+                if pd.notna(ret):
+                    benchmark_annual[str(year)] = float(ret)
+
+        return {
+            "available": len(annual_dict) > 0,
+            "annual_returns": annual_dict,
+            "benchmark_annual_returns": benchmark_annual,
+            "annual_list": annual_list,
+        }
+    except Exception:
+        return {"available": False}
+
+
 def _compute_rolling_stats(merged_data: Dict[str, Any], window: int = 20) -> Dict[str, Any]:
-    """计算滚动统计数据"""
     if not merged_data.get("available"):
         return {"available": False}
     
@@ -512,56 +703,3 @@ def _compute_rolling_stats(merged_data: Dict[str, Any], window: int = 20) -> Dic
 def _record_to_response(record) -> dict:
     from app.services.training_service import _record_to_dict
     return _record_to_dict(record)
-
-
-@router.get("/{record_id}/log", response_model=ApiResponse)
-def get_training_log(record_id: int, db: Session = Depends(get_db_session)):
-    """获取训练日志"""
-    from app.models.database import TrainingRecord
-    
-    record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail=f"训练记录 {record_id} 不存在")
-    
-    return ApiResponse(
-        success=True,
-        data={
-            "log_content": record.log_content or "",
-            "has_log": bool(record.log_content),
-        }
-    )
-
-
-@router.put("/{record_id}/log", response_model=ApiResponse)
-def update_training_log(
-    record_id: int,
-    log_content: str = Body(..., embed=True),
-    append: bool = Body(False, embed=True),
-    db: Session = Depends(get_db_session)
-):
-    """更新训练日志
-    
-    Args:
-        record_id: 训练记录ID
-        log_content: 日志内容
-        append: 是否追加模式（True=追加，False=覆盖）
-    """
-    from app.models.database import TrainingRecord
-    
-    record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail=f"训练记录 {record_id} 不存在")
-    
-    if append and record.log_content:
-        record.log_content = record.log_content + "\n" + log_content
-    else:
-        record.log_content = log_content
-    
-    db.commit()
-    db.refresh(record)
-    
-    return ApiResponse(
-        success=True,
-        message="日志已更新",
-        data={"log_length": len(record.log_content or "")}
-    )

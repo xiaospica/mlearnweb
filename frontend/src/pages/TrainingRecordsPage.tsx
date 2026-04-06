@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, message, Popconfirm, Segmented, Popover, Collapse } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined } from '@ant-design/icons'
+import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Popover, Collapse } from 'antd'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -149,6 +149,7 @@ const UsageGuide: React.FC = () => (
 )
 
 const TrainingRecordsPage: React.FC = () => {
+  const { message } = App.useApp()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined)
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card')
@@ -157,6 +158,11 @@ const TrainingRecordsPage: React.FC = () => {
   const [editingRecord, setEditingRecord] = useState<TrainingRecord | null>(null)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [createGroupModalVisible, setCreateGroupModalVisible] = useState(false)
+  const [newGroupName, setNewGroupName] = useState('')
+  const [renameGroupModalVisible, setRenameGroupModalVisible] = useState(false)
+  const [renameOldName, setRenameOldName] = useState('')
+  const [renameNewName, setRenameNewName] = useState('')
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -197,11 +203,109 @@ const TrainingRecordsPage: React.FC = () => {
       trainingService.update(id, { is_favorite }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['training-records'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
     onError: () => {
       message.error('收藏操作失败')
     },
   })
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['groups'],
+    queryFn: () => trainingService.listGroups(),
+    enabled: true,
+  })
+
+  const batchGroupMutation = useMutation({
+    mutationFn: (params: { recordIds: number[]; groupName: string }) => 
+      trainingService.batchUpdateGroup(params.recordIds, params.groupName),
+    onSuccess: (data) => {
+      message.success(data.message || '分组成功')
+      setCreateGroupModalVisible(false)
+      setNewGroupName('')
+      setSelectedIds([])
+      queryClient.invalidateQueries({ queryKey: ['training-records'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+    },
+    onError: () => {
+      message.error('分组操作失败')
+    },
+  })
+
+  const renameGroupMutation = useMutation({
+    mutationFn: ({ oldName, newName }: { oldName: string; newName: string }) =>
+      trainingService.renameGroup(oldName, newName),
+    onSuccess: (data) => {
+      message.success(data.message || '重命名成功')
+      setRenameGroupModalVisible(false)
+      queryClient.invalidateQueries({ queryKey: ['training-records'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+    },
+    onError: () => {
+      message.error('重命名失败')
+    },
+  })
+
+  const dissolveGroupMutation = useMutation({
+    mutationFn: (groupName: string) => trainingService.dissolveGroup(groupName),
+    onSuccess: (data) => {
+      message.success(data.message || '解散成功')
+      queryClient.invalidateQueries({ queryKey: ['training-records'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+    },
+    onError: () => {
+      message.error('解散失败')
+    },
+  })
+
+  const handleCreateGroup = () => {
+    if (selectedIds.length === 0) {
+      message.warning('请先选择要分组的记录')
+      return
+    }
+    if (!newGroupName.trim()) {
+      message.warning('请输入分组名称')
+      return
+    }
+    const filteredIds = selectedIds.filter(id => {
+      const record = records.find(r => r.id === id)
+      return !record?.is_favorite
+    })
+    if (filteredIds.length === 0) {
+      message.warning('收藏的记录不能移至其他分组，请取消收藏后再操作')
+      return
+    }
+    batchGroupMutation.mutate({
+      recordIds: filteredIds,
+      groupName: newGroupName.trim(),
+    })
+  }
+
+  const handleOpenRenameGroup = (groupName: string) => {
+    setRenameOldName(groupName)
+    setRenameNewName(groupName)
+    setRenameGroupModalVisible(true)
+  }
+
+  const handleSaveRenameGroup = () => {
+    if (!renameNewName.trim() || renameNewName.trim() === renameOldName) {
+      message.warning('请输入新的分组名称')
+      return
+    }
+    renameGroupMutation.mutate({ oldName: renameOldName, newName: renameNewName.trim() })
+  }
+
+  const handleDissolveGroup = (groupName: string) => {
+    Modal.confirm({
+      title: '解散分组',
+      icon: <ExclamationCircleOutlined />,
+      content: `确定要解散"${groupName}"分组吗？所有记录将归回"普通"分组。`,
+      okText: '确认解散',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: () => dissolveGroupMutation.mutate(groupName),
+    })
+  }
 
   const handleToggleFavorite = (record: TrainingRecord, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -231,7 +335,7 @@ const TrainingRecordsPage: React.FC = () => {
   const records = recordsData?.data?.items || []
   const total = recordsData?.data?.total || 0
   const favoriteRecords = records.filter(r => r.is_favorite)
-  const normalRecords = records.filter(r => !r.is_favorite)
+  const normalRecords = records.filter(r => !r.is_favorite && (!r.group_name || r.group_name === 'default'))
   const singleCount = records.filter(r => (r.run_count || 0) <= 1).length
   const rollingCount = records.filter(r => (r.run_count || 0) > 1).length
   const completedCount = records.filter(r => r.status === 'completed').length
@@ -478,18 +582,28 @@ const TrainingRecordsPage: React.FC = () => {
             size="small"
           />
           {selectedIds.length > 0 && (
-            <Popconfirm
-              title="确认删除"
-              description={`确定要删除选中的 ${selectedIds.length} 条记录吗？此操作不可恢复，但不会影响本地 mlruns 中的文件。`}
-              onConfirm={handleDelete}
-              okText="确认删除"
-              cancelText="取消"
-              okType="danger"
-            >
-              <Button danger icon={<DeleteOutlined />} size="small">
-                删除 ({selectedIds.length})
+            <>
+              <Button
+                icon={<FolderAddOutlined />}
+                onClick={() => setCreateGroupModalVisible(true)}
+                size="small"
+                type="default"
+              >
+                创建分组 ({selectedIds.length})
               </Button>
-            </Popconfirm>
+              <Popconfirm
+                title="确认删除"
+                description={`确定要删除选中的 ${selectedIds.length} 条记录吗？此操作不可恢复，但不会影响本地 mlruns 中的文件。`}
+                onConfirm={handleDelete}
+                okText="确认删除"
+                cancelText="取消"
+                okType="danger"
+              >
+                <Button danger icon={<DeleteOutlined />} size="small">
+                  删除 ({selectedIds.length})
+                </Button>
+              </Popconfirm>
+            </>
           )}
         </Space>
       </div>
@@ -644,6 +758,69 @@ const TrainingRecordsPage: React.FC = () => {
               />
             </Panel>
           )}
+          {(groupsData?.data || [])
+            .filter((g: any) => !g.is_system && g.name !== '普通' && g.name !== '收藏')
+            .map((group: any) => {
+              const groupRecords = records.filter(r => r.group_name === group.name)
+              return (
+                <Panel
+                  key={group.name}
+                  header={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FolderOutlined style={{ color: '#722ed1' }} />
+                      <span style={{ fontWeight: 600 }}>{group.name}</span>
+                      <Tag color="#722ed1">{group.count}</Tag>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<FormOutlined />}
+                        onClick={(e) => { e.stopPropagation(); handleOpenRenameGroup(group.name) }}
+                        style={{ color: '#1677ff', fontSize: 11 }}
+                      >
+                        重命名
+                      </Button>
+                      <Popconfirm
+                        title={`解散"${group.name}"`}
+                        description="所有记录将归回普通分组"
+                        onConfirm={() => handleDissolveGroup(group.name)}
+                        okText="确认解散"
+                        cancelText="取消"
+                        okType="danger"
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ fontSize: 11 }}
+                        >
+                          解散
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  }
+                  style={{ marginBottom: 16, background: '#f9f0ff', borderRadius: 8, border: '1px solid #d3adf7' }}
+                >
+                  {groupRecords.length === 0 ? (
+                    <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    <Table
+                      dataSource={groupRecords}
+                      columns={listColumns}
+                      rowKey="id"
+                      pagination={false}
+                      size="middle"
+                      onRow={(record) => ({
+                        onClick: () => navigate(`/training/${record.id}`),
+                        style: { cursor: 'pointer', transition: 'all 0.2s' },
+                      })}
+                    />
+                  )}
+                </Panel>
+              )
+            })
+          }
           <Panel
             header={
               <Space>
@@ -783,13 +960,16 @@ const TrainingRecordsPage: React.FC = () => {
 
                           {record.cumulative_return_preview && (
                             <div style={{
-                              padding: '10px 12px',
-                              background: '#fafafa',
-                              borderRadius: 6,
-                              border: '1px solid #f0f0f0',
+                              padding: '8px 0',
                             }}>
                               <MiniReturnChart data={record.cumulative_return_preview} />
                             </div>
+                          )}
+
+                          {record.description && (
+                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                              {record.description}
+                            </Text>
                           )}
 
                           <div style={{
@@ -821,7 +1001,163 @@ const TrainingRecordsPage: React.FC = () => {
               </Row>
             </Panel>
           )}
-          
+
+          {(groupsData?.data || [])
+            .filter((g: any) => !g.is_system && g.name !== '普通' && g.name !== '收藏')
+            .map((group: any) => {
+              const groupRecords = records.filter(r => r.group_name === group.name)
+              return (
+                <Panel
+                  key={group.name}
+                  header={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <FolderOutlined style={{ color: '#722ed1' }} />
+                      <span style={{ fontWeight: 600 }}>{group.name}</span>
+                      <Tag color="#722ed1">{group.count}</Tag>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<FormOutlined />}
+                        onClick={(e) => { e.stopPropagation(); handleOpenRenameGroup(group.name) }}
+                        style={{ color: '#1677ff', fontSize: 11 }}
+                      >
+                        重命名
+                      </Button>
+                      <Popconfirm
+                        title={`解散"${group.name}"`}
+                        description="所有记录将归回普通分组"
+                        onConfirm={() => handleDissolveGroup(group.name)}
+                        okText="确认解散"
+                        cancelText="取消"
+                        okType="danger"
+                      >
+                        <Button
+                          type="text"
+                          size="small"
+                          danger
+                          icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ fontSize: 11 }}
+                        >
+                          解散
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  }
+                  style={{ marginBottom: 16, background: '#f9f0ff', borderRadius: 8, border: '1px solid #d3adf7' }}
+                >
+                  {groupRecords.length === 0 ? (
+                    <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                  ) : (
+                    <Row gutter={[20, 20]}>
+                      {groupRecords.map((record: TrainingRecord) => {
+                        const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
+                        const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
+                        const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
+                        const isSelected = selectedIds.includes(record.id)
+                        return (
+                          <Col xs={24} sm={12} lg={8} xl={6} key={record.id}>
+                            <Card
+                              hoverable
+                              onClick={() => navigate(`/training/${record.id}`)}
+                              style={{
+                                height: '100%',
+                                background: isSelected ? '#f0f7ff' : '#ffffff',
+                                border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                                borderRadius: 8,
+                                transition: 'all 0.2s ease',
+                                cursor: 'pointer',
+                                boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
+                              }}
+                              styles={{ body: { padding: 16 } }}
+                            >
+                              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    <Tag color={catCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                      {catCfg.label}
+                                    </Tag>
+                                    <Tag color={stCfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 10 }}>
+                                      {stCfg.label}
+                                    </Tag>
+                                  </div>
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleSelect(record.id, !isSelected)
+                                    }}
+                                  >
+                                    {isSelected ? <CheckSquareFilled style={{ color: '#1677ff', fontSize: 16 }} /> : <BorderOutlined style={{ color: '#bfbfbf', fontSize: 16 }} />}
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                                  <Tooltip title={record.name}>
+                                    <Text strong style={{ fontSize: 13, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{record.name}</Text>
+                                  </Tooltip>
+                                  <Popover
+                                    content={
+                                      <div style={{ maxWidth: 300 }}>
+                                        <div style={{ marginBottom: 4, fontWeight: 500 }}>操作</div>
+                                        <Space direction="vertical" size={4}>
+                                          <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleOpenEditModal(record, e) }}>编辑</Button>
+                                          {!record.is_favorite && <Button type="link" size="small" icon={<StarOutlined />} onClick={(e) => { e.stopPropagation(); handleToggleFavorite(record, e) }}>收藏</Button>}
+                                          {record.is_favorite && <Button type="link" size="small" icon={<StarFilled />} style={{ color: '#faad14' }} onClick={(e) => { e.stopPropagation(); handleToggleFavorite(record, e) }}>取消收藏</Button>}
+                                        </Space>
+                                      </div>
+                                    }
+                                    trigger="click"
+                                  >
+                                    <MoreOutlined style={{ cursor: 'pointer', color: '#999', flexShrink: 0 }} onClick={(e: React.MouseEvent) => e.stopPropagation()} />
+                                  </Popover>
+                                </div>
+
+                                {record.description && (
+                                  <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                                    {record.description}
+                                  </Text>
+                                )}
+
+                                {record.cumulative_return_preview && (
+                                  <div style={{
+                                    padding: '8px 0',
+                                  }}>
+                                    <MiniReturnChart data={record.cumulative_return_preview} />
+                                  </div>
+                                )}
+
+                                <div style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                }}>
+                                  <Tooltip title={`关联 ${record.run_count || record.run_ids?.length || 0} 个运行`}>
+                                    <Badge
+                                      count={record.run_count || record.run_ids?.length || 0}
+                                      overflowCount={9999}
+                                      style={{
+                                        background: '#1677ff',
+                                        fontFamily: "'SF Mono', 'Consolas', monospace",
+                                        fontSize: 11,
+                                      }}
+                                    />
+                                  </Tooltip>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    <ClockCircleOutlined style={{ marginRight: 4 }} />
+                                    {record.created_at ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm') : '-'}
+                                  </Text>
+                                </div>
+                              </Space>
+                            </Card>
+                          </Col>
+                        )
+                      })}
+                    </Row>
+                  )}
+                </Panel>
+              )
+            })}
+
           <Panel
             header={
               <Space>
@@ -928,10 +1264,7 @@ const TrainingRecordsPage: React.FC = () => {
 
                           {record.cumulative_return_preview && (
                             <div style={{
-                              padding: '10px 12px',
-                              background: '#fafafa',
-                              borderRadius: 6,
-                              border: '1px solid #f0f0f0',
+                              padding: '8px 0',
                             }}>
                               <MiniReturnChart data={record.cumulative_return_preview} />
                             </div>
@@ -998,6 +1331,67 @@ const TrainingRecordsPage: React.FC = () => {
             placeholder="请输入描述（可选）"
             rows={4}
             maxLength={1000}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title="创建新分组"
+        open={createGroupModalVisible}
+        onCancel={() => {
+          setCreateGroupModalVisible(false)
+          setNewGroupName('')
+        }}
+        onOk={handleCreateGroup}
+        confirmLoading={batchGroupMutation.isPending}
+        okText="创建"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text style={{ marginBottom: 8, display: 'block' }}>分组名称 <Text type="danger">*</Text></Text>
+          <Input
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            placeholder="请输入分组名称"
+            prefix={<FolderAddOutlined />}
+            maxLength={64}
+            autoFocus
+          />
+        </div>
+        <Alert
+          type="info"
+          message={`已选择 ${selectedIds.length} 条记录将移至新分组`}
+          showIcon
+          style={{ fontSize: 12 }}
+        />
+      </Modal>
+
+      <Modal
+        title="重命名分组"
+        open={renameGroupModalVisible}
+        onCancel={() => {
+          setRenameGroupModalVisible(false)
+          setRenameOldName('')
+          setRenameNewName('')
+        }}
+        onOk={handleSaveRenameGroup}
+        confirmLoading={renameGroupMutation.isPending}
+        okText="保存"
+        cancelText="取消"
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text style={{ marginBottom: 8, display: 'block' }}>当前名称</Text>
+          <Input value={renameOldName} disabled />
+        </div>
+        <div>
+          <Text style={{ marginBottom: 8, display: 'block' }}>新名称 <Text type="danger">*</Text></Text>
+          <Input
+            value={renameNewName}
+            onChange={(e) => setRenameNewName(e.target.value)}
+            placeholder="请输入新的分组名称"
+            prefix={<FormOutlined />}
+            maxLength={64}
+            autoFocus
           />
         </div>
       </Modal>

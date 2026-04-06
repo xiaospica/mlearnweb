@@ -134,3 +134,45 @@ class ApiResponse(BaseModel):
     success: bool = True
     message: str = ""
     data: Any = None
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+
+
+class GroupUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+
+
+class BatchGroupUpdate(BaseModel):
+    record_ids: List[int] = Field(default_factory=list)
+    group_name: str = Field(..., min_length=1, max_length=64)
+
+
+class GroupInfoResponse(BaseModel):
+    name: str
+    count: int
+    is_system: bool
+
+
+class InSampleBacktestRequest(BaseModel):
+    run_id: str = Field(..., min_length=1)
+    experiment_id: str = Field(..., min_length=1)
+    segments: Optional[List[str]] = ["train", "valid", "test"]
+    topk: Optional[int] = None
+    n_drop: Optional[int] = None
+    save_figures: Optional[bool] = True
+
+
+class InSampleBacktestSegmentResult(BaseModel):
+    pred_shape: Optional[List[int]] = None
+    n_stocks: Optional[int] = None
+    time_range: Optional[List[str]] = None
+    risk_metrics: Dict[str, Any] = {}
+    indicator_dict: Dict[str, Any] = {}
+
+
+class InSampleBacktestResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+    data: Optional[Dict[str, Any]] = None

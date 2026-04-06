@@ -1,7 +1,7 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ConfigProvider, theme as antTheme } from 'antd'
+import { ConfigProvider, App as AntApp, theme as antTheme } from 'antd'
 import AppLayout from '@/components/layout/AppLayout'
 import HomePage from '@/pages/HomePage'
 import ExperimentDetailPage from '@/pages/ExperimentDetailPage'
@@ -46,18 +46,20 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider theme={lightTheme}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<TrainingRecordsPage />} />
-              <Route path="training/:id" element={<TrainingDetailPage />} />
-              <Route path="experiments" element={<HomePage />} />
-              <Route path="experiments/:expId" element={<ExperimentDetailPage />} />
-              <Route path="report/:expId/:runId" element={<ReportPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
+        <AntApp>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<AppLayout />}>
+                <Route index element={<TrainingRecordsPage />} />
+                <Route path="training/:id" element={<TrainingDetailPage />} />
+                <Route path="experiments" element={<HomePage />} />
+                <Route path="experiments/:expId" element={<ExperimentDetailPage />} />
+                <Route path="report/:expId/:runId" element={<ReportPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </AntApp>
       </ConfigProvider>
     </QueryClientProvider>
   )

@@ -67,4 +67,81 @@ export const trainingService = {
   getLog(recordId: number): Promise<ApiSuccessResponse<{ log_content: string; has_log: boolean }>> {
     return apiClient.get(`/training-records/${recordId}/log`).then((r) => r.data)
   },
+
+  listGroups(): Promise<ApiSuccessResponse<Array<{ name: string; count: number; is_system: boolean }>>> {
+    return apiClient.get('/training-records/groups').then((r) => r.data)
+  },
+
+  batchUpdateGroup(recordIds: number[], groupName: string): Promise<ApiSuccessResponse<null>> {
+    return apiClient.put('/training-records/batch-group', { record_ids: recordIds, group_name: groupName }).then((r) => r.data)
+  },
+
+  renameGroup(oldName: string, newName: string): Promise<ApiSuccessResponse<null>> {
+    return apiClient.put(`/training-records/groups/${encodeURIComponent(oldName)}`, { name: newName }).then((r) => r.data)
+  },
+
+  dissolveGroup(groupName: string): Promise<ApiSuccessResponse<null>> {
+    return apiClient.delete(`/training-records/groups/${encodeURIComponent(groupName)}`).then((r) => r.data)
+  },
+
+  runInSampleBacktest(experimentId: string, runId: string): Promise<ApiSuccessResponse<{
+    run_id: string
+    experiment_id: string
+    segments: Record<string, {
+      pred_shape?: number[]
+      n_stocks?: number
+      time_range?: [string, string]
+      risk_metrics: {
+        available: boolean
+        total_days?: number
+        total_return?: number
+        annualized_return?: number
+        annualized_volatility?: number
+        sharpe_ratio?: number
+        max_drawdown?: number
+        mean_daily_return?: number
+        std_daily_return?: number
+        win_rate?: number
+        excess_annualized_return?: number
+        information_ratio?: number
+        [key: string]: unknown
+      }
+      indicator_dict?: Record<string, unknown>
+    }>
+  }>> {
+    return apiClient.post('/training-records/insample-backtest', {
+      experiment_id: experimentId,
+      run_id: runId,
+      segments: ['train', 'valid', 'test'],
+      save_figures: true,
+    }).then((r) => r.data)
+  },
+
+  getExistingInSampleResults(experimentId: string, runId: string): Promise<ApiSuccessResponse<{
+    run_id: string
+    experiment_id: string
+    segments: Record<string, {
+      pred_shape?: number[]
+      n_stocks?: number
+      time_range?: [string, string]
+      risk_metrics: {
+        available: boolean
+        total_days?: number
+        total_return?: number
+        annualized_return?: number
+        annualized_volatility?: number
+        sharpe_ratio?: number
+        max_drawdown?: number
+        mean_daily_return?: number
+        std_daily_return?: number
+        win_rate?: number
+        excess_annualized_return?: number
+        information_ratio?: number
+        [key: string]: unknown
+      }
+      indicator_dict?: Record<string, unknown>
+    }>
+  }>> {
+    return apiClient.get(`/training-records/insample-backtest/${experimentId}/${runId}`).then((r) => r.data)
+  },
 }

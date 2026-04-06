@@ -99,6 +99,12 @@ export interface ReportData {
     heatmap_data?: Array<[number, number, number]>
     histogram?: { values: number[]; labels: string[] }
   }
+  annual_returns?: {
+    available: boolean
+    annual_returns?: Record<string, number>
+    benchmark_annual_returns?: Record<string, number>
+    annual_list?: Array<{ year: number; return: number }>
+  }
   qlib_analysis?: {
     available: boolean
     report_data?: {
@@ -211,4 +217,83 @@ export interface QLibFiguresData {
   risk_figures?: PlotlyFigure[]
   ic_figures?: PlotlyFigure[]
   model_figures?: PlotlyFigure[]
+}
+
+export interface InSampleSegmentResult {
+  pred_shape?: number[]
+  n_stocks?: number
+  time_range?: [string, string]
+  risk_metrics: {
+    available: boolean
+    total_days?: number
+    total_return?: number
+    annualized_return?: number
+    annualized_volatility?: number
+    sharpe_ratio?: number
+    max_drawdown?: number
+    mean_daily_return?: number
+    std_daily_return?: number
+    win_rate?: number
+    excess_annualized_return?: number
+    information_ratio?: number
+    mean_turnover?: number
+    [key: string]: unknown
+  }
+  indicator_dict?: Record<string, unknown>
+  // 新增：详细时序数据
+  portfolio_data?: {
+    available: boolean
+    dates?: string[]
+    cumulative_return?: {
+      strategy?: number[]
+      benchmark?: number[]
+    }
+    drawdown?: {
+      strategy?: number[]
+      benchmark?: number[]
+    }
+    daily_return?: {
+      strategy?: number[]
+    }
+    turnover?: number[]
+  }
+  // 新增：日收益率分布
+  daily_return_distribution?: {
+    available: boolean
+    mean?: number
+    std?: number
+    min?: number
+    max?: number
+    median?: number
+    skewness?: number
+    kurtosis?: number
+    positive_ratio?: number
+    negative_days?: number
+    count?: number
+    histogram?: {
+      counts: number[]
+      bins: number[]
+      bin_centers: number[]
+    }
+  }
+  // 新增：IC分析数据
+  ic_analysis?: {
+    available: boolean
+    dates?: string[]
+    ic_values?: number[]
+    mean_ic?: number
+    std_ic?: number
+    icir?: number
+    hit_rate?: number
+  }
+}
+
+export interface InSampleBacktestResponse {
+  success: boolean
+  message: string
+  data?: {
+    run_id: string
+    experiment_id: string
+    segments: Record<string, InSampleSegmentResult>
+  }
 }

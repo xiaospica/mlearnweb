@@ -421,8 +421,132 @@ const TrainingDetailPage: React.FC = () => {
   )
 }
 
+const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_returns?: Record<string, number>; benchmark_annual_returns?: Record<string, number> } }> = ({ data }) => {
+  if (!data?.available || !data.annual_returns) {
+    return <Empty description="无年度收益数据" style={{ padding: 40 }} />
+  }
+
+  const annualReturns = data.annual_returns
+  const benchmarkReturns = data.benchmark_annual_returns || {}
+
+  const years = Object.keys(annualReturns).sort()
+  if (years.length === 0) return <Empty description="无年度收益数据" style={{ padding: 40 }} />
+
+  const values = Object.values(annualReturns)
+  const minVal = Math.min(...values) * 1.2
+  const maxVal = Math.max(...values) * 1.2
+
+  const barData = years.map(year => ({
+    year,
+    strategy: annualReturns[year],
+    benchmark: benchmarkReturns[year],
+    excess: (annualReturns[year] || 0) - (benchmarkReturns[year] || 0),
+  }))
+
+  return (
+    <div>
+      <div style={{ marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>年数: <Text strong>{years.length}</Text></Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          平均年化收益:
+          <Text strong style={{ color: values.reduce((a, b) => a + b, 0) / values.length >= 0 ? '#52c41a' : '#ff4d4f' }}>
+            {((values.reduce((a, b) => a + b, 0) / values.length) * 100).toFixed(2)}%
+          </Text>
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          最佳年份: <Text strong style={{ color: '#52c41a' }}>{Math.max(...values) > 0 ? '+' : ''}{(Math.max(...values) * 100).toFixed(2)}%</Text> ({years[values.indexOf(Math.max(...values))]})
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          最差年份: <Text strong style={{ color: '#ff4d4f' }}>{(Math.min(...values) * 100).toFixed(2)}%</Text> ({years[values.indexOf(Math.min(...values))]})
+        </Text>
+      </div>
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'axis',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (p: any) => {
+              if (!p || !p.length) return ''
+              const item = p[0]
+              const d = barData.find(b => b.year === item.name)
+              let tooltip = `${item.name}年<br/>`
+              tooltip += `策略收益: ${((d?.strategy || 0) * 100).toFixed(2)}%<br/>`
+              if (d?.benchmark !== undefined) {
+                tooltip += `基准收益: ${((d.benchmark || 0) * 100).toFixed(2)}%<br/>`
+                tooltip += `超额收益: <span style="color:${d.excess >= 0 ? '#52c41a' : '#ff4d4f'}">${(d.excess * 100).toFixed(2)}%</span>`
+              }
+              return tooltip
+            },
+          },
+          legend: {
+            data: ['策略年化收益', '基准年化收益'],
+            textStyle: { color: '#6b7280', fontSize: 11 },
+            top: 0,
+          },
+          grid: { left: 60, right: 30, top: 30, bottom: 50 },
+          xAxis: {
+            type: 'category',
+            data: years,
+            axisLabel: { color: '#9ca3af', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+          },
+          yAxis: {
+            type: 'value',
+            min: minVal,
+            max: maxVal,
+            axisLabel: {
+              color: '#9ca3af',
+              formatter: (value: number) => `${(value * 100).toFixed(0)}%`,
+            },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+            name: '收益率',
+            nameLocation: 'middle',
+            nameGap: 40,
+            nameTextStyle: { color: '#6b7280' },
+          },
+          series: [
+            {
+              name: '策略年化收益',
+              type: 'bar',
+              data: barData.map(d => ({
+                value: d.strategy,
+                itemStyle: {
+                  color: d.strategy >= 0 ? '#52c41a' : '#ff4d4f',
+                  borderRadius: [3, 3, 0, 0],
+                },
+              })),
+              barWidth: '50%',
+              z: 10,
+            },
+            ...(Object.keys(benchmarkReturns).length > 0 ? [{
+              name: '基准年化收益',
+              type: 'bar',
+              data: barData.map(d => ({
+                value: d.benchmark !== undefined ? d.benchmark : null,
+                itemStyle: {
+                  color: '#8c8c8c',
+                  borderRadius: [3, 3, 0, 0],
+                  opacity: 0.6,
+                },
+              })),
+              barWidth: '35%',
+              z: 5,
+            }] : []),
+          ],
+          markLine: {
+            data: [{ yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } }],
+          },
+        }}
+        style={{ height: 280 }}
+      />
+    </div>
+  )
+}
+
 const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
-  const { record_info, merged_report, merged_metrics, individual_runs, ic_analysis, monthly_returns, rolling_stats } = data
+  const { record_info, merged_report, merged_metrics, individual_runs, ic_analysis, monthly_returns, annual_returns, rolling_stats } = data
 
   const calcDrawdown = (cumReturns: number[]) => {
     if (!cumReturns || cumReturns.length === 0) return []
@@ -931,6 +1055,14 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                 }}
                 style={{ height: 300 }}
               />
+            </Card>
+          </Col>
+        )}
+
+        {annual_returns?.available && (
+          <Col xs={24} lg={12}>
+            <Card title="年度收益直方图" size="small">
+              <AnnualReturnHistogram data={annual_returns} />
             </Card>
           </Col>
         )}

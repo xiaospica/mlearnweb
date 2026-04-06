@@ -266,8 +266,34 @@ class MLFlowReader:
             print(f"[MLFlowReader] Port analysis not found: {pkl_path}", file=__import__('sys').stderr)
             return None
         data = self._load_pickle(pkl_path)
+        if data is None:
+            return None
+        
+        # 处理 DataFrame 格式（多级索引：excess_return_with_cost/excess_return_without_cost, 指标名）
+        if isinstance(data, pd.DataFrame):
+            result = {}
+            # 遍历 DataFrame 的行索引
+            if isinstance(data.index, pd.MultiIndex):
+                for idx in data.index:
+                    if len(idx) == 2:
+                        group, metric = idx
+                        key = f"1day.{group}.{metric}"
+                        value = data.loc[idx, data.columns[0]] if len(data.columns) > 0 else data.loc[idx]
+                        if pd.notna(value):
+                            result[key] = float(value)
+            else:
+                # 单级索引
+                for idx in data.index:
+                    metric = str(idx)
+                    value = data.loc[idx, data.columns[0]] if len(data.columns) > 0 else data.loc[idx]
+                    if pd.notna(value):
+                        result[f"1day.{metric}"] = float(value)
+            return result
+        
+        # 处理 dict 格式
         if isinstance(data, dict):
-            return {k: float(v) for k, v in data.items()}
+            return {k: float(v) for k, v in data.items() if v is not None}
+        
         return None
 
     def load_prediction_data(self, experiment_id: str, run_id: str) -> Optional[pd.DataFrame]:
@@ -294,6 +320,36 @@ class MLFlowReader:
         if ric_path.exists():
             result["ric"] = self._load_pickle(ric_path)
         return result
+
+    def load_indicator_analysis(self, experiment_id: str, run_id: str) -> Optional[Dict[str, float]]:
+        """加载 indicator_analysis_1day.pkl 文件"""
+        pkl_path = (
+            self.mlruns_dir / experiment_id / run_id /
+            "artifacts/portfolio_analysis/indicator_analysis_1day.pkl"
+        )
+        if not pkl_path.exists():
+            return None
+        data = self._load_pickle(pkl_path)
+        if data is None:
+            return None
+        
+        # 处理 DataFrame 格式
+        if isinstance(data, pd.DataFrame):
+            result = {}
+            if hasattr(data, 'index'):
+                for idx in data.index:
+                    metric_name = str(idx)
+                    value = data.loc[idx, data.columns[0]] if len(data.columns) > 0 else data.loc[idx]
+                    if pd.notna(value):
+                        # 使用 1day.xxx 格式，与 PortAnaRecord 的 log_metrics 格式一致
+                        result[f"1day.{metric_name}"] = float(value)
+            return result
+        
+        # 处理 dict 格式
+        if isinstance(data, dict):
+            return {f"1day.{k}": float(v) for k, v in data.items() if v is not None}
+        
+        return None
 
     def load_model_params_pkl(self, experiment_id: str, run_id: str) -> Optional[Dict[str, Any]]:
         pkl_path = self.mlruns_dir / experiment_id / run_id / "artifacts/params.pkl"
