@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Popover, Collapse } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined } from '@ant-design/icons'
+import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Popover, Collapse, Dropdown, Menu } from 'antd'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -168,7 +168,7 @@ const TrainingRecordsPage: React.FC = () => {
 
   const { data: recordsData, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['training-records', search, categoryFilter],
-    queryFn: () => trainingService.list({ search, status: undefined, category: categoryFilter }),
+    queryFn: () => trainingService.list({ search, status: undefined, category: categoryFilter, page_size: 1000 }),
     retry: 1,
     refetchOnWindowFocus: true,
   })
@@ -281,6 +281,25 @@ const TrainingRecordsPage: React.FC = () => {
     })
   }
 
+  const handleAddToGroup = (groupName: string) => {
+    if (selectedIds.length === 0) {
+      message.warning('请先选择要分组的记录')
+      return
+    }
+    const filteredIds = selectedIds.filter(id => {
+      const record = records.find(r => r.id === id)
+      return !record?.is_favorite
+    })
+    if (filteredIds.length === 0) {
+      message.warning('收藏的记录不能移至其他分组，请取消收藏后再操作')
+      return
+    }
+    batchGroupMutation.mutate({
+      recordIds: filteredIds,
+      groupName: groupName,
+    })
+  }
+
   const handleOpenRenameGroup = (groupName: string) => {
     setRenameOldName(groupName)
     setRenameNewName(groupName)
@@ -335,7 +354,7 @@ const TrainingRecordsPage: React.FC = () => {
   const records = recordsData?.data?.items || []
   const total = recordsData?.data?.total || 0
   const favoriteRecords = records.filter(r => r.is_favorite)
-  const normalRecords = records.filter(r => !r.is_favorite && (!r.group_name || r.group_name === 'default'))
+  const normalRecords = records.filter(r => r.group_name === 'default')
   const singleCount = records.filter(r => (r.run_count || 0) <= 1).length
   const rollingCount = records.filter(r => (r.run_count || 0) > 1).length
   const completedCount = records.filter(r => r.status === 'completed').length
@@ -438,9 +457,26 @@ const TrainingRecordsPage: React.FC = () => {
       width: 280,
       render: (name: string, record: TrainingRecord) => (
         <Space size={4}>
+          {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 12 }} />}
           <a onClick={() => navigate(`/training/${record.id}`)} style={{ color: '#1677ff', fontWeight: 500, fontSize: 13 }}>
             {name}
           </a>
+          {!record.is_favorite && (
+            <Tooltip title="收藏">
+              <StarOutlined
+                style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+                onClick={(e) => handleToggleFavorite(record, e)}
+              />
+            </Tooltip>
+          )}
+          {record.is_favorite && (
+            <Tooltip title="取消收藏">
+              <StarFilled
+                style={{ color: '#faad14', fontSize: 12, cursor: 'pointer' }}
+                onClick={(e) => handleToggleFavorite(record, e)}
+              />
+            </Tooltip>
+          )}
           <Tooltip title="编辑名称和描述">
             <EditOutlined
               style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
@@ -591,6 +627,30 @@ const TrainingRecordsPage: React.FC = () => {
               >
                 创建分组 ({selectedIds.length})
               </Button>
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'default', label: '普通分组', icon: <FolderOutlined /> },
+                    ...(groupsData?.data || [])
+                      .filter((g: any) => !g.is_system && g.name !== '普通' && g.name !== '收藏')
+                      .map((g: any) => ({
+                        key: g.name,
+                        label: g.name,
+                        icon: <FolderOutlined />,
+                      })),
+                  ],
+                  onClick: (e) => handleAddToGroup(e.key),
+                }}
+                trigger={['click']}
+              >
+                <Button
+                  icon={<FolderOpenOutlined />}
+                  size="small"
+                  type="default"
+                >
+                  添加到分组 ({selectedIds.length})
+                </Button>
+              </Dropdown>
               <Popconfirm
                 title="确认删除"
                 description={`确定要删除选中的 ${selectedIds.length} 条记录吗？此操作不可恢复，但不会影响本地 mlruns 中的文件。`}
@@ -966,12 +1026,6 @@ const TrainingRecordsPage: React.FC = () => {
                             </div>
                           )}
 
-                          {record.description && (
-                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
-                              {record.description}
-                            </Text>
-                          )}
-
                           <div style={{
                             display: 'flex',
                             justifyContent: 'space-between',
@@ -1091,25 +1145,44 @@ const TrainingRecordsPage: React.FC = () => {
                                   </div>
                                 </div>
 
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
-                                  <Tooltip title={record.name}>
-                                    <Text strong style={{ fontSize: 13, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{record.name}</Text>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {record.name}
+                                  </Title>
+                                  {!record.is_favorite && (
+                                    <Tooltip title="收藏">
+                                      <StarOutlined
+                                        style={{ color: '#9ca3af', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                        onClick={(e) => handleToggleFavorite(record, e)}
+                                      />
+                                    </Tooltip>
+                                  )}
+                                  {record.is_favorite && (
+                                    <Tooltip title="取消收藏">
+                                      <StarFilled
+                                        style={{ color: '#faad14', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                        onClick={(e) => handleToggleFavorite(record, e)}
+                                      />
+                                    </Tooltip>
+                                  )}
+                                  <Tooltip title="编辑名称和描述">
+                                    <EditOutlined
+                                      style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                      onClick={(e) => handleOpenEditModal(record, e)}
+                                    />
                                   </Tooltip>
-                                  <Popover
-                                    content={
-                                      <div style={{ maxWidth: 300 }}>
-                                        <div style={{ marginBottom: 4, fontWeight: 500 }}>操作</div>
-                                        <Space direction="vertical" size={4}>
-                                          <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleOpenEditModal(record, e) }}>编辑</Button>
-                                          {!record.is_favorite && <Button type="link" size="small" icon={<StarOutlined />} onClick={(e) => { e.stopPropagation(); handleToggleFavorite(record, e) }}>收藏</Button>}
-                                          {record.is_favorite && <Button type="link" size="small" icon={<StarFilled />} style={{ color: '#faad14' }} onClick={(e) => { e.stopPropagation(); handleToggleFavorite(record, e) }}>取消收藏</Button>}
-                                        </Space>
-                                      </div>
-                                    }
-                                    trigger="click"
-                                  >
-                                    <MoreOutlined style={{ cursor: 'pointer', color: '#999', flexShrink: 0 }} onClick={(e: React.MouseEvent) => e.stopPropagation()} />
-                                  </Popover>
+                                  {record.memo && (
+                                    <Popover
+                                      content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
+                                      title="备忘录"
+                                      trigger="click"
+                                    >
+                                      <FileTextOutlined
+                                        style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    </Popover>
+                                  )}
                                 </div>
 
                                 {record.description && (
@@ -1227,15 +1300,26 @@ const TrainingRecordsPage: React.FC = () => {
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />}
                             <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {record.name}
                             </Title>
-                            <Tooltip title="收藏">
-                              <StarOutlined
-                                style={{ color: '#9ca3af', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
-                                onClick={(e) => handleToggleFavorite(record, e)}
-                              />
-                            </Tooltip>
+                            {!record.is_favorite && (
+                              <Tooltip title="收藏">
+                                <StarOutlined
+                                  style={{ color: '#9ca3af', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                  onClick={(e) => handleToggleFavorite(record, e)}
+                                />
+                              </Tooltip>
+                            )}
+                            {record.is_favorite && (
+                              <Tooltip title="取消收藏">
+                                <StarFilled
+                                  style={{ color: '#faad14', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}
+                                  onClick={(e) => handleToggleFavorite(record, e)}
+                                />
+                              </Tooltip>
+                            )}
                             <Tooltip title="编辑名称和描述">
                               <EditOutlined
                                 style={{ color: '#9ca3af', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}

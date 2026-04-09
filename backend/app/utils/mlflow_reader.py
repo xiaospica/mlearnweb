@@ -296,6 +296,24 @@ class MLFlowReader:
         
         return None
 
+    def load_port_analysis_df(self, experiment_id: str, run_id: str) -> Optional[pd.DataFrame]:
+        pkl_path = (
+            self.mlruns_dir / experiment_id / run_id /
+            "artifacts/portfolio_analysis/port_analysis_1day.pkl"
+        )
+        print(f"[MLFlowReader] load_port_analysis_df: {pkl_path}", file=__import__('sys').stderr)
+        if not pkl_path.exists():
+            print(f"[MLFlowReader] Port analysis df not found: {pkl_path}", file=__import__('sys').stderr)
+            return None
+        data = self._load_pickle(pkl_path)
+        if data is None:
+            return None
+        
+        if isinstance(data, pd.DataFrame):
+            return data
+        
+        return None
+
     def load_prediction_data(self, experiment_id: str, run_id: str) -> Optional[pd.DataFrame]:
         pred_path = self.mlruns_dir / experiment_id / run_id / "artifacts/pred.pkl"
         label_path = self.mlruns_dir / experiment_id / run_id / "artifacts/label.pkl"

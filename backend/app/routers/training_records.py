@@ -50,7 +50,7 @@ def create_training_record(body: TrainingRecordCreate, db: Session = Depends(get
 @router.get("", response_model=ApiResponse)
 def list_training_records(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     status: str = Query(None),
     category: str = Query(None),
     search: str = Query(""),
@@ -96,30 +96,34 @@ def batch_delete_training_records(ids: List[int] = Body(..., embed=True), db: Se
 @router.get("/groups", response_model=ApiResponse)
 def list_groups(db: Session = Depends(get_db_session)):
     from app.models.database import TrainingRecord
-    from sqlalchemy import func
-    
-    system_groups = ["favorite", "default"]
+    from sqlalchemy import func, or_
     
     groups = []
     
-    for group_name in system_groups:
-        count = db.query(func.count(TrainingRecord.id)).filter(
-            TrainingRecord.group_name == group_name if group_name != "default" else (
-                (TrainingRecord.group_name.is_(None) | (TrainingRecord.group_name == "default"))
-                & (TrainingRecord.is_favorite == False)
-            )
-        ).scalar()
-        groups.append(GroupInfoResponse(
-            name="收藏" if group_name == "favorite" else "普通",
-            count=count,
-            is_system=True,
-        ))
+    favorite_count = db.query(func.count(TrainingRecord.id)).filter(
+        TrainingRecord.is_favorite == True
+    ).scalar()
+    groups.append(GroupInfoResponse(
+        name="收藏",
+        count=favorite_count,
+        is_system=True,
+    ))
+    
+    normal_count = db.query(func.count(TrainingRecord.id)).filter(
+        TrainingRecord.is_favorite == False,
+        or_(TrainingRecord.group_name.is_(None), TrainingRecord.group_name == "default")
+    ).scalar()
+    groups.append(GroupInfoResponse(
+        name="普通",
+        count=normal_count,
+        is_system=True,
+    ))
     
     custom_groups = db.query(
         TrainingRecord.group_name,
         func.count(TrainingRecord.id).label("count")
     ).filter(
-        TrainingRecord.group_name.notin_(system_groups),
+        TrainingRecord.group_name.notin_(["favorite", "default"]),
         TrainingRecord.group_name.isnot(None)
     ).group_by(TrainingRecord.group_name).all()
     
@@ -185,8 +189,7 @@ def dissolve_group(group_name: str, db: Session = Depends(get_db_session)):
     count = len(records)
     
     for record in records:
-        if not record.is_favorite:
-            record.group_name = "default"
+        record.group_name = "default"
     
     db.commit()
     return ApiResponse(success=True, message=f"已解散分组 '{group_name}'，{count} 条记录归回普通")

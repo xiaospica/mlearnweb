@@ -166,8 +166,8 @@ def get_qlib_figures(
         report_normal_df = mlflow_reader.load_portfolio_report(exp_id, run_id)
         print(f"  - report_normal_df: {type(report_normal_df)}, shape={getattr(report_normal_df, 'shape', None)}", file=sys.stderr)
         
-        analysis_df = mlflow_reader.load_port_analysis(exp_id, run_id)
-        print(f"  - analysis_df: {type(analysis_df)}", file=sys.stderr)
+        analysis_df = mlflow_reader.load_port_analysis_df(exp_id, run_id)
+        print(f"  - analysis_df: {type(analysis_df)}, shape={getattr(analysis_df, 'shape', None)}", file=sys.stderr)
         
         pred_label = mlflow_reader.load_prediction_data(exp_id, run_id)
         print(f"  - pred_label: {type(pred_label)}, shape={getattr(pred_label, 'shape', None)}", file=sys.stderr)
