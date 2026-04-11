@@ -1013,7 +1013,7 @@ const TrainingRecordsPage: React.FC = () => {
                           </div>
 
                           {record.description && (
-                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                            <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
                               {record.description}
                             </Text>
                           )}
@@ -1186,7 +1186,7 @@ const TrainingRecordsPage: React.FC = () => {
                                 </div>
 
                                 {record.description && (
-                                  <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                                  <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
                                     {record.description}
                                   </Text>
                                 )}
@@ -1341,7 +1341,7 @@ const TrainingRecordsPage: React.FC = () => {
                           </div>
 
                           {record.description && (
-                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+                            <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
                               {record.description}
                             </Text>
                           )}
