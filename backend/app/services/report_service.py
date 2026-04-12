@@ -13,23 +13,9 @@ class ReportService:
         if not run_detail:
             return {"error": f"Run {run_id} not found"}
 
-        # 从 MLflow metrics 中提取指标
         key_metrics = _extract_key_metrics(run_detail.get("metrics", {}))
         
-        # 从 port_analysis_1day.pkl 中提取风险指标并合并
         port_analysis = mlflow_reader.load_port_analysis(experiment_id, run_id)
-        if port_analysis:
-            # 合并风险指标到 key_metrics
-            for key, value in port_analysis.items():
-                # 提取指标名称映射
-                if "max_drawdown" in key and ("max_drawdown" not in key_metrics or key_metrics.get("max_drawdown") is None):
-                    key_metrics["max_drawdown"] = value
-                elif "annualized_return" in key and ("annualized_return" not in key_metrics or key_metrics.get("annualized_return") is None):
-                    key_metrics["annualized_return"] = value
-                elif "information_ratio" in key and ("information_ratio" not in key_metrics or key_metrics.get("information_ratio") is None):
-                    key_metrics["information_ratio"] = value
-                elif "sharpe" in key and ("sharpe_ratio" not in key_metrics or key_metrics.get("sharpe_ratio") is None):
-                    key_metrics["sharpe_ratio"] = value
         
         model_params_structured = run_detail.get("params", {})
         portfolio_data = ReportService._get_portfolio_chart_data(experiment_id, run_id)
@@ -44,21 +30,36 @@ class ReportService:
 
         if portfolio_data.get("available") and portfolio_data.get("daily_return"):
             daily_returns = portfolio_data["daily_return"].get("strategy", [])
+            benchmark_returns = portfolio_data["daily_return"].get("benchmark", [])
+            
             if daily_returns:
                 returns_arr = np.array([r for r in daily_returns if r is not None and not np.isnan(r)])
                 if len(returns_arr) > 0:
-                    if "cumulative_return" not in key_metrics or key_metrics.get("cumulative_return") is None:
-                        key_metrics["cumulative_return"] = float(np.prod(1 + returns_arr) - 1)
-                    if "sharpe_ratio" not in key_metrics or key_metrics.get("sharpe_ratio") is None:
-                        mean_ret = np.mean(returns_arr)
-                        std_ret = np.std(returns_arr)
-                        if std_ret > 0:
-                            key_metrics["sharpe_ratio"] = float(mean_ret / std_ret * np.sqrt(252))
-                    if "annualized_return" not in key_metrics or key_metrics.get("annualized_return") is None:
-                        total_days = len(returns_arr)
-                        if total_days > 0:
-                            total_return = np.prod(1 + returns_arr) - 1
-                            key_metrics["annualized_return"] = float((1 + total_return) ** (252 / total_days) - 1)
+                    total_days = len(returns_arr)
+                    cumulative_curve = np.cumprod(1 + returns_arr)
+                    total_return = cumulative_curve[-1] - 1
+                    
+                    key_metrics["cumulative_return"] = float(total_return)
+                    
+                    key_metrics["annualized_return"] = float((1 + total_return) ** (252 / total_days) - 1)
+                    
+                    mean_ret = np.mean(returns_arr)
+                    std_ret = np.std(returns_arr, ddof=1)
+                    if std_ret > 0:
+                        key_metrics["sharpe_ratio"] = float(mean_ret / std_ret * np.sqrt(252))
+                    
+                    running_max = np.maximum.accumulate(cumulative_curve)
+                    drawdown = (cumulative_curve - running_max) / running_max
+                    key_metrics["max_drawdown"] = float(drawdown.min())
+                    
+                    if benchmark_returns:
+                        bench_arr = np.array([r for r in benchmark_returns if r is not None and not np.isnan(r)])
+                        if len(bench_arr) == len(returns_arr):
+                            excess_returns = returns_arr - bench_arr
+                            excess_mean = np.mean(excess_returns)
+                            excess_std = np.std(excess_returns, ddof=1)
+                            if excess_std > 0:
+                                key_metrics["information_ratio"] = float(excess_mean / excess_std * np.sqrt(252))
 
         return {
             "run_info": {
@@ -180,23 +181,50 @@ class ReportService:
     def _get_risk_metrics(experiment_id: str, run_id: str) -> Dict[str, Any]:
         port_analysis = mlflow_reader.load_port_analysis(experiment_id, run_id)
         if port_analysis:
-            # 映射字段名到前端期望的格式
             metrics = {}
+            
+            dd_keys_priority = [
+                "1day.excess_return_with_cost.max_drawdown",
+                "1day.excess_return_without_cost.max_drawdown",
+            ]
+            for k in dd_keys_priority:
+                if k in port_analysis and port_analysis[k] is not None:
+                    metrics["max_drawdown"] = port_analysis[k]
+                    break
+            
+            ann_keys_priority = [
+                "1day.excess_return_with_cost.annualized_return",
+                "1day.excess_return_without_cost.annualized_return",
+            ]
+            for k in ann_keys_priority:
+                if k in port_analysis and port_analysis[k] is not None:
+                    metrics["annualized_return"] = port_analysis[k]
+                    break
+            
+            ir_keys_priority = [
+                "1day.excess_return_with_cost.information_ratio",
+                "1day.excess_return_without_cost.information_ratio",
+            ]
+            for k in ir_keys_priority:
+                if k in port_analysis and port_analysis[k] is not None:
+                    metrics["information_ratio"] = port_analysis[k]
+                    break
+            
+            sharpe_keys_priority = [
+                "1day.excess_return_with_cost.sharpe",
+                "1day.excess_return_without_cost.sharpe",
+            ]
+            for k in sharpe_keys_priority:
+                if k in port_analysis and port_analysis[k] is not None:
+                    metrics["sharpe_ratio"] = port_analysis[k]
+                    break
+            
             for key, value in port_analysis.items():
-                if "max_drawdown" in key:
-                    metrics["max_drawdown"] = value
-                elif "annualized_return" in key:
-                    metrics["annualized_return"] = value
-                elif "information_ratio" in key:
-                    metrics["information_ratio"] = value
-                elif "sharpe" in key and "ratio" not in key:
-                    metrics["sharpe_ratio"] = value
-                elif "mean" in key and "annualized" not in key:
+                if "mean" in key and "annualized" not in key and "mean" not in metrics:
                     metrics["mean"] = value
-                elif "std" in key:
+                elif "std" in key and "std" not in metrics:
                     metrics["std"] = value
             
-            # 如果没有找到任何指标，使用原始数据
             if not metrics:
                 metrics = port_analysis
             
@@ -207,11 +235,20 @@ class ReportService:
             return {"available": False}
 
         returns = report_df["return"].dropna()
+        
+        def calc_max_drawdown(returns_series: pd.Series) -> float:
+            cum_ret = (1 + returns_series).cumprod()
+            running_max = cum_ret.cummax()
+            drawdown = (cum_ret - running_max) / running_max
+            return float(drawdown.min())
+        
+        max_dd = calc_max_drawdown(returns) if len(returns) > 0 else None
+        
         metrics = {
             "mean": float(returns.mean()),
             "std": float(returns.std()),
             "annualized_return": float(returns.mean() * 252),
-            "max_drawdown": float(returns.min()) if len(returns) > 0 else None,
+            "max_drawdown": max_dd,
             "sharpe_ratio": float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else None,
             "win_rate": float((returns > 0).mean()),
             "total_days": int(len(returns)),

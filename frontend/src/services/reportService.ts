@@ -1,5 +1,5 @@
 import apiClient from './apiClient'
-import type { ReportData, ApiSuccessResponse, QLibFiguresData } from '@/types'
+import type { ReportData, ApiSuccessResponse, QLibFiguresData, FeatureImportanceData, SHAPAnalysisData } from '@/types'
 
 export const reportService = {
   getFullReport(expId: string, runId: string): Promise<ApiSuccessResponse<ReportData>> {
@@ -39,5 +39,27 @@ export const reportService = {
         console.error('[reportService] Error response:', error.response?.data)
         throw error
       })
+  },
+
+  getFeatureImportance(expId: string, runId: string): Promise<ApiSuccessResponse<FeatureImportanceData>> {
+    return apiClient.get(`/runs/${runId}/feature-importance`, { params: { exp_id: expId } }).then((r) => r.data)
+  },
+
+  getSHAPAnalysis(
+    expId: string, 
+    runId: string, 
+    sampleSize: number = 500, 
+    segment: string = 'test'
+  ): Promise<ApiSuccessResponse<SHAPAnalysisData>> {
+    return apiClient.get(`/runs/${runId}/shap-analysis`, { 
+      params: { exp_id: expId, sample_size: sampleSize, segment } 
+    }).then((r) => r.data)
+  },
+
+  getModelInterpretability(expId: string, runId: string): Promise<ApiSuccessResponse<{
+    feature_importance: FeatureImportanceData
+    shap_analysis: SHAPAnalysisData
+  }>> {
+    return apiClient.get(`/runs/${runId}/model-interpretability`, { params: { exp_id: expId } }).then((r) => r.data)
   },
 }

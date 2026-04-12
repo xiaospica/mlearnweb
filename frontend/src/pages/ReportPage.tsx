@@ -1,14 +1,16 @@
-import React from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Row, Col, Card, Typography, Tabs, Tag, Button, Space, Spin, Table, Descriptions, Empty, Tooltip, message, notification } from 'antd'
-import { ArrowLeftOutlined, BarChartOutlined, SettingOutlined, TableOutlined, InfoCircleOutlined, ExperimentOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { Row, Col, Card, Typography, Tabs, Tag, Button, Space, Spin, Table, Descriptions, Empty, Tooltip, message, notification, Select, Alert, Statistic } from 'antd'
+import { ArrowLeftOutlined, BarChartOutlined, SettingOutlined, TableOutlined, InfoCircleOutlined, ExperimentOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, BulbOutlined, DotChartOutlined, LineChartOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactECharts from 'echarts-for-react'
 import Plot from 'react-plotly.js'
 import dayjs from 'dayjs'
 import { reportService } from '@/services/reportService'
 import { trainingService } from '@/services/trainingService'
-import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult } from '@/types'
+import { factorDocService } from '@/services/factorDocService'
+import { FactorInfoModal } from '@/components/FactorInfoModal'
+import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData } from '@/types'
 
 const { Title, Text } = Typography
 
@@ -454,7 +456,10 @@ const MonthlyReturnHistogram: React.FC<{ data?: { available: boolean; histogram?
         },
         yAxis: {
           type: 'value',
-          axisLabel: { color: '#9ca3af', formatter: '{value}%' },
+          axisLabel: { 
+            color: '#9ca3af', 
+            formatter: (value: number) => `${(value * 100).toFixed(1)}%` 
+          },
           splitLine: { lineStyle: { color: '#f0f0f0' } },
         },
         series: [{
@@ -558,8 +563,22 @@ const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_retu
   if (years.length === 0) return <Empty description="无年度收益数据" style={{ padding: 40 }} />
 
   const values = Object.values(annualReturns)
-  const minVal = Math.min(...values) * 1.2
-  const maxVal = Math.max(...values) * 1.2
+  const dataMin = Math.min(...values)
+  const dataMax = Math.max(...values)
+  const dataRange = dataMax - dataMin
+  const padding = Math.max(dataRange * 0.15, 0.02)
+  
+  let minVal: number, maxVal: number
+  if (dataMin >= 0) {
+    minVal = 0
+    maxVal = dataMax + padding
+  } else if (dataMax <= 0) {
+    minVal = dataMin - padding
+    maxVal = 0
+  } else {
+    minVal = dataMin - padding
+    maxVal = dataMax + padding
+  }
 
   const barData = years.map(year => ({
     year,
@@ -1221,11 +1240,12 @@ const InSampleMetricCard: React.FC<{
   suffix?: string
   segmentColor: string
   highlight?: boolean
-}> = ({ title, value, format, suffix = '', segmentColor, highlight = false }) => {
+  tooltip?: string
+}> = ({ title, value, format, suffix = '', segmentColor, highlight = false, tooltip }) => {
   const displayValue = value == null ? '-' : (format ? format(value) : value.toFixed(4))
   const isPositive = value != null && value > 0
 
-  return (
+  const content = (
     <div style={{
       background: highlight ? '#fff7e6' : '#fafafa',
       borderRadius: 6,
@@ -1246,6 +1266,11 @@ const InSampleMetricCard: React.FC<{
       </span>
     </div>
   )
+
+  if (tooltip) {
+    return <Tooltip title={tooltip}>{content}</Tooltip>
+  }
+  return content
 }
 
 const InSampleSegmentCard: React.FC<{
@@ -1299,6 +1324,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.total_return}
               format={(v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`}
               segmentColor={config.color}
+              tooltip="复利累计: (1+r1)*(1+r2)*...*(1+rn)-1"
             />
           </Col>
           <Col span={12}>
@@ -1307,6 +1333,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.annualized_return}
               format={(v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`}
               segmentColor={config.color}
+              tooltip="复利年化: (1+累计收益)^(252/天数)-1"
             />
           </Col>
           <Col span={12}>
@@ -1315,6 +1342,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.sharpe_ratio}
               format={(v) => v.toFixed(3)}
               segmentColor={config.color}
+              tooltip="Sharpe = mean(daily_return) / std(daily_return) * sqrt(252)"
             />
           </Col>
           <Col span={12}>
@@ -1323,6 +1351,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.max_drawdown}
               format={(v) => `${(Math.abs(v) * 100).toFixed(2)}%`}
               segmentColor={config.color}
+              tooltip="复利回撤: (累计净值/历史最高净值-1)的最小值"
             />
           </Col>
           <Col span={12}>
@@ -1331,6 +1360,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.information_ratio}
               format={(v) => v.toFixed(3)}
               segmentColor={config.color}
+              tooltip="IR = mean(策略收益-基准收益) / std(策略收益-基准收益) * sqrt(252)"
             />
           </Col>
           <Col span={12}>
@@ -1339,6 +1369,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.annualized_volatility}
               format={(v) => `${(v * 100).toFixed(2)}%`}
               segmentColor={config.color}
+              tooltip="std(daily_return) * sqrt(252)"
             />
           </Col>
           <Col span={12}>
@@ -1347,6 +1378,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.win_rate}
               format={(v) => `${(v * 100).toFixed(1)}%`}
               segmentColor={config.color}
+              tooltip="日收益>0的比例"
             />
           </Col>
           <Col span={12}>
@@ -1355,6 +1387,7 @@ const InSampleSegmentCard: React.FC<{
               value={rm.excess_annualized_return}
               format={(v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`}
               segmentColor={config.color}
+              tooltip="策略年化收益 - 基准年化收益"
             />
           </Col>
         </Row>
@@ -2119,6 +2152,1564 @@ const InSampleMetricsComparisonTable: React.FC<{ segments: Record<string, InSamp
   )
 }
 
+// 新增：特征重要性图表组件
+const FeatureImportanceChart: React.FC<{ data: FeatureImportanceData }> = ({ data }) => {
+  const [sortBy, setSortBy] = useState<'gain' | 'split'>('gain')
+  const [topN, setTopN] = useState(20)
+  const [selectedFactor, setSelectedFactor] = useState<string | null>(null)
+  const [modalVisible, setModalVisible] = useState(false)
+  const [factorDescriptions, setFactorDescriptions] = useState<Record<string, string>>({})
+
+  // 获取因子描述
+  useEffect(() => {
+    const fetchDescriptions = async () => {
+      try {
+        const response = await factorDocService.getAlpha158Docs()
+        if (response.success && response.data?.factors) {
+          const descMap: Record<string, string> = {}
+          response.data.factors.forEach(f => {
+            descMap[f.name] = f.description
+          })
+          setFactorDescriptions(descMap)
+        }
+      } catch (e) {
+        console.log('Failed to fetch factor descriptions', e)
+      }
+    }
+    fetchDescriptions()
+  }, [])
+
+  if (!data?.available) {
+    return (
+      <Empty 
+        description={data?.error || "无特征重要性数据"} 
+        style={{ padding: 40 }} 
+      />
+    )
+  }
+
+  if (!data.features?.length) {
+    return <Empty description="无特征数据" style={{ padding: 40 }} />
+  }
+
+  const sortedFeatures = [...data.features]
+    .sort((a, b) => sortBy === 'gain' 
+      ? b.importance_gain - a.importance_gain 
+      : b.importance_split - a.importance_split
+    )
+    .slice(0, topN)
+
+  const featureNames = sortedFeatures.map(f => f.name)
+  const gainValues = sortedFeatures.map(f => f.importance_gain)
+  const splitValues = sortedFeatures.map(f => f.importance_split)
+
+  const maxGain = Math.max(...gainValues) || 1
+  const maxSplit = Math.max(...splitValues) || 1
+
+  const handleChartClick = (params: any) => {
+    if (params && params.name) {
+      setSelectedFactor(params.name)
+      setModalVisible(true)
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
+        <Space>
+          <Text type="secondary">排序方式:</Text>
+          <Select value={sortBy} onChange={setSortBy} style={{ width: 120 }} size="small">
+            <Select.Option value="gain">Gain Importance</Select.Option>
+            <Select.Option value="split">Split Importance</Select.Option>
+          </Select>
+        </Space>
+        <Space>
+          <Text type="secondary">显示数量:</Text>
+          <Select value={topN} onChange={setTopN} style={{ width: 80 }} size="small">
+            <Select.Option value={10}>Top 10</Select.Option>
+            <Select.Option value={20}>Top 20</Select.Option>
+            <Select.Option value={30}>Top 30</Select.Option>
+            <Select.Option value={50}>Top 50</Select.Option>
+          </Select>
+        </Space>
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          模型类型: <Tag color="blue">{data.model_type}</Tag>
+          总特征数: <Tag>{data.total_features}</Tag>
+        </Text>
+        <Tooltip title="点击柱子查看因子详情">
+          <InfoCircleOutlined style={{ color: '#1677ff' }} />
+        </Tooltip>
+      </div>
+
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any) => {
+              if (!params || params.length < 2) return ''
+              const name = params[0].name
+              const gain = params[0].value
+              const split = params[1].value
+              const desc = factorDescriptions[name]
+              const descHtml = desc ? `<div style="color:#6b7280;font-size:11px;margin-top:4px;max-width:300px;white-space:normal;">${desc}</div>` : ''
+              return `<div style="font-weight:600">${name}</div>Gain: ${gain.toFixed(2)}<br/>Split: ${split}${descHtml}<div style="color:#1677ff;font-size:11px;margin-top:4px">点击查看因子详情</div>`
+            },
+          },
+          legend: {
+            data: ['Gain Importance', 'Split Importance'],
+            textStyle: { color: '#6b7280' },
+            top: 0,
+          },
+          grid: { left: 180, right: 50, top: 40, bottom: 30 },
+          xAxis: [
+            {
+              type: 'value',
+              name: 'Gain',
+              nameTextStyle: { color: '#6b7280' },
+              axisLabel: { color: '#9ca3af', formatter: (v: number) => v.toFixed(0) },
+              splitLine: { lineStyle: { color: '#f0f0f0' } },
+              max: Math.ceil(maxGain * 1.1),
+            },
+            {
+              type: 'value',
+              name: 'Split',
+              nameTextStyle: { color: '#6b7280' },
+              axisLabel: { color: '#9ca3af', formatter: (v: number) => v.toFixed(0) },
+              splitLine: { show: false },
+              max: Math.ceil(maxSplit * 1.1),
+            },
+          ],
+          yAxis: {
+            type: 'category',
+            data: featureNames,
+            axisLabel: { 
+              color: '#374151', 
+              fontSize: 11,
+              width: 160,
+              overflow: 'truncate',
+            },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+          },
+          series: [
+            {
+              name: 'Gain Importance',
+              type: 'bar',
+              data: gainValues,
+              barWidth: '35%',
+              itemStyle: { 
+                color: {
+                  type: 'linear',
+                  x: 0, y: 0, x2: 1, y2: 0,
+                  colorStops: [
+                    { offset: 0, color: '#1677ff' },
+                    { offset: 1, color: '#69b1ff' },
+                  ],
+                },
+                borderRadius: [0, 2, 2, 0],
+              },
+            },
+            {
+              name: 'Split Importance',
+              type: 'bar',
+              xAxisIndex: 1,
+              data: splitValues,
+              barWidth: '35%',
+              itemStyle: { 
+                color: {
+                  type: 'linear',
+                  x: 0, y: 0, x2: 1, y2: 0,
+                  colorStops: [
+                    { offset: 0, color: '#52c41a' },
+                    { offset: 1, color: '#95de64' },
+                  ],
+                },
+                borderRadius: [0, 2, 2, 0],
+              },
+            },
+          ],
+        }}
+        style={{ height: Math.max(400, topN * 20) }}
+        notMerge={true}
+        onEvents={{ click: handleChartClick }}
+      />
+      
+      <FactorInfoModal
+        visible={modalVisible}
+        factorName={selectedFactor}
+        onClose={() => setModalVisible(false)}
+      />
+    </div>
+  )
+}
+
+// 新增：SHAP Summary Plot 组件
+const SHAPSummaryPlot: React.FC<{ data: SHAPAnalysisData }> = ({ data }) => {
+  const [topN, setTopN] = useState(15)
+
+  if (!data?.available) {
+    return (
+      <Empty 
+        description={data?.error || "无SHAP分析数据"} 
+        style={{ padding: 40 }} 
+      />
+    )
+  }
+
+  if (!data.shap_values?.length || !data.feature_names?.length) {
+    return <Empty description="SHAP数据不完整" style={{ padding: 40 }} />
+  }
+
+  const shapValues = data.shap_values
+  const featureValues = data.feature_values || []
+  const featureNames = data.feature_names
+
+  const featureStats = data.feature_stats || {}
+  const sortedFeatures = Object.entries(featureStats)
+    .sort((a, b) => (b[1] as any).mean_abs_shap - (a[1] as any).mean_abs_shap)
+    .slice(0, topN)
+    .map(([name]) => name)
+
+  if (sortedFeatures.length === 0) {
+    return <Empty description="无有效特征数据" style={{ padding: 40 }} />
+  }
+
+  const plotData: Array<{
+    feature: string
+    shap: number
+    value: number
+    sampleIndex: number
+  }> = []
+
+  sortedFeatures.forEach(featureName => {
+    const featureIdx = featureNames.indexOf(featureName)
+    if (featureIdx === -1) return
+
+    for (let i = 0; i < shapValues.length; i++) {
+      const shapVal = shapValues[i][featureIdx]
+      const featVal = featureValues[i]?.[featureIdx] ?? 0
+
+      if (shapVal != null && !isNaN(shapVal)) {
+        plotData.push({
+          feature: featureName,
+          shap: shapVal,
+          value: featVal,
+          sampleIndex: i,
+        })
+      }
+    }
+  })
+
+  const allValues = plotData.map(d => d.value).filter(v => !isNaN(v))
+  const valueMin = Math.min(...allValues)
+  const valueMax = Math.max(...allValues)
+  const valueRange = valueMax - valueMin || 1
+
+  const visualMapPieces = [
+    { min: valueMin, max: valueMin + valueRange * 0.5, color: '#3b82f6', label: '低' },
+    { min: valueMin + valueRange * 0.5, max: valueMax, color: '#ef4444', label: '高' },
+  ]
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
+        <Space>
+          <Text type="secondary">显示特征数:</Text>
+          <Select value={topN} onChange={setTopN} style={{ width: 100 }} size="small">
+            <Select.Option value={10}>Top 10</Select.Option>
+            <Select.Option value={15}>Top 15</Select.Option>
+            <Select.Option value={20}>Top 20</Select.Option>
+          </Select>
+        </Space>
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          样本数: <Tag>{data.sample_size}</Tag>
+          基准值: <Tag color="purple">{data.base_value?.toFixed(4) || '-'}</Tag>
+        </Text>
+      </div>
+
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any) => {
+              const d = params.data
+              return `${d[3]}<br/>SHAP: ${d[0].toFixed(4)}<br/>特征值: ${d[1].toFixed(4)}`
+            },
+          },
+          grid: { left: 180, right: 60, top: 20, bottom: 40 },
+          xAxis: {
+            type: 'value',
+            name: 'SHAP Value',
+            nameLocation: 'middle',
+            nameGap: 25,
+            nameTextStyle: { color: '#6b7280' },
+            axisLabel: { color: '#9ca3af' },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+          },
+          yAxis: {
+            type: 'category',
+            data: sortedFeatures,
+            inverse: true,
+            axisLabel: { color: '#374151', fontSize: 11 },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+          },
+          visualMap: {
+            min: valueMin,
+            max: valueMax,
+            dimension: 1,
+            orient: 'vertical',
+            right: 10,
+            top: 'center',
+            text: ['高', '低'],
+            textStyle: { color: '#6b7280' },
+            inRange: {
+              color: ['#3b82f6', '#93c5fd', '#fca5a5', '#ef4444'],
+            },
+            calculable: true,
+          },
+          series: [
+            {
+              type: 'scatter',
+              data: plotData.map(d => [
+                d.shap,
+                d.value,
+                d.sampleIndex,
+                d.feature,
+              ]),
+              symbolSize: 5,
+              encode: { x: 0, y: 3 },
+              itemStyle: {
+                opacity: 0.6,
+              },
+            },
+          ],
+        }}
+        style={{ height: Math.max(400, topN * 25) }}
+        notMerge={true}
+      />
+
+      <div style={{ marginTop: 16, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          <strong>说明：</strong>
+          每个点代表一个样本。X轴为SHAP值（正值表示正向贡献，负值表示负向贡献）。
+          颜色表示特征值高低（红色=高值，蓝色=低值）。
+          特征按平均|SHAP|值排序。
+        </Text>
+      </div>
+    </div>
+  )
+}
+
+// 新增：SHAP 依赖图组件
+const SHAPDependencePlot: React.FC<{ 
+  data: SHAPAnalysisData
+  selectedFeature: string
+}> = ({ data, selectedFeature }) => {
+  if (!data?.available || !data.shap_values?.length || !selectedFeature) {
+    return <Empty description="请选择特征查看依赖图" style={{ padding: 40 }} />
+  }
+
+  const featureIdx = data.feature_names.indexOf(selectedFeature)
+  if (featureIdx === -1) {
+    return <Empty description="特征不存在" style={{ padding: 40 }} />
+  }
+
+  const plotData: Array<[number, number, number]> = []
+  for (let i = 0; i < data.shap_values.length; i++) {
+    const shapVal = data.shap_values[i][featureIdx]
+    const featVal = data.feature_values?.[i]?.[featureIdx]
+    if (shapVal != null && featVal != null && !isNaN(shapVal) && !isNaN(featVal)) {
+      plotData.push([featVal, shapVal, i])
+    }
+  }
+
+  if (plotData.length === 0) {
+    return <Empty description="无有效数据点" style={{ padding: 40 }} />
+  }
+
+  const featValues = plotData.map(d => d[0])
+  const featMin = Math.min(...featValues)
+  const featMax = Math.max(...featValues)
+
+  return (
+    <div>
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any) => {
+              const d = params.data
+              return `特征值: ${d[0].toFixed(4)}<br/>SHAP: ${d[1].toFixed(4)}`
+            },
+          },
+          grid: { left: 70, right: 60, top: 20, bottom: 50 },
+          xAxis: {
+            type: 'value',
+            name: selectedFeature,
+            nameLocation: 'middle',
+            nameGap: 30,
+            nameTextStyle: { color: '#6b7280' },
+            axisLabel: { color: '#9ca3af' },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+          },
+          yAxis: {
+            type: 'value',
+            name: 'SHAP Value',
+            nameLocation: 'middle',
+            nameGap: 45,
+            nameTextStyle: { color: '#6b7280' },
+            axisLabel: { color: '#9ca3af' },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+          },
+          visualMap: {
+            min: featMin,
+            max: featMax,
+            dimension: 0,
+            orient: 'vertical',
+            right: 10,
+            top: 'center',
+            text: ['高', '低'],
+            textStyle: { color: '#6b7280' },
+            inRange: {
+              color: ['#3b82f6', '#ef4444'],
+            },
+            calculable: true,
+          },
+          series: [
+            {
+              type: 'scatter',
+              data: plotData,
+              symbolSize: 6,
+              itemStyle: { opacity: 0.7 },
+            },
+          ],
+        }}
+        style={{ height: 350 }}
+        notMerge={true}
+      />
+    </div>
+  )
+}
+
+// 新增：模型可解释性分析面板
+const ModelInterpretabilityPanel: React.FC<{ expId: string; runId: string }> = ({ expId, runId }) => {
+  const [activeSubTab, setActiveSubTab] = useState('importance')
+  const [selectedFeature, setSelectedFeature] = useState<string>('')
+  const [sampleSize, setSampleSize] = useState(500)
+
+  const { data: featureData, isLoading: loadingFeature, error: errorFeature } = useQuery({
+    queryKey: ['feature-importance', expId, runId],
+    queryFn: async () => {
+      console.log('[ModelInterpretability] Fetching feature importance for:', { expId, runId })
+      const result = await reportService.getFeatureImportance(expId, runId)
+      console.log('[ModelInterpretability] Feature importance result:', result)
+      return result
+    },
+    staleTime: 10 * 60 * 1000,
+  })
+
+  const { data: shapData, isLoading: loadingShap, error: errorShap } = useQuery({
+    queryKey: ['shap-analysis', expId, runId, sampleSize],
+    queryFn: async () => {
+      console.log('[ModelInterpretability] Fetching SHAP analysis for:', { expId, runId, sampleSize })
+      const result = await reportService.getSHAPAnalysis(expId, runId, sampleSize, 'test')
+      console.log('[ModelInterpretability] SHAP analysis result:', result)
+      console.log('[ModelInterpretability] SHAP available:', result?.data?.available)
+      if (result?.data?.available === false) {
+        console.log('[ModelInterpretability] SHAP error:', result?.data?.error)
+      }
+      return result
+    },
+    staleTime: 10 * 60 * 1000,
+    enabled: activeSubTab === 'shap' || activeSubTab === 'dependence',
+  })
+
+  useEffect(() => {
+    if (shapData?.data?.feature_names?.length && !selectedFeature) {
+      const stats = shapData.data.feature_stats || {}
+      const topFeature = Object.entries(stats)
+        .sort((a, b) => (b[1] as any).mean_abs_shap - (a[1] as any).mean_abs_shap)[0]
+      if (topFeature) {
+        setSelectedFeature(topFeature[0])
+      }
+    }
+  }, [shapData, selectedFeature])
+
+  const isLoading = loadingFeature || (activeSubTab !== 'importance' && loadingShap)
+  const hasError = errorFeature || (activeSubTab !== 'importance' && errorShap)
+  
+  const shapAvailable = shapData?.data?.available === true
+  const shapError = shapData?.data?.available === false ? shapData?.data?.error : null
+
+  if (isLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 80 }}>
+        <Spin size="large" />
+        <div style={{ marginTop: 16 }}>
+          <Text type="secondary">
+            {activeSubTab === 'importance' ? '正在加载特征重要性...' : '正在计算SHAP值...'}
+          </Text>
+        </div>
+      </div>
+    )
+  }
+
+  if (hasError) {
+    return (
+      <Alert
+        type="error"
+        message="加载失败"
+        description={(hasError as any)?.message || '请检查后端服务是否正常运行'}
+        showIcon
+      />
+    )
+  }
+
+  const shapFeatureOptions = shapData?.data?.feature_names?.map(name => ({
+    label: name,
+    value: name,
+  })) || []
+
+  return (
+    <div>
+      <Tabs
+        activeKey={activeSubTab}
+        onChange={setActiveSubTab}
+        items={[
+          {
+            key: 'importance',
+            label: <span><BarChartOutlined /> 特征重要性</span>,
+            children: (
+              <Card size="small" style={{ border: 'none', boxShadow: 'none' }}>
+                {featureData?.data?.available === false && (
+                  <Alert type="warning" message={featureData?.data?.error || '特征重要性不可用'} style={{ marginBottom: 16 }} />
+                )}
+                {featureData?.data && <FeatureImportanceChart data={featureData.data} />}
+              </Card>
+            ),
+          },
+          {
+            key: 'shap',
+            label: <span><DotChartOutlined /> SHAP Summary</span>,
+            children: (
+              <div>
+                {shapError && (
+                  <Alert type="warning" message="SHAP分析不可用" description={shapError} showIcon style={{ marginBottom: 16 }} />
+                )}
+                <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <Space>
+                    <Text type="secondary">采样数量:</Text>
+                    <Select value={sampleSize} onChange={setSampleSize} style={{ width: 100 }} size="small">
+                      <Select.Option value={300}>300</Select.Option>
+                      <Select.Option value={500}>500</Select.Option>
+                      <Select.Option value={1000}>1000</Select.Option>
+                    </Select>
+                  </Space>
+                </div>
+                {shapAvailable && shapData?.data && <SHAPSummaryPlot data={shapData.data} />}
+              </div>
+            ),
+          },
+          {
+            key: 'dependence',
+            label: <span><LineChartOutlined /> SHAP 依赖图</span>,
+            children: (
+              <div>
+                <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
+                  <Space>
+                    <Text type="secondary">选择特征:</Text>
+                    <Select
+                      showSearch
+                      value={selectedFeature}
+                      onChange={setSelectedFeature}
+                      style={{ width: 250 }}
+                      size="small"
+                      placeholder="搜索或选择特征"
+                      filterOption={(input, option) =>
+                        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                      }
+                      options={shapFeatureOptions}
+                    />
+                  </Space>
+                </div>
+                {shapData?.data && selectedFeature && (
+                  <SHAPDependencePlot data={shapData.data} selectedFeature={selectedFeature} />
+                )}
+              </div>
+            ),
+          },
+        ]}
+      />
+    </div>
+  )
+}
+
+// 新增：IC 曲线对比图组件
+const InSampleICChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+
+  const allICData: Array<{ date: string; ic: number; segment: string; rawDate: Date }> = []
+  const segmentBoundaries: Array<{ startIndex: number; segment: string; color: string }> = []
+
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const icAnalysis = segData.ic_analysis
+
+    if (!icAnalysis?.available || !icAnalysis.dates || !icAnalysis.ic_values) {
+      return
+    }
+
+    const dates = icAnalysis.dates
+    const icValues = icAnalysis.ic_values
+
+    dates.forEach((date, i) => {
+      if (icValues[i] != null && !isNaN(icValues[i])) {
+        allICData.push({
+          date,
+          ic: icValues[i],
+          segment: segName,
+          rawDate: new Date(date),
+        })
+      }
+    })
+  })
+
+  if (allICData.length === 0) {
+    return <Empty description="无IC数据" style={{ padding: 40 }} />
+  }
+
+  allICData.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime())
+
+  let lastSegment = ''
+  allICData.forEach((item, idx) => {
+    if (item.segment !== lastSegment) {
+      const config = SEGMENT_CONFIG[item.segment] || { color: '#8c8c8c', label: item.segment }
+      segmentBoundaries.push({
+        startIndex: idx,
+        segment: config.label,
+        color: config.color,
+      })
+      lastSegment = item.segment
+    }
+  })
+
+  const dates = allICData.map(d => d.date)
+  const icValues = allICData.map(d => d.ic)
+
+  const markLineData: Array<{ xAxis: string; name: string; lineStyle: any }> = []
+  segmentBoundaries.forEach((boundary, idx) => {
+    if (idx > 0 && boundary.startIndex < dates.length) {
+      markLineData.push({
+        xAxis: dates[boundary.startIndex],
+        name: boundary.segment,
+        lineStyle: {
+          color: boundary.color,
+          type: 'dashed',
+          width: 2,
+        },
+      })
+    }
+  })
+
+  const icArr = icValues.filter(v => !isNaN(v))
+  const meanIC = icArr.length > 0 ? icArr.reduce((a, b) => a + b, 0) / icArr.length : 0
+
+  return (
+    <div>
+      <div style={{ marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>IC样本数: <Text strong>{icArr.length}</Text></Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>均值IC: <Text strong style={{ color: meanIC > 0 ? '#52c41a' : '#ff4d4f' }}>{meanIC.toFixed(4)}</Text></Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>胜率: <Text strong>{((icArr.filter(v => v > 0).length / icArr.length) * 100).toFixed(1)}%</Text></Text>
+      </div>
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'axis',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any) => {
+              if (!params || !params.length) return ''
+              const date = params[0].name
+              const ic = params[0].value
+              return `${date}<br/>IC: ${ic.toFixed(4)}`
+            },
+          },
+          legend: {
+            data: segmentBoundaries.map(b => b.segment),
+            textStyle: { color: '#6b7280' },
+            top: 0,
+          },
+          grid: { left: 70, right: 30, top: 40, bottom: 60 },
+          xAxis: {
+            type: 'category',
+            data: dates,
+            axisLabel: {
+              color: '#9ca3af',
+              fontSize: 10,
+              rotate: 45,
+            },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: 'value',
+            axisLabel: {
+              color: '#9ca3af',
+              formatter: (value: number) => value.toFixed(2),
+            },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+            name: 'IC值',
+            nameLocation: 'middle',
+            nameGap: 45,
+            nameTextStyle: { color: '#6b7280' },
+          },
+          series: [
+            {
+              name: 'IC',
+              type: 'bar',
+              data: icValues.map(v => ({
+                value: v,
+                itemStyle: {
+                  color: v >= 0 ? '#52c41a' : '#ff4d4f',
+                  borderRadius: [1, 1, 0, 0],
+                },
+              })),
+              barWidth: '60%',
+              markLine: {
+                silent: true,
+                symbol: 'none',
+                data: [
+                  { yAxis: meanIC, name: '均值', lineStyle: { color: '#fa8c16', type: 'dashed', width: 2 } },
+                  { yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } },
+                  ...markLineData,
+                ],
+                label: {
+                  show: true,
+                  formatter: '{b}',
+                  position: 'start',
+                  color: '#6b7280',
+                  fontSize: 10,
+                },
+              },
+            },
+          ],
+          dataZoom: [
+            {
+              type: 'slider',
+              start: 0,
+              end: 100,
+              height: 20,
+              bottom: 5,
+              borderColor: '#e5e7eb',
+              fillerColor: 'rgba(22,119,255,0.1)',
+              handleStyle: { color: '#1677ff' },
+            },
+            { type: 'inside', start: 0, end: 100 },
+          ],
+        }}
+        style={{ height: 350 }}
+        notMerge={true}
+      />
+    </div>
+  )
+}
+
+// 新增：滚动 ICIR 曲线组件
+const InSampleICIRChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+
+  const allICIRData: Array<{ date: string; icir: number | null; segment: string; rawDate: Date }> = []
+  const segmentBoundaries: Array<{ startIndex: number; segment: string; color: string }> = []
+
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const icAnalysis = segData.ic_analysis
+
+    if (!icAnalysis?.available || !icAnalysis.dates || !icAnalysis.rolling_icir) {
+      return
+    }
+
+    const dates = icAnalysis.dates
+    const rollingICIR = icAnalysis.rolling_icir
+
+    dates.forEach((date, i) => {
+      if (i < rollingICIR.length && rollingICIR[i] != null && !isNaN(rollingICIR[i]!)) {
+        allICIRData.push({
+          date,
+          icir: rollingICIR[i],
+          segment: segName,
+          rawDate: new Date(date),
+        })
+      }
+    })
+  })
+
+  if (allICIRData.length === 0) {
+    return <Empty description="无滚动ICIR数据（需要至少20个IC样本）" style={{ padding: 40 }} />
+  }
+
+  allICIRData.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime())
+
+  let lastSegment = ''
+  allICIRData.forEach((item, idx) => {
+    if (item.segment !== lastSegment) {
+      const config = SEGMENT_CONFIG[item.segment] || { color: '#8c8c8c', label: item.segment }
+      segmentBoundaries.push({
+        startIndex: idx,
+        segment: config.label,
+        color: config.color,
+      })
+      lastSegment = item.segment
+    }
+  })
+
+  const dates = allICIRData.map(d => d.date)
+  const icirValues = allICIRData.map(d => d.icir)
+
+  const markLineData: Array<{ xAxis: string; name: string; lineStyle: any }> = []
+  segmentBoundaries.forEach((boundary, idx) => {
+    if (idx > 0 && boundary.startIndex < dates.length) {
+      markLineData.push({
+        xAxis: dates[boundary.startIndex],
+        name: boundary.segment,
+        lineStyle: {
+          color: boundary.color,
+          type: 'dashed',
+          width: 2,
+        },
+      })
+    }
+  })
+
+  return (
+    <ReactECharts
+      option={{
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#fff',
+          borderColor: '#e8e8e8',
+          textStyle: { color: '#374151' },
+          formatter: (params: any) => {
+            if (!params || !params.length) return ''
+            const date = params[0].name
+            const icir = params[0].value
+            return `${date}<br/>滚动ICIR: ${icir?.toFixed(3) || '-'}`
+          },
+        },
+        legend: {
+          data: segmentBoundaries.map(b => b.segment),
+          textStyle: { color: '#6b7280' },
+          top: 0,
+        },
+        grid: { left: 70, right: 30, top: 40, bottom: 30 },
+        xAxis: {
+          type: 'category',
+          data: dates,
+          axisLabel: { color: '#9ca3af', fontSize: 10 },
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+        },
+        yAxis: {
+          type: 'value',
+          axisLabel: {
+            color: '#9ca3af',
+            formatter: (value: number) => value.toFixed(1),
+          },
+          splitLine: { lineStyle: { color: '#f0f0f0' } },
+          name: '滚动ICIR',
+          nameLocation: 'middle',
+          nameGap: 45,
+          nameTextStyle: { color: '#6b7280' },
+        },
+        series: [
+          {
+            name: '滚动ICIR',
+            type: 'line',
+            data: icirValues,
+            lineStyle: { width: 2, color: '#722ed1' },
+            itemStyle: { color: '#722ed1' },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: 'rgba(114,46,209,0.15)' },
+                  { offset: 1, color: 'rgba(114,46,209,0)' },
+                ],
+              },
+            },
+            markLine: {
+              silent: true,
+              symbol: 'none',
+              data: [
+                { yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } },
+                ...markLineData,
+              ],
+              label: {
+                show: true,
+                formatter: '{b}',
+                position: 'start',
+                color: '#6b7280',
+                fontSize: 10,
+              },
+            },
+          },
+        ],
+        dataZoom: [{ type: 'inside', start: 0, end: 100 }],
+      }}
+      style={{ height: 280 }}
+    />
+  )
+}
+
+// 新增：预测值 vs 标签值 散点图组件
+const InSampleScatterChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+  
+  const series: Array<Record<string, unknown>> = []
+  
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const predLabelData = segData.pred_label_data
+    
+    if (!predLabelData?.available || !predLabelData.scores || !predLabelData.labels) {
+      return
+    }
+    
+    const scores = predLabelData.scores
+    const labels = predLabelData.labels
+    
+    const sampleSize = Math.min(scores.length, 2000)
+    const step = Math.max(1, Math.floor(scores.length / sampleSize))
+    const sampledData: Array<[number, number]> = []
+    
+    for (let i = 0; i < scores.length; i += step) {
+      if (scores[i] != null && labels[i] != null && !isNaN(scores[i]) && !isNaN(labels[i])) {
+        sampledData.push([scores[i], labels[i]])
+      }
+    }
+    
+    if (sampledData.length > 0) {
+      series.push({
+        name: config.label,
+        type: 'scatter',
+        data: sampledData,
+        symbolSize: 3,
+        itemStyle: {
+          color: config.color,
+          opacity: 0.5,
+        },
+      })
+    }
+  })
+  
+  if (series.length === 0) {
+    return <Empty description="无预测值-标签值数据" style={{ padding: 40 }} />
+  }
+  
+  return (
+    <ReactECharts
+      option={{
+        tooltip: {
+          trigger: 'item',
+          backgroundColor: '#fff',
+          borderColor: '#e8e8e8',
+          textStyle: { color: '#374151' },
+          formatter: (params: any) => {
+            return `预测值: ${params.value[0]?.toFixed(4)}<br/>标签值: ${params.value[1]?.toFixed(4)}`
+          },
+        },
+        legend: {
+          data: series.map(s => s.name as string),
+          textStyle: { color: '#6b7280' },
+          top: 0,
+        },
+        grid: { left: 70, right: 30, top: 50, bottom: 50 },
+        xAxis: {
+          type: 'value',
+          name: '预测值 (Score)',
+          nameLocation: 'middle',
+          nameGap: 30,
+          axisLabel: { color: '#9ca3af' },
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+          splitLine: { lineStyle: { color: '#f0f0f0' } },
+        },
+        yAxis: {
+          type: 'value',
+          name: '标签值 (Label)',
+          nameLocation: 'middle',
+          nameGap: 50,
+          axisLabel: { color: '#9ca3af' },
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+          splitLine: { lineStyle: { color: '#f0f0f0' } },
+        },
+        series,
+      }}
+      style={{ height: 350 }}
+    />
+  )
+}
+
+// 新增：预测值分布直方图
+const InSampleScoreHistogramChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+  
+  const series: Array<Record<string, unknown>> = []
+  
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const predLabelData = segData.pred_label_data
+    
+    if (!predLabelData?.available || !predLabelData.score_histogram) {
+      return
+    }
+    
+    const histogram = predLabelData.score_histogram
+    
+    series.push({
+      name: config.label,
+      type: 'bar',
+      data: histogram.counts,
+      xAxisData: histogram.bin_centers.map((c: number) => c.toFixed(4)),
+      itemStyle: {
+        color: config.color,
+        opacity: 0.7,
+        borderRadius: [2, 2, 0, 0],
+      },
+    })
+  })
+  
+  if (series.length === 0) {
+    return <Empty description="无预测值分布数据" style={{ padding: 40 }} />
+  }
+  
+  const xAxisData = series[0].xAxisData as string[]
+  
+  return (
+    <ReactECharts
+      option={{
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#fff',
+          borderColor: '#e8e8e8',
+          textStyle: { color: '#374151' },
+        },
+        legend: {
+          data: series.map(s => s.name as string),
+          textStyle: { color: '#6b7280' },
+          top: 0,
+        },
+        grid: { left: 70, right: 30, top: 50, bottom: 60 },
+        xAxis: {
+          type: 'category',
+          data: xAxisData,
+          axisLabel: { color: '#9ca3af', fontSize: 9, rotate: 45 },
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+        },
+        yAxis: {
+          type: 'value',
+          name: '频次',
+          axisLabel: { color: '#9ca3af' },
+          splitLine: { lineStyle: { color: '#f0f0f0' } },
+        },
+        series: series.map(s => ({
+          name: s.name,
+          type: 'bar',
+          data: s.data,
+          itemStyle: s.itemStyle,
+        })),
+      }}
+      style={{ height: 300 }}
+    />
+  )
+}
+
+// 新增：标签值分布直方图
+const InSampleLabelHistogramChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+  
+  const series: Array<Record<string, unknown>> = []
+  
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const predLabelData = segData.pred_label_data
+    
+    if (!predLabelData?.available || !predLabelData.label_histogram) {
+      return
+    }
+    
+    const histogram = predLabelData.label_histogram
+    
+    series.push({
+      name: config.label,
+      type: 'bar',
+      data: histogram.counts,
+      xAxisData: histogram.bin_centers.map((c: number) => c.toFixed(4)),
+      itemStyle: {
+        color: config.color,
+        opacity: 0.7,
+        borderRadius: [2, 2, 0, 0],
+      },
+    })
+  })
+  
+  if (series.length === 0) {
+    return <Empty description="无标签值分布数据" style={{ padding: 40 }} />
+  }
+  
+  const xAxisData = series[0].xAxisData as string[]
+  
+  return (
+    <ReactECharts
+      option={{
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#fff',
+          borderColor: '#e8e8e8',
+          textStyle: { color: '#374151' },
+        },
+        legend: {
+          data: series.map(s => s.name as string),
+          textStyle: { color: '#6b7280' },
+          top: 0,
+        },
+        grid: { left: 70, right: 30, top: 50, bottom: 60 },
+        xAxis: {
+          type: 'category',
+          data: xAxisData,
+          axisLabel: { color: '#9ca3af', fontSize: 9, rotate: 45 },
+          axisLine: { lineStyle: { color: '#e5e7eb' } },
+        },
+        yAxis: {
+          type: 'value',
+          name: '频次',
+          axisLabel: { color: '#9ca3af' },
+          splitLine: { lineStyle: { color: '#f0f0f0' } },
+        },
+        series: series.map(s => ({
+          name: s.name,
+          type: 'bar',
+          data: s.data,
+          itemStyle: s.itemStyle,
+        })),
+      }}
+      style={{ height: 300 }}
+    />
+  )
+}
+
+// 新增：IC 综合分析图表（四条曲线：IC、ICIR、Rank IC、Rank ICIR）
+const InSampleICComprehensiveChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+
+  interface DataPoint {
+    date: string
+    rawDate: Date
+    segment: string
+    ic: number | null
+    icir: number | null
+    rankIc: number | null
+    rankIcir: number | null
+  }
+
+  const allData: DataPoint[] = []
+  const segmentBoundaries: Array<{ date: string; segment: string; color: string }> = []
+
+  // 计算每个segment的统计指标
+  const segmentStats: Record<string, { 
+    icValues: number[], 
+    rankIcValues: number[],
+    meanIC: number, 
+    meanRankIC: number,
+    icir: number,
+    rankIcir: number
+  }> = {}
+
+  orderedSegmentNames.forEach(segName => {
+    const segData = segments[segName]
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const icAnalysis = segData.ic_analysis
+    const rankIcAnalysis = segData.rank_ic_analysis
+
+    if (!icAnalysis?.available && !rankIcAnalysis?.available) {
+      return
+    }
+
+    const icDates = icAnalysis?.dates || []
+    const icValues = icAnalysis?.ic_values || []
+    const icirValues = icAnalysis?.rolling_icir || []
+    const rankIcDates = rankIcAnalysis?.dates || []
+    const rankIcValues = rankIcAnalysis?.rank_ic_values || []
+    const rankIcirValues = rankIcAnalysis?.rolling_rank_icir || []
+
+    // 计算该segment的统计指标
+    const segIcValues = icValues.filter((v): v is number => v != null && !isNaN(v))
+    const segRankIcValues = rankIcValues.filter((v): v is number => v != null && !isNaN(v))
+    
+    const meanIC = segIcValues.length > 0 ? segIcValues.reduce((a, b) => a + b, 0) / segIcValues.length : 0
+    const meanRankIC = segRankIcValues.length > 0 ? segRankIcValues.reduce((a, b) => a + b, 0) / segRankIcValues.length : 0
+    const stdIC = segIcValues.length > 1 ? Math.sqrt(segIcValues.map(v => (v - meanIC) ** 2).reduce((a, b) => a + b, 0) / segIcValues.length) : 0
+    const stdRankIC = segRankIcValues.length > 1 ? Math.sqrt(segRankIcValues.map(v => (v - meanRankIC) ** 2).reduce((a, b) => a + b, 0) / segRankIcValues.length) : 0
+
+    segmentStats[segName] = {
+      icValues: segIcValues,
+      rankIcValues: segRankIcValues,
+      meanIC,
+      meanRankIC,
+      icir: stdIC > 0 ? meanIC / stdIC : 0,
+      rankIcir: stdRankIC > 0 ? meanRankIC / stdRankIC : 0,
+    }
+
+    const dateSet = new Set([...icDates, ...rankIcDates])
+    const sortedDates = Array.from(dateSet).sort()
+
+    sortedDates.forEach(date => {
+      const icIdx = icDates.indexOf(date)
+      const rankIcIdx = rankIcDates.indexOf(date)
+
+      const ic = icIdx >= 0 && icValues[icIdx] != null && !isNaN(icValues[icIdx]) ? icValues[icIdx] : null
+      const icir = icIdx >= 0 && icirValues[icIdx] != null && !isNaN(icirValues[icIdx]!) ? icirValues[icIdx] : null
+      const rankIc = rankIcIdx >= 0 && rankIcValues[rankIcIdx] != null && !isNaN(rankIcValues[rankIcIdx]) ? rankIcValues[rankIcIdx] : null
+      const rankIcir = rankIcIdx >= 0 && rankIcirValues[rankIcIdx] != null && !isNaN(rankIcirValues[rankIcIdx]!) ? rankIcirValues[rankIcIdx] : null
+
+      if (ic !== null || icir !== null || rankIc !== null || rankIcir !== null) {
+        allData.push({
+          date,
+          rawDate: new Date(date),
+          segment: segName,
+          ic,
+          icir,
+          rankIc,
+          rankIcir,
+        })
+      }
+    })
+  })
+
+  if (allData.length === 0) {
+    return <Empty description="无IC分析数据" style={{ padding: 40 }} />
+  }
+
+  allData.sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime())
+
+  let lastSegment = ''
+  allData.forEach(item => {
+    if (item.segment !== lastSegment) {
+      const config = SEGMENT_CONFIG[item.segment] || { color: '#8c8c8c', label: item.segment }
+      segmentBoundaries.push({
+        date: item.date,
+        segment: config.label,
+        color: config.color,
+      })
+      lastSegment = item.segment
+    }
+  })
+
+  const dates = allData.map(d => d.date)
+  const icData = allData.map(d => d.ic)
+  const icirData = allData.map(d => d.icir)
+  const rankIcData = allData.map(d => d.rankIc)
+  const rankIcirData = allData.map(d => d.rankIcir)
+
+  const validIC = icData.filter(v => v !== null) as number[]
+  const validRankIC = rankIcData.filter(v => v !== null) as number[]
+  const meanIC = validIC.length > 0 ? validIC.reduce((a, b) => a + b, 0) / validIC.length : 0
+  const meanRankIC = validRankIC.length > 0 ? validRankIC.reduce((a, b) => a + b, 0) / validRankIC.length : 0
+
+  // 创建分隔线数据（和累计收益曲线一样的方案）
+  const markLineData: Array<{ xAxis: string; name: string; lineStyle: any; label: any }> = []
+  
+  segmentBoundaries.forEach((boundary, idx) => {
+    if (idx > 0) {
+      markLineData.push({
+        xAxis: boundary.date,
+        name: boundary.segment,
+        lineStyle: {
+          color: boundary.color,
+          type: 'dashed',
+          width: 2,
+        },
+        label: {
+          show: true,
+          formatter: boundary.segment,
+          position: 'start',
+          color: boundary.color,
+          fontSize: 11,
+        },
+      })
+    }
+  })
+
+  return (
+    <div>
+      {/* 分阶段统计指标 */}
+      <div style={{ marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        {orderedSegmentNames.map(segName => {
+          const stats = segmentStats[segName]
+          const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+          if (!stats) return null
+          return (
+            <div key={segName} style={{ padding: '4px 8px', background: '#fafafa', borderRadius: 4 }}>
+              <Tag color={config.color} style={{ marginRight: 4 }}>{config.label}</Tag>
+              <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
+                IC: <Text strong style={{ color: stats.meanIC > 0 ? '#52c41a' : '#ff4d4f' }}>{stats.meanIC.toFixed(4)}</Text>
+              </Text>
+              <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
+                RankIC: <Text strong style={{ color: stats.meanRankIC > 0 ? '#52c41a' : '#ff4d4f' }}>{stats.meanRankIC.toFixed(4)}</Text>
+              </Text>
+              <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
+                ICIR: <Text strong style={{ color: stats.icir > 0 ? '#52c41a' : '#ff4d4f' }}>{stats.icir.toFixed(2)}</Text>
+              </Text>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                RankICIR: <Text strong style={{ color: stats.rankIcir > 0 ? '#52c41a' : '#ff4d4f' }}>{stats.rankIcir.toFixed(2)}</Text>
+              </Text>
+            </div>
+          )
+        })}
+      </div>
+      
+      {/* 总体统计 */}
+      <div style={{ marginBottom: 12, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          总样本数: <Text strong>{validIC.length}</Text>
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          总体均值IC: <Text strong style={{ color: meanIC > 0 ? '#52c41a' : '#ff4d4f' }}>{meanIC.toFixed(4)}</Text>
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          总体均值Rank IC: <Text strong style={{ color: meanRankIC > 0 ? '#52c41a' : '#ff4d4f' }}>{meanRankIC.toFixed(4)}</Text>
+        </Text>
+        <Tooltip title={
+          <div>
+            <div><b>IC</b>: 日度信息系数，预测值与真实标签的Spearman相关系数</div>
+            <div><b>Rank IC</b>: 日度秩相关系数，预测值排名与标签排名的Pearson相关系数</div>
+            <div><b>ICIR</b>: IC信息比率 = Mean(IC) / Std(IC)</div>
+            <div><b>Rank ICIR</b>: Rank IC信息比率</div>
+          </div>
+        }>
+          <InfoCircleOutlined style={{ color: '#1677ff', cursor: 'pointer' }} />
+        </Tooltip>
+      </div>
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'axis',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any[]) => {
+              if (!params || !params.length) return ''
+              const date = params[0].name
+              let lines = [date]
+              params.forEach(p => {
+                if (p.value !== null && p.value !== undefined) {
+                  lines.push(`${p.marker}${p.seriesName}: ${p.value.toFixed(4)}`)
+                }
+              })
+              return lines.join('<br/>')
+            },
+          },
+          legend: {
+            data: ['IC', 'ICIR', 'Rank IC', 'Rank ICIR'],
+            textStyle: { color: '#6b7280' },
+            top: 0,
+            selected: {
+              'IC': true,
+              'ICIR': true,
+              'Rank IC': true,
+              'Rank ICIR': true,
+            },
+          },
+          grid: { left: 70, right: 30, top: 50, bottom: 60 },
+          xAxis: {
+            type: 'category',
+            data: dates,
+            axisLabel: {
+              color: '#9ca3af',
+              fontSize: 10,
+              rotate: 45,
+            },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+            splitLine: { show: false },
+          },
+          yAxis: {
+            type: 'value',
+            axisLabel: {
+              color: '#9ca3af',
+              formatter: (value: number) => value.toFixed(2),
+            },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+            name: '值',
+            nameLocation: 'middle',
+            nameGap: 45,
+            nameTextStyle: { color: '#6b7280' },
+          },
+          series: [
+            {
+              name: 'IC',
+              type: 'line',
+              data: icData,
+              lineStyle: { width: 1.5, color: '#1677ff' },
+              itemStyle: { color: '#1677ff' },
+              symbol: 'none',
+              connectNulls: false,
+              markLine: {
+                silent: true,
+                symbol: 'none',
+                data: [
+                  { yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } },
+                  ...markLineData,
+                ],
+                label: {
+                  show: true,
+                  formatter: '{b}',
+                  position: 'start',
+                  color: '#6b7280',
+                  fontSize: 10,
+                },
+              },
+            },
+            {
+              name: 'ICIR',
+              type: 'line',
+              data: icirData,
+              lineStyle: { width: 1.5, color: '#722ed1' },
+              itemStyle: { color: '#722ed1' },
+              symbol: 'none',
+              connectNulls: false,
+            },
+            {
+              name: 'Rank IC',
+              type: 'line',
+              data: rankIcData,
+              lineStyle: { width: 1.5, color: '#52c41a' },
+              itemStyle: { color: '#52c41a' },
+              symbol: 'none',
+              connectNulls: false,
+            },
+            {
+              name: 'Rank ICIR',
+              type: 'line',
+              data: rankIcirData,
+              lineStyle: { width: 1.5, color: '#fa8c16' },
+              itemStyle: { color: '#fa8c16' },
+              symbol: 'none',
+              connectNulls: false,
+            },
+          ],
+          dataZoom: [
+            {
+              type: 'slider',
+              start: 0,
+              end: 100,
+              height: 20,
+              bottom: 5,
+              borderColor: '#e5e7eb',
+              fillerColor: 'rgba(22,119,255,0.1)',
+              handleStyle: { color: '#1677ff' },
+            },
+            { type: 'inside', start: 0, end: 100 },
+          ],
+        }}
+        style={{ height: 400 }}
+        notMerge={true}
+      />
+      <div style={{ marginTop: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          <strong>说明：</strong>点击图例可隐藏/显示对应曲线。IC = Spearman相关系数，Rank IC = Pearson(rank(score), rank(label))，ICIR = IC均值/IC标准差。
+        </Text>
+      </div>
+    </div>
+  )
+}
+
+// 新增：IC 指标对比表格
+const InSampleICMetricsTable: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const segmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
+  
+  if (segmentNames.length === 0) {
+    return null
+  }
+
+  const hasICData = segmentNames.some(name => segments[name].ic_analysis?.available)
+  if (!hasICData) {
+    return null
+  }
+
+  const columns = [
+    {
+      title: 'IC指标',
+      dataIndex: 'metric',
+      key: 'metric',
+      fixed: 'left' as const,
+      width: 120,
+      render: (text: string) => <Text strong style={{ color: '#374151' }}>{text}</Text>,
+    },
+    ...segmentNames.map(segName => {
+      const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+      return {
+        title: <Tag color={config.color}>{config.label}</Tag>,
+        dataIndex: segName,
+        key: segName,
+        align: 'right' as const,
+        render: (value: string) => (
+          <Text style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}>
+            {value}
+          </Text>
+        ),
+      }
+    }),
+  ]
+
+  const metrics = [
+    { key: 'mean_ic', label: '均值IC', format: (v: number) => v.toFixed(4) },
+    { key: 'std_ic', label: 'IC标准差', format: (v: number) => v.toFixed(4) },
+    { key: 'icir', label: 'ICIR', format: (v: number) => v.toFixed(3) },
+    { key: 'hit_rate', label: 'IC胜率', format: (v: number) => `${(v * 100).toFixed(1)}%` },
+  ]
+
+  const dataSource = metrics.map(metric => {
+    const row: Record<string, any> = {
+      key: metric.key,
+      metric: metric.label,
+    }
+    segmentNames.forEach(segName => {
+      const ic = segments[segName].ic_analysis
+      const value = ic?.[metric.key as keyof typeof ic]
+      row[segName] = value != null ? metric.format(value as number) : '-'
+    })
+    return row
+  })
+
+  return (
+    <Table
+      size="small"
+      dataSource={dataSource}
+      columns={columns}
+      pagination={false}
+      scroll={{ x: 'max-content' }}
+      bordered
+    />
+  )
+}
+
 interface InSampleAnalysisPanelProps {
   expId: string
   runId: string
@@ -2131,7 +3722,27 @@ const InSampleAnalysisPanel: React.FC<InSampleAnalysisPanelProps> = ({ expId, ru
   // 首先尝试加载已有的 In-Sample 结果
   const { data: existingResult, isLoading: isLoadingExisting } = useQuery({
     queryKey: ['insample-existing', expId, runId],
-    queryFn: () => trainingService.getExistingInSampleResults(expId, runId),
+    queryFn: async () => {
+      console.log('[InSample] Fetching existing results for:', { expId, runId })
+      const result = await trainingService.getExistingInSampleResults(expId, runId)
+      console.log('[InSample] Existing result:', result)
+      if (result?.data?.segments) {
+        Object.entries(result.data.segments).forEach(([name, seg]) => {
+          const segData = seg as any
+          console.log(`[InSample] Segment ${name}:`, {
+            hasIC: !!segData.ic_analysis,
+            hasRankIC: !!segData.rank_ic_analysis,
+            icAvailable: segData.ic_analysis?.available,
+            rankICAvailable: segData.rank_ic_analysis?.available,
+            icDates: segData.ic_analysis?.dates?.length,
+            icValues: segData.ic_analysis?.ic_values?.length,
+            rankICDates: segData.rank_ic_analysis?.dates?.length,
+            rankICValues: segData.rank_ic_analysis?.rank_ic_values?.length,
+          })
+        })
+      }
+      return result
+    },
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
@@ -2238,6 +3849,23 @@ const InSampleAnalysisPanel: React.FC<InSampleAnalysisPanelProps> = ({ expId, ru
             </Card>
           </Col>
 
+          {/* IC 综合分析图表（移到回测曲线之后） */}
+          <Col span={24}>
+            <Card 
+              title={
+                <Space>
+                  <span>IC 综合分析</span>
+                  <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                    （IC/ICIR/Rank IC/Rank ICIR，点击图例可隐藏曲线）
+                  </Text>
+                </Space>
+              } 
+              size="small"
+            >
+              <InSampleICComprehensiveChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
           {/* 回撤曲线对比 */}
           <Col span={24}>
             <Card title="回撤曲线对比" size="small">
@@ -2261,6 +3889,27 @@ const InSampleAnalysisPanel: React.FC<InSampleAnalysisPanelProps> = ({ expId, ru
           <Col xs={24} lg={12}>
             <Card title="日收益率分布对比" size="small">
               <InSampleDailyReturnDistributionChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 预测值 vs 标签值 散点图 */}
+          <Col xs={24} lg={12}>
+            <Card title="预测值 vs 标签值 散点图" size="small">
+              <InSampleScatterChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 预测值分布直方图 */}
+          <Col xs={24} lg={12}>
+            <Card title="预测值分布" size="small">
+              <InSampleScoreHistogramChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 标签值分布直方图 */}
+          <Col xs={24} lg={12}>
+            <Card title="标签值分布" size="small">
+              <InSampleLabelHistogramChart segments={result.data.segments} />
             </Card>
           </Col>
         </Row>
@@ -2352,7 +4001,7 @@ const ReportPage: React.FC = () => {
             suffix="%"
             format={(v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}`}
             color="#52c41a"
-            tooltip="累计收益率 = (1 + r1) * (1 + r2) * ... * (1 + rn) - 1"
+            tooltip="复利累计: (1+r1)*(1+r2)*...*(1+rn)-1"
             isCalculated={true}
           />
         </Col>
@@ -2363,7 +4012,7 @@ const ReportPage: React.FC = () => {
             suffix="%"
             format={(v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}`}
             color="#52c41a"
-            tooltip="含交易成本的年化收益率 (with_cost)"
+            tooltip="复利年化: (1+累计收益)^(252/天数)-1，含交易成本"
           />
         </Col>
         <Col xs={12} sm={6} md={4}>
@@ -2383,16 +4032,16 @@ const ReportPage: React.FC = () => {
             suffix="%"
             format={(v) => `${(Math.abs(v) * 100).toFixed(2)}`}
             color="#ff4d4f"
-            tooltip="含交易成本的最大回撤 (with_cost)"
+            tooltip="复利回撤: (累计净值/历史最高净值-1)的最小值，含交易成本"
           />
         </Col>
         <Col xs={12} sm={6} md={4}>
           <MetricCard
-            title="信息比率(ICIR)"
+            title="信息比率"
             value={km?.icir ?? km?.information_ratio ?? null}
             format={(v) => v.toFixed(3)}
             color="#1677ff"
-            tooltip="ICIR = IC均值 / IC标准差"
+            tooltip="IR = mean(策略收益-基准收益) / std(策略收益-基准收益) * sqrt(252)"
           />
         </Col>
         <Col xs={12} sm={6} md={4}>
@@ -2481,22 +4130,43 @@ const ReportPage: React.FC = () => {
           },
           {
             key: 'metrics',
-            label: <span><TableOutlined /> 完整指标</span>,
+            label: (
+              <Tooltip title="指标基于QLib单利计算: 累计收益=sum(r)，年化收益=mean(r)*252">
+                <span><TableOutlined /> 完整指标</span>
+              </Tooltip>
+            ),
             children: (
               <FullMetricsTable metrics={report.all_metrics_raw} />
             ),
           },
           {
             key: 'qlib',
-            label: <span><BarChartOutlined /> QLib分析</span>,
+            label: (
+              <Tooltip title="QLib标准分析图表，基于单利计算">
+                <span><BarChartOutlined /> QLib分析</span>
+              </Tooltip>
+            ),
             children: (
               <QLibAnalysisPanel expId={expId!} runId={runId!} />
             ),
           },
           {
             key: 'insample',
-            label: <span><ExperimentOutlined /> In-Sample分析</span>,
+            label: (
+              <Tooltip title="In-Sample分析，基于复利计算">
+                <span><ExperimentOutlined /> In-Sample分析</span>
+              </Tooltip>
+            ),
             children: <InSampleAnalysisPanel expId={expId!} runId={runId!} externalTrigger={inSampleTrigger} />,
+          },
+          {
+            key: 'interpretability',
+            label: (
+              <Tooltip title="模型可解释性分析：特征重要性与SHAP值">
+                <span><BulbOutlined /> 模型解释</span>
+              </Tooltip>
+            ),
+            children: <ModelInterpretabilityPanel expId={expId!} runId={runId!} />,
           },
         ]}
       />

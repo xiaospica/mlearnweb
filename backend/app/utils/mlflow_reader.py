@@ -44,10 +44,32 @@ class MLFlowReader:
             print(f"[MLFlowReader] File not found: {filepath}", file=__import__('sys').stderr)
             return None
         try:
+            import io
             with open(filepath, "rb") as f:
-                data = pickle.load(f)
-                print(f"[MLFlowReader] Loaded pickle: type={type(data)}, shape={getattr(data, 'shape', 'N/A')}", file=__import__('sys').stderr)
-                return data
+                content = f.read()
+            
+            class NumpyUnpickler(pickle.Unpickler):
+                def find_class(self, module, name):
+                    if module == 'numpy.core.multiarray' or module == 'numpy._core.multiarray':
+                        if name == '_reconstruct':
+                            return np.ndarray.__new__
+                        if name == 'scalar':
+                            return np.core.multiarray.scalar
+                    if module == 'numpy' and name == 'dtype':
+                        return np.dtype
+                    if module == 'numpy.core.numeric' or module == 'numpy._core.numeric':
+                        return getattr(np.core.numeric, name, getattr(np, name, None))
+                    return super().find_class(module, name)
+            
+            try:
+                data = NumpyUnpickler(io.BytesIO(content)).load()
+            except Exception as inner_e:
+                print(f"[MLFlowReader] NumpyUnpickler failed, trying default: {inner_e}", file=__import__('sys').stderr)
+                with open(filepath, "rb") as f:
+                    data = pickle.load(f)
+            
+            print(f"[MLFlowReader] Loaded pickle: type={type(data)}, shape={getattr(data, 'shape', 'N/A')}", file=__import__('sys').stderr)
+            return data
         except Exception as e:
             print(f"[MLFlowReader] Error loading pickle {filepath}: {e}", file=__import__('sys').stderr)
             import traceback

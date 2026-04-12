@@ -370,7 +370,21 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False, run_m
 
 
 class InSampleBacktestService:
-    """In-Sample 回测服务 - 对已有 MLflow Run 执行 train/valid/test 多 segment 预测和回测"""
+    """In-Sample 回测服务 - 对已有 MLflow Run 执行 train/valid/test 多 segment 预测和回测
+
+    ⚠️ 功能冻结 - 后续修复
+    ============================
+    此功能当前已禁用，存在以下已知问题：
+    1. 前端 insample 回测功能已禁用
+    2. 后端代码有 bug，暂时冻结
+    3. insample 数据现在通过训练阶段的 MULTI_SEGMENT_RECORD_CONFIG 获取
+
+    后续修复计划：
+    - 修复 IC 分析中 train/valid segment 的 label 加载问题
+    - 优化多 segment 数据加载逻辑
+
+    如需启用，请联系开发者。
+    """
 
     @staticmethod
     def run_insample_backtest(
@@ -504,6 +518,9 @@ class InSampleBacktestService:
         Returns:
             包含已有结果的字典，包括风险指标、累计收益序列、回撤序列、换手率等详细数据
         """
+        import sys
+        print(f"[InSampleBacktestService] load_existing_results called for exp={experiment_id}, run={run_id}", file=sys.stderr)
+        
         from app.core.config import settings
         import pickle
 
@@ -511,9 +528,12 @@ class InSampleBacktestService:
         run_path = mlruns_dir / experiment_id / run_id
 
         if not run_path.exists():
+            print(f"[InSampleBacktestService] Run path not found: {run_path}", file=sys.stderr)
             return {"success": False, "message": f"Run 目录不存在: {run_path}", "data": None}
 
         artifacts_path = run_path / "artifacts"
+        print(f"[InSampleBacktestService] Artifacts path: {artifacts_path}", file=sys.stderr)
+        
         results = {
             "run_id": run_id,
             "experiment_id": experiment_id,
@@ -527,11 +547,14 @@ class InSampleBacktestService:
         }
 
         for seg_name, seg_dir in segment_dirs.items():
+            print(f"[InSampleBacktestService] Checking segment {seg_name}: {seg_dir}, exists={seg_dir.exists()}", file=sys.stderr)
+            
             if not seg_dir.exists():
                 continue
 
             report_file = seg_dir / "report_normal_1day.pkl"
             if not report_file.exists():
+                print(f"[InSampleBacktestService] Report file not found: {report_file}", file=sys.stderr)
                 continue
 
             try:
@@ -539,10 +562,12 @@ class InSampleBacktestService:
                     report_df = pickle.load(f)
 
                 if report_df is None or report_df.empty:
+                    print(f"[InSampleBacktestService] Report is empty for {seg_name}", file=sys.stderr)
                     continue
 
                 returns = report_df["return"].dropna() if "return" in report_df.columns else pd.Series()
                 if returns.empty:
+                    print(f"[InSampleBacktestService] Returns is empty for {seg_name}", file=sys.stderr)
                     continue
 
                 # 获取日期索引
@@ -658,8 +683,79 @@ class InSampleBacktestService:
                 }
 
                 # 尝试加载 IC 分析数据
+                # 路径1: artifacts 目录下的 ic_analysis.json (MultiSegmentSignalRecord 生成的，包含IC和RankIC)
+                ic_json_file_test = seg_dir.parent / "ic_analysis.json" if seg_name == "test" else seg_dir.parent / f"ic_analysis_{seg_name}.json"
+                # 路径2: segment目录下的ic_analysis.pkl
                 ic_file = seg_dir / "ic_analysis.pkl"
-                if ic_file.exists():
+                # 路径3: insample_analysis目录下的JSON文件
+                ic_json_file_insample = seg_dir.parent / "insample_analysis" / f"ic_analysis_{seg_name}.json"
+                # 路径4: sig_analysis目录下的ic.pkl (SigAnaRecord生成的)
+                sig_analysis_dir = seg_dir.parent / "sig_analysis"
+                sig_ic_file = sig_analysis_dir / "ic.pkl"
+                sig_ric_file = sig_analysis_dir / "ric.pkl"
+                
+                print(f"[InSampleBacktestService] IC JSON file (MultiSegment): {ic_json_file_test}, exists={ic_json_file_test.exists()}", file=sys.stderr)
+                print(f"[InSampleBacktestService] IC JSON file (insample): {ic_json_file_insample}, exists={ic_json_file_insample.exists()}", file=sys.stderr)
+                print(f"[InSampleBacktestService] IC PKL file: {ic_file}, exists={ic_file.exists()}", file=sys.stderr)
+                print(f"[InSampleBacktestService] Sig IC file: {sig_ic_file}, exists={sig_ic_file.exists()}", file=sys.stderr)
+                
+                ic_data_loaded = False
+                rank_ic_loaded = False
+                
+                # 优先尝试加载 MultiSegmentSignalRecord 生成的 JSON 格式 IC 数据（包含IC和RankIC）
+                if ic_json_file_test.exists():
+                    try:
+                        import json
+                        with open(ic_json_file_test, "r") as f:
+                            ic_json_data = json.load(f)
+                        print(f"[InSampleBacktestService] MultiSegment IC JSON data: available={ic_json_data.get('available')}, dates={len(ic_json_data.get('dates', []))}", file=sys.stderr)
+                        if ic_json_data and ic_json_data.get("available"):
+                            segment_result["ic_analysis"] = {
+                                "available": True,
+                                "dates": ic_json_data.get("dates", []),
+                                "ic_values": ic_json_data.get("ic_values", []),
+                                "mean_ic": ic_json_data.get("mean_ic"),
+                                "std_ic": ic_json_data.get("std_ic"),
+                                "icir": ic_json_data.get("icir"),
+                                "hit_rate": ic_json_data.get("hit_rate"),
+                                "rolling_icir": ic_json_data.get("rolling_icir"),
+                                "rolling_window": ic_json_data.get("rolling_window"),
+                            }
+                            ic_data_loaded = True
+                            # 同时加载 Rank IC 数据
+                            if ic_json_data.get("rank_ic_values"):
+                                segment_result["rank_ic_analysis"] = {
+                                    "available": True,
+                                    "dates": ic_json_data.get("dates", []),
+                                    "rank_ic_values": ic_json_data.get("rank_ic_values", []),
+                                    "mean_rank_ic": ic_json_data.get("mean_rank_ic"),
+                                    "std_rank_ic": ic_json_data.get("std_rank_ic"),
+                                    "rank_icir": ic_json_data.get("rank_icir"),
+                                    "hit_rate": ic_json_data.get("rank_hit_rate"),
+                                    "rolling_rank_icir": ic_json_data.get("rolling_rank_icir"),
+                                    "rolling_window": ic_json_data.get("rolling_window"),
+                                }
+                                rank_ic_loaded = True
+                            print(f"[InSampleBacktestService] MultiSegment IC JSON loaded for {seg_name}, rank_ic_loaded={rank_ic_loaded}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading MultiSegment IC JSON {seg_name}: {e}", file=sys.stderr)
+                
+                # 回退到 insample_analysis 目录下的 JSON 文件
+                if not ic_data_loaded and ic_json_file_insample.exists():
+                    try:
+                        import json
+                        with open(ic_json_file_insample, "r") as f:
+                            ic_json_data = json.load(f)
+                        print(f"[InSampleBacktestService] IC JSON data: available={ic_json_data.get('available')}, dates={len(ic_json_data.get('dates', []))}", file=sys.stderr)
+                        if ic_json_data and ic_json_data.get("available"):
+                            segment_result["ic_analysis"] = ic_json_data
+                            ic_data_loaded = True
+                            print(f"[InSampleBacktestService] IC JSON loaded for {seg_name}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading IC JSON {seg_name}: {e}", file=sys.stderr)
+                
+                # 回退到 PKL 格式 (segment目录)
+                if not ic_data_loaded and ic_file.exists():
                     try:
                         with open(ic_file, "rb") as f:
                             ic_data = pickle.load(f)
@@ -667,6 +763,16 @@ class InSampleBacktestService:
                             ic_values = ic_data.iloc[:, 0].tolist() if hasattr(ic_data, 'iloc') else ic_data.tolist()
                             ic_dates = [str(d)[:10] for d in ic_data.index] if hasattr(ic_data, 'index') else list(range(len(ic_values)))
                             ic_arr = np.array([v for v in ic_values if v is not None and not np.isnan(v)])
+                            
+                            # 计算滚动 ICIR
+                            rolling_window = min(20, len(ic_arr))
+                            rolling_icir = None
+                            if len(ic_arr) >= rolling_window:
+                                ic_series = pd.Series(ic_arr)
+                                rolling_mean = ic_series.rolling(window=rolling_window).mean()
+                                rolling_std = ic_series.rolling(window=rolling_window).std()
+                                rolling_icir = (rolling_mean / rolling_std).tolist()
+                            
                             segment_result["ic_analysis"] = {
                                 "available": True,
                                 "dates": ic_dates,
@@ -675,10 +781,294 @@ class InSampleBacktestService:
                                 "std_ic": float(np.std(ic_arr)) if len(ic_arr) > 0 else None,
                                 "icir": float(np.mean(ic_arr) / np.std(ic_arr)) if len(ic_arr) > 0 and np.std(ic_arr) > 0 else None,
                                 "hit_rate": float((ic_arr > 0).mean()) if len(ic_arr) > 0 else None,
+                                "rolling_icir": rolling_icir,
+                                "rolling_window": rolling_window,
                             }
-                    except Exception:
-                        pass
+                            ic_data_loaded = True
+                            print(f"[InSampleBacktestService] IC PKL loaded from segment dir for {seg_name}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading IC PKL {seg_name}: {e}")
+                
+                # 尝试从 sig_analysis 目录加载 IC 数据 (SigAnaRecord生成的，只针对test segment)
+                if not ic_data_loaded and sig_ic_file.exists() and seg_name == "test":
+                    try:
+                        with open(sig_ic_file, "rb") as f:
+                            ic_data = pickle.load(f)
+                        if ic_data is not None and not ic_data.empty:
+                            print(f"[InSampleBacktestService] Sig IC data type: {type(ic_data)}, shape: {getattr(ic_data, 'shape', 'N/A')}", file=sys.stderr)
+                            
+                            # 处理不同的数据格式
+                            if isinstance(ic_data, pd.DataFrame):
+                                ic_values = ic_data.iloc[:, 0].tolist()
+                                ic_dates = [str(d)[:10] for d in ic_data.index]
+                            elif isinstance(ic_data, pd.Series):
+                                ic_values = ic_data.tolist()
+                                ic_dates = [str(d)[:10] for d in ic_data.index]
+                            else:
+                                ic_values = list(ic_data)
+                                ic_dates = list(range(len(ic_values)))
+                            
+                            ic_arr = np.array([v for v in ic_values if v is not None and not np.isnan(v)])
+                            
+                            if len(ic_arr) > 0:
+                                # 计算滚动 ICIR
+                                rolling_window = min(20, len(ic_arr))
+                                rolling_icir = None
+                                if len(ic_arr) >= rolling_window:
+                                    ic_series = pd.Series(ic_arr)
+                                    rolling_mean = ic_series.rolling(window=rolling_window).mean()
+                                    rolling_std = ic_series.rolling(window=rolling_window).std()
+                                    rolling_icir = (rolling_mean / rolling_std).tolist()
+                                
+                                segment_result["ic_analysis"] = {
+                                    "available": True,
+                                    "dates": ic_dates,
+                                    "ic_values": ic_values,
+                                    "mean_ic": float(np.mean(ic_arr)),
+                                    "std_ic": float(np.std(ic_arr)),
+                                    "icir": float(np.mean(ic_arr) / np.std(ic_arr)) if np.std(ic_arr) > 0 else 0,
+                                    "hit_rate": float((ic_arr > 0).mean()),
+                                    "rolling_icir": rolling_icir,
+                                    "rolling_window": rolling_window,
+                                }
+                                ic_data_loaded = True
+                                mean_ic = np.mean(ic_arr)
+                                std_ic = np.std(ic_arr)
+                                icir_val = mean_ic / std_ic if std_ic > 0 else 0
+                                print(f"[InSampleBacktestService] Sig IC loaded for {seg_name}: mean_ic={mean_ic:.4f}, icir={icir_val:.4f}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading sig IC for {seg_name}: {e}", file=sys.stderr)
 
+                # 尝试加载 Rank IC 分析数据
+                rank_ic_json_file = seg_dir.parent / "insample_analysis" / f"rank_ic_analysis_{seg_name}.json"
+                print(f"[InSampleBacktestService] Rank IC JSON file: {rank_ic_json_file}, exists={rank_ic_json_file.exists()}", file=sys.stderr)
+                print(f"[InSampleBacktestService] Sig RIC file: {sig_ric_file}, exists={sig_ric_file.exists()}", file=sys.stderr)
+                
+                rank_ic_loaded = False
+                
+                if rank_ic_json_file.exists():
+                    try:
+                        import json
+                        with open(rank_ic_json_file, "r") as f:
+                            rank_ic_json_data = json.load(f)
+                        print(f"[InSampleBacktestService] Rank IC JSON data: available={rank_ic_json_data.get('available')}, dates={len(rank_ic_json_data.get('dates', []))}", file=sys.stderr)
+                        if rank_ic_json_data and rank_ic_json_data.get("available"):
+                            segment_result["rank_ic_analysis"] = rank_ic_json_data
+                            rank_ic_loaded = True
+                            print(f"[InSampleBacktestService] Rank IC JSON loaded for {seg_name}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading Rank IC JSON {seg_name}: {e}", file=sys.stderr)
+                
+                # 尝试从 sig_analysis 目录加载 Rank IC 数据
+                if not rank_ic_loaded and sig_ric_file.exists() and seg_name == "test":
+                    try:
+                        with open(sig_ric_file, "rb") as f:
+                            ric_data = pickle.load(f)
+                        if ric_data is not None and not ric_data.empty:
+                            print(f"[InSampleBacktestService] Sig RIC data type: {type(ric_data)}, shape: {getattr(ric_data, 'shape', 'N/A')}", file=sys.stderr)
+                            
+                            # 处理不同的数据格式
+                            if isinstance(ric_data, pd.DataFrame):
+                                ric_values = ric_data.iloc[:, 0].tolist()
+                                ric_dates = [str(d)[:10] for d in ric_data.index]
+                            elif isinstance(ric_data, pd.Series):
+                                ric_values = ric_data.tolist()
+                                ric_dates = [str(d)[:10] for d in ric_data.index]
+                            else:
+                                ric_values = list(ric_data)
+                                ric_dates = list(range(len(ric_values)))
+                            
+                            ric_arr = np.array([v for v in ric_values if v is not None and not np.isnan(v)])
+                            
+                            if len(ric_arr) > 0:
+                                # 计算滚动 Rank ICIR
+                                rolling_window = min(20, len(ric_arr))
+                                rolling_ricir = None
+                                if len(ric_arr) >= rolling_window:
+                                    ric_series = pd.Series(ric_arr)
+                                    rolling_mean = ric_series.rolling(window=rolling_window).mean()
+                                    rolling_std = ric_series.rolling(window=rolling_window).std()
+                                    rolling_ricir = (rolling_mean / rolling_std).tolist()
+                                
+                                segment_result["rank_ic_analysis"] = {
+                                    "available": True,
+                                    "dates": ric_dates,
+                                    "rank_ic_values": ric_values,
+                                    "mean_rank_ic": float(np.mean(ric_arr)),
+                                    "std_rank_ic": float(np.std(ric_arr)),
+                                    "rank_icir": float(np.mean(ric_arr) / np.std(ric_arr)) if np.std(ric_arr) > 0 else 0,
+                                    "hit_rate": float((ric_arr > 0).mean()),
+                                    "rolling_rank_icir": rolling_ricir,
+                                    "rolling_window": rolling_window,
+                                }
+                                rank_ic_loaded = True
+                                mean_ric = np.mean(ric_arr)
+                                std_ric = np.std(ric_arr)
+                                ricir_val = mean_ric / std_ric if std_ric > 0 else 0
+                                print(f"[InSampleBacktestService] Sig RIC loaded for {seg_name}: mean_ric={mean_ric:.4f}, ricir={ricir_val:.4f}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[InSampleBacktestService] Error loading sig RIC for {seg_name}: {e}", file=sys.stderr)
+
+                # 方法5: 从 pred 和 label 文件计算 IC（适用于所有 segment）
+                # 同时计算 pred_label_data 用于散点图和直方图
+                try:
+                    pred_filename = "pred.pkl" if seg_name == "test" else f"pred_{seg_name}.pkl"
+                    pred_path = run_path / "artifacts" / pred_filename
+                    label_filename = "label.pkl" if seg_name == "test" else f"label_{seg_name}.pkl"
+                    label_path = run_path / "artifacts" / label_filename
+                    
+                    print(f"[InSampleBacktestService] Checking pred/label for {seg_name}", file=sys.stderr)
+                    print(f"[InSampleBacktestService] pred_path: {pred_path}, exists={pred_path.exists()}", file=sys.stderr)
+                    print(f"[InSampleBacktestService] label_path: {label_path}, exists={label_path.exists()}", file=sys.stderr)
+                    
+                    if pred_path.exists() and label_path.exists():
+                        with open(pred_path, "rb") as f:
+                            pred_df = pickle.load(f)
+                        with open(label_path, "rb") as f:
+                            label_df = pickle.load(f)
+                        
+                        print(f"[InSampleBacktestService] pred_df shape: {pred_df.shape}, index names: {pred_df.index.names if hasattr(pred_df.index, 'names') else 'N/A'}", file=sys.stderr)
+                        print(f"[InSampleBacktestService] label_df shape: {label_df.shape}, index names: {label_df.index.names if hasattr(label_df.index, 'names') else 'N/A'}", file=sys.stderr)
+                        
+                        # 对齐索引
+                        common_index = pred_df.index.intersection(label_df.index)
+                        print(f"[InSampleBacktestService] common_index size: {len(common_index)}", file=sys.stderr)
+                        
+                        if len(common_index) > 0:
+                            pred_aligned = pred_df.loc[common_index]
+                            label_aligned = label_df.loc[common_index]
+                            
+                            # 计算 pred_label_data 用于散点图和直方图
+                            scores_all = pred_aligned.iloc[:, 0].values if hasattr(pred_aligned, 'iloc') else pred_aligned.values.flatten()
+                            labels_all = label_aligned.iloc[:, 0].values if hasattr(label_aligned, 'iloc') else label_aligned.values.flatten()
+                            
+                            valid_mask = ~(np.isnan(scores_all) | np.isnan(labels_all))
+                            scores_valid = scores_all[valid_mask]
+                            labels_valid = labels_all[valid_mask]
+                            
+                            if len(scores_valid) > 0:
+                                from scipy.stats import pearsonr
+                                corr, _ = pearsonr(scores_valid, labels_valid)
+                                
+                                def compute_histogram(values, n_bins=30):
+                                    if len(values) == 0:
+                                        return None
+                                    min_val, max_val = np.min(values), np.max(values)
+                                    if min_val == max_val:
+                                        return {"counts": [len(values)], "bins": [min_val, max_val], "bin_centers": [min_val]}
+                                    bin_edges = np.linspace(min_val, max_val, n_bins + 1)
+                                    counts, _ = np.histogram(values, bins=bin_edges)
+                                    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                                    return {
+                                        "counts": counts.tolist(),
+                                        "bins": bin_edges.tolist(),
+                                        "bin_centers": bin_centers.tolist(),
+                                    }
+                                
+                                segment_result["pred_label_data"] = {
+                                    "available": True,
+                                    "scores": scores_valid.tolist()[:5000],
+                                    "labels": labels_valid.tolist()[:5000],
+                                    "correlation": float(corr),
+                                    "count": len(scores_valid),
+                                    "score_mean": float(np.mean(scores_valid)),
+                                    "score_std": float(np.std(scores_valid)),
+                                    "label_mean": float(np.mean(labels_valid)),
+                                    "label_std": float(np.std(labels_valid)),
+                                    "score_histogram": compute_histogram(scores_valid),
+                                    "label_histogram": compute_histogram(labels_valid),
+                                }
+                                print(f"[InSampleBacktestService] Added pred_label_data for {seg_name}: count={len(scores_valid)}, corr={corr:.4f}", file=sys.stderr)
+                            
+                            # 如果 IC 或 Rank IC 未加载，则计算
+                            if not ic_data_loaded or not rank_ic_loaded:
+                                print(f"[InSampleBacktestService] Computing IC from pred/label for {seg_name}", file=sys.stderr)
+                                # 按日期分组计算 IC
+                                if hasattr(pred_aligned.index, 'get_level_values'):
+                                    from scipy import stats
+                                    dates = pred_aligned.index.get_level_values(0).unique()
+                                    ic_values = []
+                                    rank_ic_values = []
+                                    ic_dates = []
+                                    
+                                    for date in dates:
+                                        try:
+                                            pred_day = pred_aligned.loc[date]
+                                            label_day = label_aligned.loc[date]
+                                            
+                                            pred_vals = pred_day.iloc[:, 0].values if hasattr(pred_day, 'iloc') else pred_day.values
+                                            label_vals = label_day.iloc[:, 0].values if hasattr(label_day, 'iloc') else label_day.values
+                                            
+                                            if len(pred_vals) > 1 and len(label_vals) > 1:
+                                                # IC (Spearman)
+                                                ic, _ = stats.spearmanr(pred_vals, label_vals)
+                                                if not np.isnan(ic):
+                                                    ic_values.append(ic)
+                                                    
+                                                # Rank IC (Pearson on ranks)
+                                                pred_rank = pd.Series(pred_vals).rank()
+                                                label_rank = pd.Series(label_vals).rank()
+                                                rank_ic, _ = stats.pearsonr(pred_rank, label_rank)
+                                                if not np.isnan(rank_ic):
+                                                    rank_ic_values.append(rank_ic)
+                                                
+                                                ic_dates.append(str(date)[:10])
+                                        except Exception as day_e:
+                                            pass
+                                    
+                                    print(f"[InSampleBacktestService] Computed {len(ic_values)} IC values for {seg_name}", file=sys.stderr)
+                                    
+                                    if ic_values and not ic_data_loaded:
+                                        ic_arr = np.array(ic_values)
+                                        rolling_window = min(20, len(ic_arr))
+                                        rolling_icir = None
+                                        if len(ic_arr) >= rolling_window:
+                                            ic_series = pd.Series(ic_arr)
+                                            rolling_mean = ic_series.rolling(window=rolling_window).mean()
+                                            rolling_std = ic_series.rolling(window=rolling_window).std()
+                                            rolling_icir = (rolling_mean / rolling_std).tolist()
+                                        
+                                        segment_result["ic_analysis"] = {
+                                            "available": True,
+                                            "dates": ic_dates,
+                                            "ic_values": ic_values,
+                                            "mean_ic": float(np.mean(ic_arr)),
+                                            "std_ic": float(np.std(ic_arr)),
+                                            "icir": float(np.mean(ic_arr) / np.std(ic_arr)) if np.std(ic_arr) > 0 else 0,
+                                            "hit_rate": float((ic_arr > 0).mean()),
+                                            "rolling_icir": rolling_icir,
+                                            "rolling_window": rolling_window,
+                                        }
+                                        ic_data_loaded = True
+                                        print(f"[InSampleBacktestService] Computed IC for {seg_name}: mean_ic={np.mean(ic_arr):.4f}", file=sys.stderr)
+                                    
+                                    if rank_ic_values and not rank_ic_loaded:
+                                        ric_arr = np.array(rank_ic_values)
+                                        rolling_window = min(20, len(ric_arr))
+                                        rolling_ricir = None
+                                        if len(ric_arr) >= rolling_window:
+                                            ric_series = pd.Series(ric_arr)
+                                            rolling_mean = ric_series.rolling(window=rolling_window).mean()
+                                            rolling_std = ric_series.rolling(window=rolling_window).std()
+                                            rolling_ricir = (rolling_mean / rolling_std).tolist()
+                                        
+                                        segment_result["rank_ic_analysis"] = {
+                                            "available": True,
+                                            "dates": ic_dates,
+                                            "rank_ic_values": rank_ic_values,
+                                            "mean_rank_ic": float(np.mean(ric_arr)),
+                                            "std_rank_ic": float(np.std(ric_arr)),
+                                            "rank_icir": float(np.mean(ric_arr) / np.std(ric_arr)) if np.std(ric_arr) > 0 else 0,
+                                            "hit_rate": float((ric_arr > 0).mean()),
+                                            "rolling_rank_icir": rolling_ricir,
+                                            "rolling_window": rolling_window,
+                                        }
+                                        rank_ic_loaded = True
+                                        print(f"[InSampleBacktestService] Computed Rank IC for {seg_name}: mean_ric={np.mean(ric_arr):.4f}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[InSampleBacktestService] Error computing IC from pred/label for {seg_name}: {e}", file=sys.stderr)
+
+                print(f"[InSampleBacktestService] Segment {seg_name} result: hasIC={bool(segment_result.get('ic_analysis'))}, hasRankIC={bool(segment_result.get('rank_ic_analysis'))}", file=sys.stderr)
                 results["segments"][seg_name] = segment_result
 
             except Exception as e:

@@ -1,6 +1,8 @@
 import React from 'react'
-import { Layout } from 'antd'
+import { Layout, Dropdown } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { QuestionCircleOutlined, BookOutlined, DownOutlined } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
 
 const { Header: AntHeader } = Layout
 
@@ -9,6 +11,16 @@ const Header: React.FC = () => {
   const location = useLocation()
 
   const isExperiments = location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
+  const isHelp = location.pathname.startsWith('/help')
+
+  const helpMenuItems: MenuProps['items'] = [
+    {
+      key: 'factor-docs',
+      label: '因子文档',
+      icon: <BookOutlined />,
+      onClick: () => navigate('/help'),
+    },
+  ]
 
   return (
     <AntHeader
@@ -73,9 +85,9 @@ const Header: React.FC = () => {
               borderRadius: 6,
               cursor: 'pointer',
               fontSize: 13,
-              fontWeight: !isExperiments ? 600 : 400,
-              color: !isExperiments ? '#1677ff' : '#6b7280',
-              background: !isExperiments ? '#e8f4fd' : 'transparent',
+              fontWeight: !isExperiments && !isHelp ? 600 : 400,
+              color: !isExperiments && !isHelp ? '#1677ff' : '#6b7280',
+              background: !isExperiments && !isHelp ? '#e8f4fd' : 'transparent',
               transition: 'all 0.2s',
               userSelect: 'none',
             }}
@@ -98,6 +110,28 @@ const Header: React.FC = () => {
           >
             实验浏览
           </div>
+          <Dropdown menu={{ items: helpMenuItems }} trigger={['click']}>
+            <div
+              style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: isHelp ? 600 : 400,
+                color: isHelp ? '#1677ff' : '#6b7280',
+                background: isHelp ? '#e8f4fd' : 'transparent',
+                transition: 'all 0.2s',
+                userSelect: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <QuestionCircleOutlined style={{ fontSize: 12 }} />
+              帮助
+              <DownOutlined style={{ fontSize: 10 }} />
+            </div>
+          </Dropdown>
         </div>
       </div>
 

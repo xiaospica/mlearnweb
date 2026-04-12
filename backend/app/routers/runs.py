@@ -261,3 +261,78 @@ def get_qlib_figures(
     serializable_result = _convert_to_serializable(result)
     print(f"{'='*60}\n", file=sys.stderr)
     return ApiResponse(success=True, data=serializable_result)
+
+
+@router.get("/{run_id}/feature-importance")
+def get_feature_importance(
+    run_id: str,
+    exp_id: str = Query(..., description="实验ID"),
+):
+    """获取模型特征重要性
+    
+    从 LightGBM 模型中提取特征重要性：
+    - Split Importance: 特征被用于分裂的次数
+    - Gain Importance: 特征带来的信息增益总和
+    """
+    from app.services.model_interpretability_service import ModelInterpretabilityService
+    
+    result = ModelInterpretabilityService.get_feature_importance(exp_id, run_id)
+    
+    if not result.get("available"):
+        return ApiResponse(
+            success=False,
+            message=result.get("error", "无法获取特征重要性"),
+            data=result
+        )
+    
+    return ApiResponse(success=True, data=result)
+
+
+@router.get("/{run_id}/shap-analysis")
+def get_shap_analysis(
+    run_id: str,
+    exp_id: str = Query(..., description="实验ID"),
+    sample_size: int = Query(500, ge=100, le=5000, description="采样数量"),
+    segment: str = Query("test", description="数据段(train/valid/test)"),
+):
+    """获取 SHAP 分析数据
+    
+    使用 SHAP (SHapley Additive exPlanations) 进行模型解释：
+    - 全局特征重要性
+    - SHAP 值分布
+    - 特征交互效应
+    """
+    from app.services.model_interpretability_service import ModelInterpretabilityService
+    
+    result = ModelInterpretabilityService.compute_shap_values(
+        exp_id, run_id, sample_size, segment
+    )
+    
+    if not result.get("available"):
+        return ApiResponse(
+            success=False,
+            message=result.get("error", "无法计算SHAP值"),
+            data=result
+        )
+    
+    serializable_result = _convert_to_serializable(result)
+    return ApiResponse(success=True, data=serializable_result)
+
+
+@router.get("/{run_id}/model-interpretability")
+def get_model_interpretability(
+    run_id: str,
+    exp_id: str = Query(..., description="实验ID"),
+):
+    """获取完整的模型可解释性分析
+    
+    包含：
+    - 特征重要性分析
+    - SHAP 值分析
+    """
+    from app.services.model_interpretability_service import ModelInterpretabilityService
+    
+    result = ModelInterpretabilityService.get_full_analysis(exp_id, run_id)
+    
+    serializable_result = _convert_to_serializable(result)
+    return ApiResponse(success=True, data=serializable_result)

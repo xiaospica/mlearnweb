@@ -1013,9 +1013,20 @@ const TrainingRecordsPage: React.FC = () => {
                           </div>
 
                           {record.description && (
-                            <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
-                              {record.description}
-                            </Text>
+                            <Tooltip title={record.description}>
+                              <div style={{
+                                fontSize: 12,
+                                color: '#8c8c8c',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                lineHeight: 1.5,
+                              }}>
+                                {record.description}
+                              </div>
+                            </Tooltip>
                           )}
 
                           {record.cumulative_return_preview && (
@@ -1186,9 +1197,20 @@ const TrainingRecordsPage: React.FC = () => {
                                 </div>
 
                                 {record.description && (
-                                  <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
-                                    {record.description}
-                                  </Text>
+                                  <Tooltip title={record.description}>
+                                    <div style={{
+                                      fontSize: 12,
+                                      color: '#8c8c8c',
+                                      display: '-webkit-box',
+                                      WebkitLineClamp: 2,
+                                      WebkitBoxOrient: 'vertical',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      lineHeight: 1.5,
+                                    }}>
+                                      {record.description}
+                                    </div>
+                                  </Tooltip>
                                 )}
 
                                 {record.cumulative_return_preview && (
@@ -1341,9 +1363,20 @@ const TrainingRecordsPage: React.FC = () => {
                           </div>
 
                           {record.description && (
-                            <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ rows: 2, tooltip: record.description }}>
-                              {record.description}
-                            </Text>
+                            <Tooltip title={record.description}>
+                              <div style={{
+                                fontSize: 12,
+                                color: '#8c8c8c',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                lineHeight: 1.5,
+                              }}>
+                                {record.description}
+                              </div>
+                            </Tooltip>
                           )}
 
                           {record.cumulative_return_preview && (

@@ -8,6 +8,11 @@ import ExperimentDetailPage from '@/pages/ExperimentDetailPage'
 import ReportPage from '@/pages/ReportPage'
 import TrainingRecordsPage from '@/pages/TrainingRecordsPage'
 import TrainingDetailPage from '@/pages/TrainingDetailPage'
+import HelpLayout from '@/pages/help/HelpLayout'
+import FactorCategoriesPage from '@/pages/help/FactorCategoriesPage'
+import Alpha158DocsPage from '@/pages/help/Alpha158DocsPage'
+import Alpha101DocsPage from '@/pages/help/Alpha101DocsPage'
+import Alpha191DocsPage from '@/pages/help/Alpha191DocsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +60,13 @@ function App() {
                 <Route path="experiments" element={<HomePage />} />
                 <Route path="experiments/:expId" element={<ExperimentDetailPage />} />
                 <Route path="report/:expId/:runId" element={<ReportPage />} />
+                <Route path="help" element={<HelpLayout />}>
+                  <Route index element={<Navigate to="categories" replace />} />
+                  <Route path="categories" element={<FactorCategoriesPage />} />
+                  <Route path="alpha158" element={<Alpha158DocsPage />} />
+                  <Route path="alpha101" element={<Alpha101DocsPage />} />
+                  <Route path="alpha191" element={<Alpha191DocsPage />} />
+                </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

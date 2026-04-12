@@ -240,7 +240,6 @@ export interface InSampleSegmentResult {
     [key: string]: unknown
   }
   indicator_dict?: Record<string, unknown>
-  // 新增：详细时序数据
   portfolio_data?: {
     available: boolean
     dates?: string[]
@@ -257,7 +256,6 @@ export interface InSampleSegmentResult {
     }
     turnover?: number[]
   }
-  // 新增：日收益率分布
   daily_return_distribution?: {
     available: boolean
     mean?: number
@@ -276,7 +274,6 @@ export interface InSampleSegmentResult {
       bin_centers: number[]
     }
   }
-  // 新增：IC分析数据
   ic_analysis?: {
     available: boolean
     dates?: string[]
@@ -285,6 +282,76 @@ export interface InSampleSegmentResult {
     std_ic?: number
     icir?: number
     hit_rate?: number
+    rolling_icir?: (number | null)[]
+    rolling_window?: number
+  }
+  rank_ic_analysis?: {
+    available: boolean
+    dates?: string[]
+    rank_ic_values?: number[]
+    mean_rank_ic?: number
+    std_rank_ic?: number
+    rank_icir?: number
+    hit_rate?: number
+    rolling_rank_icir?: (number | null)[]
+    rolling_window?: number
+  }
+  pred_label_data?: {
+    available: boolean
+    scores?: number[]
+    labels?: number[]
+    correlation?: number
+    count?: number
+    score_mean?: number
+    score_std?: number
+    label_mean?: number
+    label_std?: number
+    score_histogram?: {
+      counts: number[]
+      bins: number[]
+      bin_centers: number[]
+    }
+    label_histogram?: {
+      counts: number[]
+      bins: number[]
+      bin_centers: number[]
+    }
+  }
+}
+
+export interface FeatureImportanceData {
+  available: boolean
+  error?: string
+  features: Array<{
+    name: string
+    importance_split: number
+    importance_gain: number
+    rank: number
+  }>
+  total_features: number
+  model_type: string
+}
+
+export interface SHAPAnalysisData {
+  available: boolean
+  error?: string
+  feature_names: string[]
+  shap_values: number[][]
+  feature_values?: number[][]
+  base_value: number
+  sample_size: number
+  feature_stats?: Record<string, {
+    mean_abs_shap: number
+    min_shap: number
+    max_shap: number
+  }>
+}
+
+export interface ModelInterpretabilityResponse {
+  success: boolean
+  data: {
+    feature_importance: FeatureImportanceData
+    shap_analysis: SHAPAnalysisData
   }
 }
 
@@ -296,4 +363,17 @@ export interface InSampleBacktestResponse {
     experiment_id: string
     segments: Record<string, InSampleSegmentResult>
   }
+}
+
+export interface FactorDoc {
+  name: string
+  expression: string
+  description: string
+  category: string
+}
+
+export interface Alpha158DocsResponse {
+  factors: FactorDoc[]
+  categories: Record<string, string>
+  total_count: number
 }
