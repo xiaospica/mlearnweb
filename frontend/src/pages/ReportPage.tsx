@@ -10,7 +10,7 @@ import { reportService } from '@/services/reportService'
 import { trainingService } from '@/services/trainingService'
 import { factorDocService } from '@/services/factorDocService'
 import { FactorInfoModal } from '@/components/FactorInfoModal'
-import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData } from '@/types'
+import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData, LagICAnalysis, HoldingsAnalysis, SHAPHeatmapData } from '@/types'
 
 const { Title, Text } = Typography
 
@@ -2600,6 +2600,462 @@ const SHAPDependencePlot: React.FC<{
   )
 }
 
+// Lag IC 衰减曲线组件
+const LagICDecayCurve: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const lags = [1, 2, 3, 5, 10]
+  const orderedSegs = ['train', 'valid', 'test'].filter(s => segments[s])
+
+  const hasAnyData = orderedSegs.some(seg => {
+    const lagIC = segments[seg].lag_ic as LagICAnalysis | undefined
+    return lagIC && Object.keys(lagIC).length > 0
+  })
+
+  const explanationTooltip = (
+    <div style={{ maxWidth: 380, lineHeight: 1.7 }}>
+      <div style={{ fontWeight: 'bold', marginBottom: 6 }}>Lag IC 衰减曲线 — 原理与解读</div>
+      <div><b>计算对象：</b>LightGBM 模型每日输出的截面预测得分（prediction score）</div>
+      <div><b>计算方法：</b>将 N 天前的预测得分与今天的真实收益（label）计算 Spearman IC</div>
+      <div style={{ marginTop: 4 }}><b>如何解读：</b></div>
+      <ul style={{ paddingLeft: 16, margin: '2px 0' }}>
+        <li><b>Lag=1：</b>昨天的预测今天还有多少预测力（= 模型信号 1 日残留有效性）</li>
+        <li><b>Lag=5：</b>5 日前的信号是否仍有统计显著性</li>
+        <li><b>衰减越快</b>（IC 随 lag 增大快速降至 0）→ 信号短效，当前 T+1 日调仓频率合理</li>
+        <li><b>衰减缓慢</b>（高 lag 仍有较高 IC）→ 信号存在持续性，可考虑降低换手频率</li>
+      </ul>
+      <div style={{ marginTop: 4, color: '#faad14' }}>⚠ 各 segment 均在本 segment 时间范围内独立计算</div>
+    </div>
+  )
+
+  if (!hasAnyData) {
+    return <Empty description="暂无 Lag IC 数据（需重新运行 In-Sample 回测）" style={{ padding: 40 }} />
+  }
+
+  const series = orderedSegs.map(segName => {
+    const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
+    const lagIC = (segments[segName].lag_ic || {}) as LagICAnalysis
+    const data = lags.map(lag => {
+      const entry = lagIC[String(lag)]
+      return entry ? parseFloat(entry.mean_ic.toFixed(4)) : null
+    })
+    return {
+      name: config.label,
+      type: 'line',
+      data,
+      itemStyle: { color: config.color },
+      lineStyle: { color: config.color, width: 2 },
+      symbol: 'circle',
+      symbolSize: 8,
+    }
+  })
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+      formatter: (params: any[]) => {
+        if (!params?.length) return ''
+        const lag = lags[params[0].dataIndex]
+        let lines = [`<b>Lag ${lag} 天</b>`]
+        params.forEach(p => {
+          if (p.value === null || p.value === undefined) return
+          const segKey = orderedSegs[p.seriesIndex]
+          const entry = ((segments[segKey]?.lag_ic || {}) as LagICAnalysis)[String(lag)]
+          lines.push(
+            `${p.marker}${p.seriesName}: Mean IC = <b>${p.value}</b>` +
+            (entry ? `，Std = ${entry.std_ic.toFixed(4)}，N = ${entry.n_dates}` : '')
+          )
+        })
+        return lines.join('<br/>')
+      },
+    },
+    legend: {
+      data: orderedSegs.map(s => (SEGMENT_CONFIG[s] || { label: s }).label),
+      textStyle: { color: '#6b7280' },
+      top: 0,
+    },
+    grid: { left: 70, right: 30, top: 40, bottom: 60 },
+    xAxis: {
+      type: 'category',
+      data: lags.map(l => `Lag ${l}天`),
+      name: 'Lag 天数（N 天前的模型预测得分）',
+      nameLocation: 'middle',
+      nameGap: 32,
+      nameTextStyle: { color: '#6b7280' },
+      axisLabel: { color: '#9ca3af' },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Mean IC',
+      nameTextStyle: { color: '#6b7280' },
+      axisLabel: { color: '#9ca3af' },
+      axisLine: { show: true, lineStyle: { color: '#e5e7eb' } },
+      splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
+    },
+    series,
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          对象：LightGBM 模型预测得分（prediction score）。X轴为滞后天数，Y轴为 Spearman IC。
+        </Text>
+        <Tooltip title={explanationTooltip} placement="topLeft">
+          <InfoCircleOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 14 }} />
+        </Tooltip>
+      </div>
+      <ReactECharts option={option} style={{ height: 350 }} notMerge />
+    </div>
+  )
+}
+
+// 仓位时序分析图（持仓数量 + 最大/最小权重，使用 markLine 分割 train/valid/test）
+const PositionAnalysisChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const orderedSegs = ['train', 'valid', 'test'].filter(s => segments[s]?.position_analysis?.available)
+
+  if (orderedSegs.length === 0) {
+    return <Empty description="暂无仓位数据（需 positions_normal_1day.pkl 存在）" style={{ padding: 40 }} />
+  }
+
+  // 合并所有 segment 的时序数据，保留 segment 归属
+  type PosRow = { date: string; numStocks: number; maxW: number; minW: number; seg: string }
+  const allRows: PosRow[] = []
+
+  orderedSegs.forEach(seg => {
+    const pa = segments[seg].position_analysis!
+    const dates = pa.dates || []
+    dates.forEach((d, i) => {
+      allRows.push({
+        date: d,
+        numStocks: pa.num_stocks?.[i] ?? 0,
+        maxW: pa.max_weights?.[i] ?? 0,
+        minW: pa.min_weights?.[i] ?? 0,
+        seg,
+      })
+    })
+  })
+
+  allRows.sort((a, b) => a.date.localeCompare(b.date))
+
+  const dates = allRows.map(r => r.date)
+  const numStocksData = allRows.map(r => r.numStocks)
+  const maxWData = allRows.map(r => r.maxW)
+  const minWData = allRows.map(r => r.minW)
+
+  // 计算每个 segment 的边界索引，用于 markLine 分割线
+  const segmentBoundaries: Array<{ startIndex: number; segment: string; color: string }> = []
+  let lastSeg = ''
+  allRows.forEach((row, idx) => {
+    if (row.seg !== lastSeg) {
+      const config = SEGMENT_CONFIG[row.seg] || { color: '#8c8c8c', label: row.seg }
+      segmentBoundaries.push({
+        startIndex: idx,
+        segment: config.label,
+        color: config.color,
+      })
+      lastSeg = row.seg
+    }
+  })
+
+  // 构建垂直分隔线（跳过第一个边界）
+  const markLineData: Array<{ xAxis: string; name: string; lineStyle: any }> = []
+  segmentBoundaries.forEach((boundary, idx) => {
+    if (idx > 0 && boundary.startIndex < dates.length) {
+      markLineData.push({
+        xAxis: dates[boundary.startIndex],
+        name: boundary.segment,
+        lineStyle: {
+          color: boundary.color,
+          type: 'dashed',
+          width: 2,
+        },
+      })
+    }
+  })
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+      formatter: (params: any[]) => {
+        if (!params?.length) return ''
+        const idx = params[0].dataIndex
+        const row = allRows[idx]
+        const cfg = SEGMENT_CONFIG[row.seg] || { label: row.seg }
+        return [
+          `<b>${params[0].name}</b> [${cfg.label}]`,
+          ...params.map(p => `${p.marker}${p.seriesName}: <b>${typeof p.value === 'number' ? p.value.toFixed(p.seriesIndex === 0 ? 0 : 2) : p.value}</b>${p.seriesIndex > 0 ? '%' : '只'}`)
+        ].join('<br/>')
+      },
+    },
+    legend: {
+      data: segmentBoundaries.map(b => b.segment),
+      textStyle: { color: '#6b7280' },
+      top: 0,
+    },
+    grid: { left: 70, right: 60, top: 40, bottom: 60 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: {
+        color: '#9ca3af',
+        fontSize: 10,
+        rotate: 45,
+      },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      splitLine: { show: false },
+      boundaryGap: false,
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '持仓数量（只）',
+        nameTextStyle: { fontSize: 11, color: '#6b7280' },
+        minInterval: 1,
+        position: 'left',
+        axisLabel: { color: '#9ca3af' },
+        splitLine: { lineStyle: { color: '#f0f0f0' } },
+      },
+      {
+        type: 'value',
+        name: '权重 (%)',
+        nameTextStyle: { fontSize: 11, color: '#6b7280' },
+        position: 'right',
+        axisLabel: {
+          color: '#9ca3af',
+          formatter: '{value}%',
+        },
+        axisLine: { show: true, lineStyle: { color: '#e5e7eb' } },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '持仓数量',
+        type: 'line',
+        yAxisIndex: 0,
+        data: numStocksData,
+        itemStyle: { color: '#5470c6' },
+        lineStyle: { color: '#5470c6', width: 1.5 },
+        symbol: 'none',
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: markLineData,
+          label: {
+            show: true,
+            formatter: '{b}',
+            position: 'start',
+            color: '#6b7280',
+            fontSize: 10,
+          },
+        },
+      },
+      {
+        name: '最大权重',
+        type: 'line',
+        yAxisIndex: 1,
+        data: maxWData,
+        itemStyle: { color: '#ee6666' },
+        lineStyle: { color: '#ee6666', width: 1, type: 'dashed' },
+        symbol: 'none',
+      },
+      {
+        name: '最小权重',
+        type: 'line',
+        yAxisIndex: 1,
+        data: minWData,
+        itemStyle: { color: '#91cc75' },
+        lineStyle: { color: '#91cc75', width: 1, type: 'dashed' },
+        symbol: 'none',
+      },
+    ],
+    dataZoom: [
+      {
+        type: 'slider',
+        start: 0,
+        end: 100,
+        height: 20,
+        bottom: 5,
+        borderColor: '#e5e7eb',
+        fillerColor: 'rgba(22,119,255,0.1)',
+        handleStyle: { color: '#1677ff' },
+      },
+      { type: 'inside', start: 0, end: 100 },
+    ],
+  }
+
+  return <ReactECharts option={option} style={{ height: 350 }} notMerge />
+}
+
+// 持仓分析图组件
+const HoldingsAnalysisChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  // 优先展示 test，其次 train
+  const segName = ['test', 'train', 'valid'].find(s => segments[s]?.holdings_analysis)
+  const holdings = segName ? (segments[segName].holdings_analysis as HoldingsAnalysis | undefined) : undefined
+
+  if (!holdings || !holdings.top_stocks || holdings.top_stocks.length === 0) {
+    return <Empty description="暂无持仓分析数据（需重新运行 In-Sample 回测）" style={{ padding: 40 }} />
+  }
+
+  const stocks = [...holdings.top_stocks].reverse() // 从小到大排列，最大值在顶部
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+      formatter: (params: any) => {
+        const p = params[0]
+        const stock = holdings.top_stocks.find(s => s.stock_id === p.name) ||
+          holdings.top_stocks[holdings.top_stocks.length - 1 - p.dataIndex]
+        return `${p.name}<br/>持仓天数: ${stock?.hold_days ?? '-'}<br/>持仓频率: ${((stock?.hold_rate ?? 0) * 100).toFixed(1)}%`
+      },
+    },
+    grid: { top: 10, right: 80, bottom: 10, left: 120, containLabel: true },
+    xAxis: {
+      type: 'value',
+      name: '持仓频率 (%)',
+      nameTextStyle: { color: '#6b7280' },
+      axisLabel: {
+        color: '#9ca3af',
+        formatter: (v: number) => `${(v * 100).toFixed(0)}%`,
+      },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+      splitLine: { lineStyle: { color: '#f0f0f0' } },
+      max: 1,
+    },
+    yAxis: {
+      type: 'category',
+      data: stocks.map(s => s.stock_id),
+      axisLabel: { fontSize: 11, color: '#6b7280' },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: stocks.map(s => parseFloat(s.hold_rate.toFixed(4))),
+        itemStyle: { color: '#5470c6' },
+        label: {
+          show: true,
+          position: 'right',
+          formatter: (p: any) => `${(p.value * 100).toFixed(1)}%`,
+          fontSize: 11,
+          color: '#6b7280',
+        },
+      },
+    ],
+  }
+
+  const segLabel = (SEGMENT_CONFIG[segName!] || { label: segName }).label
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8, display: 'flex', gap: 24 }}>
+        <Text type="secondary">数据段: <Tag color="blue">{segLabel}</Tag></Text>
+        <Text type="secondary">持仓股票总数: <strong>{holdings.unique_stocks}</strong></Text>
+        <Text type="secondary">平均持仓天数: <strong>{holdings.avg_holding_days}</strong></Text>
+        <Text type="secondary">总交易日: <strong>{holdings.total_days}</strong></Text>
+      </div>
+      <ReactECharts option={option} style={{ height: Math.max(350, stocks.length * 26 + 40) }} notMerge />
+    </div>
+  )
+}
+
+// SHAP 跨 Rolling Period 热力图组件
+const SHAPHeatmapChart: React.FC<{ expId: string; runId: string }> = ({ expId, runId }) => {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['shap-heatmap', expId],
+    queryFn: () => reportService.getSHAPHeatmap(expId, runId),
+    staleTime: 15 * 60 * 1000,
+  })
+
+  if (isLoading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <Spin />
+        <div style={{ marginTop: 8 }}><Text type="secondary">加载 SHAP 热力图...</Text></div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return <Alert type="error" message="加载失败" description={(error as any).message} showIcon />
+  }
+
+  const heatmap = data?.data as SHAPHeatmapData | undefined
+  if (!heatmap || !heatmap.features.length || !heatmap.periods.length) {
+    return <Empty description="暂无跨期 SHAP 数据（需各 rolling period 含 shap_analysis.pkl）" style={{ padding: 40 }} />
+  }
+
+  const { features, periods, matrix } = heatmap
+  // ECharts 热力图数据格式: [periodIdx, featureIdx, value]
+  const echartsData: [number, number, number][] = []
+  matrix.forEach((row, featureIdx) => {
+    row.forEach((val, periodIdx) => {
+      echartsData.push([periodIdx, featureIdx, val])
+    })
+  })
+
+  const maxVal = Math.max(...matrix.flat())
+
+  const option = {
+    tooltip: {
+      formatter: (p: any) => {
+        const feat = features[p.data[1]]
+        const period = periods[p.data[0]]
+        return `特征: ${feat}<br/>Period: ${period}<br/>Mean |SHAP|: ${p.data[2].toFixed(6)}`
+      },
+    },
+    grid: { top: 20, right: 120, bottom: 80, left: 20, containLabel: true },
+    xAxis: {
+      type: 'category',
+      data: periods,
+      axisLabel: { rotate: 30, fontSize: 10 },
+      name: 'Rolling Period',
+      nameLocation: 'middle',
+      nameGap: 55,
+    },
+    yAxis: {
+      type: 'category',
+      data: features,
+      axisLabel: { fontSize: 10 },
+    },
+    visualMap: {
+      min: 0,
+      max: maxVal,
+      calculable: true,
+      orient: 'vertical',
+      right: 10,
+      top: 'center',
+      inRange: { color: ['#f0f9e8', '#43a2ca', '#0868ac'] },
+    },
+    series: [
+      {
+        type: 'heatmap',
+        data: echartsData,
+        label: { show: false },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+      },
+    ],
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 8 }}>
+        <Text type="secondary">Top {features.length} 特征 × {periods.length} 个 Rolling Period — 颜色越深表示 SHAP 重要性越高</Text>
+      </div>
+      <ReactECharts option={option} style={{ height: Math.max(400, features.length * 22 + 120) }} notMerge />
+    </div>
+  )
+}
+
 // 新增：模型可解释性分析面板
 const ModelInterpretabilityPanel: React.FC<{ expId: string; runId: string }> = ({ expId, runId }) => {
   const [activeSubTab, setActiveSubTab] = useState('importance')
@@ -2745,6 +3201,15 @@ const ModelInterpretabilityPanel: React.FC<{ expId: string; runId: string }> = (
                   <SHAPDependencePlot data={shapData.data} selectedFeature={selectedFeature} />
                 )}
               </div>
+            ),
+          },
+          {
+            key: 'shap-heatmap',
+            label: <span><BarChartOutlined /> SHAP 热力图</span>,
+            children: (
+              <Card size="small" style={{ border: 'none', boxShadow: 'none' }}>
+                <SHAPHeatmapChart expId={expId} runId={runId} />
+              </Card>
             ),
           },
         ]}
@@ -3910,6 +4375,27 @@ const InSampleAnalysisPanel: React.FC<InSampleAnalysisPanelProps> = ({ expId, ru
           <Col xs={24} lg={12}>
             <Card title="标签值分布" size="small">
               <InSampleLabelHistogramChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 仓位时序分析 */}
+          <Col xs={24}>
+            <Card title="仓位分析（持仓数量 & 权重）" size="small" extra={<Text type="secondary">按 train / valid / test 时间段着色，左轴：持仓只数，右轴：最大/最小权重%</Text>}>
+              <PositionAnalysisChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* Lag IC 衰减曲线 */}
+          <Col xs={24}>
+            <Card title="Lag IC 衰减曲线" size="small" extra={<Text type="secondary">信号在不同 lag 天数下的预测能力衰减情况</Text>}>
+              <LagICDecayCurve segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 持仓频率分析 */}
+          <Col xs={24}>
+            <Card title="持仓频率分析 Top 20" size="small" extra={<Text type="secondary">模拟 TopK 持仓中各股票出现频率</Text>}>
+              <HoldingsAnalysisChart segments={result.data.segments} />
             </Card>
           </Col>
         </Row>

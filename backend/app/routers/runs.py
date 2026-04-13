@@ -325,14 +325,32 @@ def get_model_interpretability(
     exp_id: str = Query(..., description="实验ID"),
 ):
     """获取完整的模型可解释性分析
-    
+
     包含：
     - 特征重要性分析
     - SHAP 值分析
     """
     from app.services.model_interpretability_service import ModelInterpretabilityService
-    
+
     result = ModelInterpretabilityService.get_full_analysis(exp_id, run_id)
-    
+
     serializable_result = _convert_to_serializable(result)
     return ApiResponse(success=True, data=serializable_result)
+
+
+@router.get("/{run_id}/shap-heatmap")
+def get_shap_heatmap(
+    run_id: str,  # noqa: ARG001 — kept for URL path consistency
+    experiment_id: str = Query(..., description="实验ID，用于跨所有 rolling period 汇总 SHAP 数据"),
+):
+    """获取实验下所有 rolling period 的 SHAP 重要性热力图数据。
+
+    返回矩阵：行=top-20特征，列=各 period（时间顺序）。
+    """
+    from app.services.model_interpretability_service import ModelInterpretabilityService
+
+    try:
+        data = ModelInterpretabilityService.get_shap_heatmap_across_runs(experiment_id)
+        return ApiResponse(success=True, data=data)
+    except Exception as e:
+        return ApiResponse(success=False, message=str(e), data=None)

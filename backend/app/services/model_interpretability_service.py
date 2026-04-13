@@ -485,3 +485,99 @@ class ModelInterpretabilityService:
             "feature_importance": feature_importance,
             "shap_analysis": shap_analysis,
         }
+
+    @staticmethod
+    def get_shap_heatmap_across_runs(experiment_id: str) -> Dict[str, Any]:
+        """跨实验所有 child runs 生成 SHAP 热力图数据。
+
+        按各 run 的 shap_analysis.pkl 中的 feature_stats 构建矩阵：
+        - 行（Y 轴）：top-20 特征（按平均 mean_abs_shap 排序）
+        - 列（X 轴）：各 rolling period（按 run 开始时间升序排列）
+
+        Args:
+            experiment_id: MLflow experiment ID
+
+        Returns:
+            {"features": [...], "periods": [...], "matrix": [[float, ...]]}
+        """
+        mlruns_dir = Path(settings.mlruns_dir)
+        exp_dir = mlruns_dir / experiment_id
+
+        if not exp_dir.exists():
+            print(f"[SHAPHeatmap] Experiment dir not found: {exp_dir}", file=sys.stderr)
+            return {"features": [], "periods": [], "matrix": []}
+
+        # 收集所有 run 目录（按 start_time 排序）
+        run_entries: List[tuple] = []  # (start_time_str, run_id, period_label, feature_stats)
+        for run_dir in exp_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            shap_pkl = run_dir / "artifacts" / "shap_analysis.pkl"
+            if not shap_pkl.exists():
+                continue
+            try:
+                with open(shap_pkl, "rb") as f:
+                    shap_data = pickle.load(f)
+                feature_stats: Dict[str, Any] = shap_data.get("feature_stats", {})
+                if not feature_stats:
+                    continue
+
+                # 读取 start_time 用于排序
+                meta_file = run_dir / "meta.yaml"
+                start_time = ""
+                if meta_file.exists():
+                    try:
+                        content = meta_file.read_text(encoding="utf-8")
+                        for line in content.splitlines():
+                            if line.startswith("start_time:"):
+                                start_time = line.split(":", 1)[1].strip()
+                                break
+                    except Exception:
+                        pass
+
+                # 读取 period 标签（tags/period 文件）
+                period_file = run_dir / "tags" / "period"
+                if period_file.exists():
+                    try:
+                        period = period_file.read_text(encoding="utf-8").strip()
+                    except Exception:
+                        period = run_dir.name[:8]
+                else:
+                    period = run_dir.name[:8]
+
+                run_entries.append((start_time, run_dir.name, period, feature_stats))
+            except Exception as e:
+                print(f"[SHAPHeatmap] Error loading run {run_dir.name}: {e}", file=sys.stderr)
+                continue
+
+        if not run_entries:
+            print(f"[SHAPHeatmap] No runs with shap_analysis.pkl found in experiment {experiment_id}", file=sys.stderr)
+            return {"features": [], "periods": [], "matrix": []}
+
+        # 按 start_time 升序排列（字符串排序对 ISO 时间戳有效）
+        run_entries.sort(key=lambda x: x[0])
+
+        # 计算全局 top-20 特征（按各 run 平均 mean_abs_shap 排序）
+        all_features: Dict[str, List[float]] = {}
+        for _, _, _, fstats in run_entries:
+            for feat, stat in fstats.items():
+                all_features.setdefault(feat, []).append(float(stat.get("mean_abs_shap", 0.0)))
+
+        feature_avg = {f: float(np.mean(vals)) for f, vals in all_features.items()}
+        top_features = sorted(feature_avg.keys(), key=lambda x: feature_avg[x], reverse=True)[:20]
+
+        periods = [entry[2] for entry in run_entries]
+        matrix: List[List[float]] = []
+        for feat in top_features:
+            row = []
+            for _, _, _, fstats in run_entries:
+                val = fstats.get(feat, {})
+                row.append(round(float(val.get("mean_abs_shap", 0.0)) if isinstance(val, dict) else 0.0, 6))
+            matrix.append(row)
+
+        print(f"[SHAPHeatmap] Built heatmap: {len(top_features)} features × {len(periods)} periods", file=sys.stderr)
+        return {
+            "features": top_features,
+            "periods": periods,
+            "matrix": matrix,
+        }

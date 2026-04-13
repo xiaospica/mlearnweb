@@ -369,6 +369,163 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False, run_m
         }
 
 
+def _compute_lag_ic(
+    pred_aligned: "pd.DataFrame",
+    label_aligned: "pd.DataFrame",
+    lags: list = None,
+) -> dict:
+    """计算不同 lag 天数的 IC，衡量预测信号有效期。
+
+    Args:
+        pred_aligned: 预测值 DataFrame，MultiIndex (datetime, instrument)
+        label_aligned: 标签值 DataFrame，MultiIndex (datetime, instrument)
+        lags: 待计算的 lag 天数列表
+
+    Returns:
+        dict: {lag_str: {mean_ic, std_ic, n_dates}}
+    """
+    from scipy import stats as _stats
+
+    if lags is None:
+        lags = [1, 2, 3, 5, 10]
+
+    results: dict = {}
+    try:
+        dates = pred_aligned.index.get_level_values(0).unique().sort_values()
+    except Exception:
+        return {str(lag): {"mean_ic": 0.0, "std_ic": 0.0, "n_dates": 0} for lag in lags}
+
+    for lag in lags:
+        ic_list: list = []
+        for i, date in enumerate(dates):
+            if i < lag:
+                continue
+            past_date = dates[i - lag]
+            try:
+                past_pred = pred_aligned.loc[past_date]
+                curr_label = label_aligned.loc[date]
+                # 对齐 instrument 轴
+                common_inst = past_pred.index.intersection(curr_label.index)
+                if len(common_inst) < 10:
+                    continue
+                pv = past_pred.loc[common_inst].iloc[:, 0].values if hasattr(past_pred, "iloc") else past_pred.loc[common_inst].values
+                lv = curr_label.loc[common_inst].iloc[:, 0].values if hasattr(curr_label, "iloc") else curr_label.loc[common_inst].values
+                ic, _ = _stats.spearmanr(pv, lv)
+                if not np.isnan(ic):
+                    ic_list.append(float(ic))
+            except Exception:
+                continue
+        results[str(lag)] = {
+            "mean_ic": float(np.mean(ic_list)) if ic_list else 0.0,
+            "std_ic": float(np.std(ic_list)) if ic_list else 0.0,
+            "n_dates": len(ic_list),
+        }
+    return results
+
+
+def _compute_holdings_analysis(
+    pred_aligned: "pd.DataFrame",
+    top_k: int = 7,
+) -> dict:
+    """分析每日 TopK 持仓股票的频率分布。
+
+    Args:
+        pred_aligned: 预测值 DataFrame，MultiIndex (datetime, instrument)
+        top_k: 每日持仓股票数
+
+    Returns:
+        dict: top_stocks 列表及汇总统计
+    """
+    try:
+        dates = pred_aligned.index.get_level_values(0).unique()
+    except Exception:
+        return {"top_stocks": [], "unique_stocks": 0, "avg_holding_days": 0.0, "total_days": 0}
+
+    hold_counts: dict = {}
+    total_days = len(dates)
+
+    for date in dates:
+        try:
+            day_pred = pred_aligned.loc[date]
+            scores = day_pred.iloc[:, 0] if hasattr(day_pred, "iloc") else day_pred
+            top_stocks = scores.nlargest(top_k).index.tolist()
+            for s in top_stocks:
+                hold_counts[s] = hold_counts.get(s, 0) + 1
+        except Exception:
+            continue
+
+    sorted_stocks = sorted(hold_counts.items(), key=lambda x: x[1], reverse=True)
+    top_20 = sorted_stocks[:20]
+
+    return {
+        "top_stocks": [
+            {
+                "stock_id": str(sid),
+                "hold_days": int(cnt),
+                "hold_rate": round(cnt / total_days, 4) if total_days > 0 else 0.0,
+            }
+            for sid, cnt in top_20
+        ],
+        "unique_stocks": len(hold_counts),
+        "avg_holding_days": round(
+            sum(hold_counts.values()) / len(hold_counts), 2
+        ) if hold_counts else 0.0,
+        "total_days": total_days,
+    }
+
+
+def _compute_position_analysis(seg_dir: "Path") -> dict:
+    """从 portfolio_analysis 目录的 positions_normal_1day.pkl 计算仓位统计。
+
+    Returns:
+        dict: {available, dates, num_stocks, max_weights, min_weights}
+    """
+    import pickle as _pickle
+
+    pos_file = seg_dir / "positions_normal_1day.pkl"
+    if not pos_file.exists():
+        return {"available": False}
+
+    try:
+        with open(pos_file, "rb") as f:
+            positions = _pickle.load(f)
+    except Exception as e:
+        print(f"[PositionAnalysis] Failed to load {pos_file}: {e}", file=__import__("sys").stderr)
+        return {"available": False, "error": str(e)}
+
+    dates: list = []
+    num_stocks: list = []
+    max_weights: list = []
+    min_weights: list = []
+
+    for date in sorted(positions.keys()):
+        pos_obj = positions[date]
+        if not hasattr(pos_obj, "position"):
+            continue
+        weight_list = [
+            float(v["weight"])
+            for k, v in pos_obj.position.items()
+            if "." in str(k) and isinstance(v, dict) and "weight" in v
+        ]
+        if not weight_list:
+            continue
+        dates.append(str(pd.Timestamp(date))[:10])
+        num_stocks.append(len(weight_list))
+        max_weights.append(round(max(weight_list) * 100, 4))
+        min_weights.append(round(min(weight_list) * 100, 4))
+
+    if not dates:
+        return {"available": False, "error": "持仓数据为空"}
+
+    return {
+        "available": True,
+        "dates": dates,
+        "num_stocks": num_stocks,
+        "max_weights": max_weights,
+        "min_weights": min_weights,
+    }
+
+
 class InSampleBacktestService:
     """In-Sample 回测服务 - 对已有 MLflow Run 执行 train/valid/test 多 segment 预测和回测
 
@@ -839,12 +996,11 @@ class InSampleBacktestService:
                     except Exception as e:
                         print(f"[InSampleBacktestService] Error loading sig IC for {seg_name}: {e}", file=sys.stderr)
 
-                # 尝试加载 Rank IC 分析数据
+                # 尝试加载 Rank IC 分析数据（注意：不重置 rank_ic_loaded，保留 Path 1 已加载的状态）
                 rank_ic_json_file = seg_dir.parent / "insample_analysis" / f"rank_ic_analysis_{seg_name}.json"
                 print(f"[InSampleBacktestService] Rank IC JSON file: {rank_ic_json_file}, exists={rank_ic_json_file.exists()}", file=sys.stderr)
                 print(f"[InSampleBacktestService] Sig RIC file: {sig_ric_file}, exists={sig_ric_file.exists()}", file=sys.stderr)
-                
-                rank_ic_loaded = False
+                print(f"[InSampleBacktestService] rank_ic_loaded (before secondary paths): {rank_ic_loaded}", file=sys.stderr)
                 
                 if rank_ic_json_file.exists():
                     try:
@@ -980,6 +1136,14 @@ class InSampleBacktestService:
                                 }
                                 print(f"[InSampleBacktestService] Added pred_label_data for {seg_name}: count={len(scores_valid)}, corr={corr:.4f}", file=sys.stderr)
                             
+                            # 计算 Lag IC 衰减和持仓分析
+                            try:
+                                segment_result["lag_ic"] = _compute_lag_ic(pred_aligned, label_aligned)
+                                segment_result["holdings_analysis"] = _compute_holdings_analysis(pred_aligned, top_k=7)
+                                print(f"[InSampleBacktestService] Computed lag_ic and holdings_analysis for {seg_name}", file=sys.stderr)
+                            except Exception as _e:
+                                print(f"[InSampleBacktestService] Error computing lag_ic/holdings for {seg_name}: {_e}", file=sys.stderr)
+
                             # 如果 IC 或 Rank IC 未加载，则计算
                             if not ic_data_loaded or not rank_ic_loaded:
                                 print(f"[InSampleBacktestService] Computing IC from pred/label for {seg_name}", file=sys.stderr)
@@ -990,29 +1154,31 @@ class InSampleBacktestService:
                                     ic_values = []
                                     rank_ic_values = []
                                     ic_dates = []
-                                    
+                                    rank_ic_dates = []
+
                                     for date in dates:
                                         try:
                                             pred_day = pred_aligned.loc[date]
                                             label_day = label_aligned.loc[date]
-                                            
+
                                             pred_vals = pred_day.iloc[:, 0].values if hasattr(pred_day, 'iloc') else pred_day.values
                                             label_vals = label_day.iloc[:, 0].values if hasattr(label_day, 'iloc') else label_day.values
-                                            
+
                                             if len(pred_vals) > 1 and len(label_vals) > 1:
+                                                date_str = str(date)[:10]
                                                 # IC (Spearman)
                                                 ic, _ = stats.spearmanr(pred_vals, label_vals)
                                                 if not np.isnan(ic):
                                                     ic_values.append(ic)
-                                                    
-                                                # Rank IC (Pearson on ranks)
+                                                    ic_dates.append(date_str)
+
+                                                # Rank IC (Pearson on ranks)，使用独立的 rank_ic_dates 避免与 ic_dates 错位
                                                 pred_rank = pd.Series(pred_vals).rank()
                                                 label_rank = pd.Series(label_vals).rank()
                                                 rank_ic, _ = stats.pearsonr(pred_rank, label_rank)
                                                 if not np.isnan(rank_ic):
                                                     rank_ic_values.append(rank_ic)
-                                                
-                                                ic_dates.append(str(date)[:10])
+                                                    rank_ic_dates.append(date_str)
                                         except Exception as day_e:
                                             pass
                                     
@@ -1054,7 +1220,7 @@ class InSampleBacktestService:
                                         
                                         segment_result["rank_ic_analysis"] = {
                                             "available": True,
-                                            "dates": ic_dates,
+                                            "dates": rank_ic_dates,
                                             "rank_ic_values": rank_ic_values,
                                             "mean_rank_ic": float(np.mean(ric_arr)),
                                             "std_rank_ic": float(np.std(ric_arr)),
@@ -1067,6 +1233,14 @@ class InSampleBacktestService:
                                         print(f"[InSampleBacktestService] Computed Rank IC for {seg_name}: mean_ric={np.mean(ric_arr):.4f}", file=sys.stderr)
                 except Exception as e:
                     print(f"[InSampleBacktestService] Error computing IC from pred/label for {seg_name}: {e}", file=sys.stderr)
+
+                # 仓位分析
+                try:
+                    segment_result["position_analysis"] = _compute_position_analysis(seg_dir)
+                    if segment_result["position_analysis"].get("available"):
+                        print(f"[InSampleBacktestService] Loaded position analysis for {seg_name}: {len(segment_result['position_analysis']['dates'])} days", file=sys.stderr)
+                except Exception as e:
+                    print(f"[InSampleBacktestService] Error computing position analysis for {seg_name}: {e}", file=sys.stderr)
 
                 print(f"[InSampleBacktestService] Segment {seg_name} result: hasIC={bool(segment_result.get('ic_analysis'))}, hasRankIC={bool(segment_result.get('rank_ic_analysis'))}", file=sys.stderr)
                 results["segments"][seg_name] = segment_result

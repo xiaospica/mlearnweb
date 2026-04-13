@@ -317,6 +317,45 @@ export interface InSampleSegmentResult {
       bin_centers: number[]
     }
   }
+  lag_ic?: LagICAnalysis
+  holdings_analysis?: HoldingsAnalysis
+  position_analysis?: {
+    available: boolean
+    error?: string
+    dates?: string[]
+    num_stocks?: number[]
+    max_weights?: number[]
+    min_weights?: number[]
+  }
+}
+
+export interface LagICResult {
+  mean_ic: number
+  std_ic: number
+  n_dates: number
+}
+
+export interface LagICAnalysis {
+  [lag: string]: LagICResult  // keys: "1", "2", "3", "5", "10"
+}
+
+export interface HoldingStock {
+  stock_id: string
+  hold_days: number
+  hold_rate: number
+}
+
+export interface HoldingsAnalysis {
+  top_stocks: HoldingStock[]
+  unique_stocks: number
+  avg_holding_days: number
+  total_days: number
+}
+
+export interface SHAPHeatmapData {
+  features: string[]
+  periods: string[]
+  matrix: number[][]  // shape: [n_features x n_periods]
 }
 
 export interface FeatureImportanceData {
