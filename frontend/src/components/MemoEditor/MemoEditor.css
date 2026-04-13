@@ -1,0 +1,18 @@
+.memo-editor-wrapper .w-md-editor {
+  box-shadow: none;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+}
+
+.memo-editor-wrapper .w-md-editor-preview img,
+.memo-editor-wrapper .wmde-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 6px 0;
+}
+
+.memo-editor-wrapper .wmde-markdown {
+  background: transparent;
+  font-size: 13px;
+}

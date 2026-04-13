@@ -4,11 +4,12 @@ matplotlib.use('Agg')
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 
 from app.core.config import settings
 from app.models.database import init_db
-from app.routers import experiments, runs, reports, training_records, factor_docs
+from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images
 
 app = FastAPI(
     title="QLib Backtest Dashboard API",
@@ -37,10 +38,13 @@ app.add_middleware(
 
 init_db()
 
+app.mount("/uploads", StaticFiles(directory=str(settings.upload_dir)), name="uploads")
+
 app.include_router(experiments.router)
 app.include_router(runs.router)
 app.include_router(reports.router)
 app.include_router(training_records.router)
+app.include_router(training_record_images.router)
 app.include_router(factor_docs.router)
 
 

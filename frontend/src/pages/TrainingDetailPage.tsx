@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, Suspense } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, Descriptions, Table, Tag, Button, Space, Typography, Spin, Empty, Row, Col, Statistic, Tooltip, Badge, Tabs, Input, message, Modal } from 'antd'
 import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined, EditOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons'
@@ -6,6 +6,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
 import ReactECharts from 'echarts-for-react'
+
+const MemoEditor = React.lazy(() => import('@/components/MemoEditor/MemoEditor'))
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -341,15 +343,16 @@ const TrainingDetailPage: React.FC = () => {
               </Button>
             }
           >
-            <TextArea
-              value={editMemo}
-              onChange={(e) => setEditMemo(e.target.value)}
-              placeholder="在此记录备忘信息，如训练参数说明、注意事项等..."
-              rows={6}
-              style={{ marginBottom: 8 }}
-            />
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              备忘录内容会自动保存到数据库
+            <Suspense fallback={<Spin style={{ display: 'block', margin: '40px auto' }} />}>
+              <MemoEditor
+                recordId={Number(id)}
+                value={editMemo}
+                onChange={setEditMemo}
+                height={420}
+              />
+            </Suspense>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+              支持 Markdown · 粘贴或拖拽图片自动上传 · 点击保存入库
             </Text>
           </Card>
         </Col>

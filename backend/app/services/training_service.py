@@ -252,11 +252,20 @@ class TrainingService:
         record = db.query(TrainingRecord).filter(TrainingRecord.id == record_id).first()
         if not record:
             return None
+        memo_changed = "memo" in update_data
         for key, value in update_data.items():
             if hasattr(record, key) and value is not None:
                 setattr(record, key, value)
         db.commit()
         db.refresh(record)
+
+        if memo_changed:
+            try:
+                from app.services import memo_image_service
+                memo_image_service.sync_orphans(record_id, record.memo)
+            except Exception as e:
+                print(f"[TrainingService] memo 孤儿清理失败 record_id={record_id}: {e}")
+
         return record
 
     @staticmethod
@@ -266,6 +275,11 @@ class TrainingService:
             return False
         db.delete(record)
         db.commit()
+        try:
+            from app.services import memo_image_service
+            memo_image_service.delete_record_dir(record_id)
+        except Exception as e:
+            print(f"[TrainingService] 级联清理图片目录失败 record_id={record_id}: {e}")
         return True
 
     @staticmethod
