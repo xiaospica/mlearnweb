@@ -1,12 +1,13 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Popover, Collapse, Dropdown, Menu } from 'antd'
+import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu } from 'antd'
 import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
 import { trainingService } from '@/services/trainingService'
 import type { TrainingRecord } from '@/types'
+import MemoPopover from '@/components/MemoPopover/MemoPopover'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -484,16 +485,12 @@ const TrainingRecordsPage: React.FC = () => {
             />
           </Tooltip>
           {record.memo && (
-            <Popover
-              content={<div style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
-              title="备忘录"
-              trigger="click"
-            >
+            <MemoPopover memo={record.memo}>
               <FileTextOutlined
                 style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer' }}
                 onClick={(e) => e.stopPropagation()}
               />
-            </Popover>
+            </MemoPopover>
           )}
         </Space>
       ),
@@ -999,16 +996,12 @@ const TrainingRecordsPage: React.FC = () => {
                               />
                             </Tooltip>
                             {record.memo && (
-                              <Popover
-                                content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
-                                title="备忘录"
-                                trigger="click"
-                              >
+                              <MemoPopover memo={record.memo}>
                                 <FileTextOutlined
                                   style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
                                   onClick={(e) => e.stopPropagation()}
                                 />
-                              </Popover>
+                              </MemoPopover>
                             )}
                           </div>
 
@@ -1183,16 +1176,12 @@ const TrainingRecordsPage: React.FC = () => {
                                     />
                                   </Tooltip>
                                   {record.memo && (
-                                    <Popover
-                                      content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
-                                      title="备忘录"
-                                      trigger="click"
-                                    >
+                                    <MemoPopover memo={record.memo}>
                                       <FileTextOutlined
                                         style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
                                         onClick={(e) => e.stopPropagation()}
                                       />
-                                    </Popover>
+                                    </MemoPopover>
                                   )}
                                 </div>
 
@@ -1349,16 +1338,12 @@ const TrainingRecordsPage: React.FC = () => {
                               />
                             </Tooltip>
                             {record.memo && (
-                              <Popover
-                                content={<div style={{ maxWidth: 280, whiteSpace: 'pre-wrap' }}>{record.memo}</div>}
-                                title="备忘录"
-                                trigger="click"
-                              >
+                              <MemoPopover memo={record.memo}>
                                 <FileTextOutlined
                                   style={{ color: '#1677ff', fontSize: 12, cursor: 'pointer', flexShrink: 0 }}
                                   onClick={(e) => e.stopPropagation()}
                                 />
-                              </Popover>
+                              </MemoPopover>
                             )}
                           </div>
 

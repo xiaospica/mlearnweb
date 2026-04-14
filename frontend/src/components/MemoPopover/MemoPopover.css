@@ -1,0 +1,35 @@
+.memo-popover-content {
+  width: 360px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.memo-popover-content .wmde-markdown {
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.memo-popover-content .wmde-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.memo-popover-content .wmde-markdown h1,
+.memo-popover-content .wmde-markdown h2,
+.memo-popover-content .wmde-markdown h3,
+.memo-popover-content .wmde-markdown h4 {
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.memo-popover-content .wmde-markdown p {
+  margin: 4px 0;
+}
+
+.memo-popover-content .wmde-markdown pre {
+  font-size: 11px;
+  padding: 6px 8px;
+}
