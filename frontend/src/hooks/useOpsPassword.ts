@@ -1,22 +1,17 @@
 import { useCallback } from 'react'
 import { App, Input } from 'antd'
 import React from 'react'
-import { liveTradingService } from '@/services/liveTradingService'
+import {
+  clearOpsPassword as _clearOpsPassword,
+  hasOpsPassword as _hasOpsPassword,
+  setOpsPassword as _setOpsPassword,
+} from '@/services/liveTradingService'
 
-const KEY = liveTradingService.OPS_PASSWORD_KEY
-
-export function hasOpsPassword(): boolean {
-  if (typeof window === 'undefined') return false
-  return !!sessionStorage.getItem(KEY)
-}
-
-export function clearOpsPassword(): void {
-  if (typeof window !== 'undefined') sessionStorage.removeItem(KEY)
-}
-
-function setOpsPassword(pwd: string): void {
-  if (typeof window !== 'undefined') sessionStorage.setItem(KEY, pwd)
-}
+// Re-export so existing callers can `import { hasOpsPassword } from '@/hooks/useOpsPassword'`.
+// The actual storage is an in-memory closure inside liveTradingService (see the
+// threat-model comment there). DO NOT reintroduce sessionStorage/localStorage here.
+export const hasOpsPassword = _hasOpsPassword
+export const clearOpsPassword = _clearOpsPassword
 
 /**
  * Ask the user for the ops password via an antd Modal. Resolves to true
@@ -49,7 +44,7 @@ export function useOpsPassword() {
               message.warning('请输入口令')
               return Promise.reject()
             }
-            setOpsPassword(entered)
+            _setOpsPassword(entered)
             resolve(true)
           },
           onCancel: () => resolve(false),

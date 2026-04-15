@@ -10,13 +10,44 @@ import type {
   StrategySummary,
 } from '@/types/liveTrading'
 
-const OPS_PASSWORD_KEY = 'live_trading_ops_password'
+// ─── Ops password storage ───────────────────────────────────────────────
+//
+// Threat model: the ops password is a single shared secret that gates write
+// operations against live vnpy strategies. It is NOT per-user authentication;
+// it exists to prevent misclicks from triggering real-money actions on a
+// local research workstation.
+//
+// Storage choice: we keep the password in a **module-level closure**, not in
+// sessionStorage / localStorage / cookies.
+//   - No DOM storage surface: DevTools → Application → Storage shows nothing.
+//   - Attack window is reduced to "from user entry until page reload/tab close";
+//     any XSS that fires after a reload sees an empty string.
+//   - httpOnly cookies were considered and rejected: they do not stop same-origin
+//     XSS from calling fetch(..., {credentials: 'include'}), which for this API
+//     is the actual threat. Cookies would add CORS/CSRF plumbing without any
+//     real security gain in this single-user localhost deployment.
+//   - Frontend encryption was considered and rejected: the key must live in JS
+//     too, so XSS obtains both ciphertext and key — pure security theater.
+//
+// DO NOT persist this value to sessionStorage / localStorage / indexedDB.
+let _opsPassword: string | null = null
+
+export function setOpsPassword(pwd: string): void {
+  _opsPassword = pwd || null
+}
+
+export function clearOpsPassword(): void {
+  _opsPassword = null
+}
+
+export function hasOpsPassword(): boolean {
+  return _opsPassword !== null && _opsPassword.length > 0
+}
 
 function withOpsPassword(config: AxiosRequestConfig = {}): AxiosRequestConfig {
-  const pwd = typeof window !== 'undefined' ? sessionStorage.getItem(OPS_PASSWORD_KEY) || '' : ''
   return {
     ...config,
-    headers: { ...(config.headers || {}), 'X-Ops-Password': pwd },
+    headers: { ...(config.headers || {}), 'X-Ops-Password': _opsPassword || '' },
   }
 }
 
@@ -25,8 +56,6 @@ function enc(s: string): string {
 }
 
 export const liveTradingService = {
-  OPS_PASSWORD_KEY,
-
   // --- read endpoints -----------------------------------------------------
   listNodes(): Promise<LiveTradingResponse<NodeStatus[]>> {
     return apiClient.get('/live-trading/nodes').then((r) => r.data)
