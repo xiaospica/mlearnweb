@@ -176,3 +176,92 @@ class InSampleBacktestResponse(BaseModel):
     success: bool = True
     message: str = ""
     data: Optional[Dict[str, Any]] = None
+
+
+# ======================================================================
+# Live trading (vnpy) schemas
+# ======================================================================
+
+
+class NodeStatus(BaseModel):
+    node_id: str
+    base_url: str
+    enabled: bool = True
+    online: bool = False
+    last_probe_ts: Optional[int] = None
+    last_error: Optional[str] = None
+
+
+class EquityPoint(BaseModel):
+    ts: int  # ms since epoch
+    strategy_value: Optional[float] = None
+    account_equity: Optional[float] = None
+    source_label: Optional[str] = None
+
+
+class LivePosition(BaseModel):
+    vt_symbol: str
+    direction: str
+    volume: float = 0
+    price: Optional[float] = None  # avg cost
+    pnl: Optional[float] = None
+    yd_volume: Optional[float] = None
+    frozen: Optional[float] = None
+
+
+class StrategyIdentity(BaseModel):
+    node_id: str
+    engine: str
+    strategy_name: str
+
+
+class StrategySummary(BaseModel):
+    node_id: str
+    engine: str
+    strategy_name: str
+    class_name: Optional[str] = None
+    vt_symbol: Optional[str] = None
+    author: Optional[str] = None
+    inited: bool = False
+    trading: bool = False
+    running: bool = False  # inited AND trading
+    strategy_value: Optional[float] = None
+    source_label: Optional[str] = None
+    account_equity: Optional[float] = None
+    positions_count: int = 0
+    last_update_ts: Optional[int] = None
+    mini_curve: List[EquityPoint] = []
+    capabilities: List[str] = []
+
+
+class StrategyDetail(StrategySummary):
+    parameters: Dict[str, Any] = {}
+    variables: Dict[str, Any] = {}
+    curve: List[EquityPoint] = []
+    positions: List[LivePosition] = []
+
+
+class StrategyEngineInfo(BaseModel):
+    app_name: str
+    display_name: Optional[str] = None
+    event_type: Optional[str] = None
+    capabilities: List[str] = []
+
+
+class StrategyCreateRequest(BaseModel):
+    engine: str = Field(..., min_length=1)
+    class_name: str = Field(..., min_length=1)
+    strategy_name: str = Field(..., min_length=1)
+    vt_symbol: Optional[str] = None
+    setting: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyEditRequest(BaseModel):
+    setting: Dict[str, Any] = Field(default_factory=dict)
+
+
+class LiveTradingListResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+    data: Any = None
+    warning: Optional[str] = None

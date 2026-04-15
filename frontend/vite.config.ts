@@ -13,6 +13,12 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     proxy: {
+      // live trading routes MUST come before the generic /api rule,
+      // since Vite proxies by longest-prefix match.
+      '/api/live-trading': {
+        target: 'http://127.0.0.1:8100',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

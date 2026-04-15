@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List, Set
+from typing import List, Optional, Set
 from pathlib import Path
 import os
 
@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     max_image_size_mb: int = 10
     allowed_image_exts: Set[str] = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     orphan_grace_seconds: int = 300
+
+    # vnpy live trading integration
+    vnpy_nodes_config_path: str = os.path.join(_BASE_DIR, "vnpy_nodes.yaml")
+    vnpy_request_timeout: float = 10.0
+    vnpy_poll_interval_seconds: int = 10
+    vnpy_snapshot_retention_days: int = 30
+    live_trading_ops_password: Optional[str] = None
 
     class Config:
         env_file = ".env"

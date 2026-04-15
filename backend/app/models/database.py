@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, JSON, ForeignKey, Boolean, Index, event
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 
@@ -6,6 +6,20 @@ from app.core.config import settings
 
 engine = create_engine(settings.database_url.replace("sqlite:///", "sqlite:///"), connect_args={"check_same_thread": False})
 Base = declarative_base()
+
+
+# SQLite WAL mode: required for two-process access (app.main + app.live_main).
+# WAL is a file-level persistent setting, so enabling it on any connection
+# applies to the whole database file.
+@event.listens_for(engine, "connect")
+def _enable_sqlite_wal(dbapi_conn, conn_record):
+    try:
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.close()
+    except Exception as e:
+        print(f"[DB] failed to set WAL pragma: {e}")
 
 
 class TrainingRecord(Base):
@@ -38,6 +52,51 @@ class TrainingRecord(Base):
     run_mappings = relationship("TrainingRunMapping", back_populates="training_record", cascade="all, delete-orphan")
 
 
+class StrategyEquitySnapshot(Base):
+    """Time series of per-strategy equity/PnL snapshots, polled by the
+    live_trading snapshot_loop in app.live_main.
+
+    ``source_label`` records which of the three fallback tiers produced
+    ``strategy_value`` for a given tick:
+      - "strategy_pnl"      : taken from vnpy StrategyInfo.variables PnL fields
+      - "position_sum_pnl"  : sum of PositionData.pnl matching strategy vt_symbol
+      - "account_equity"    : gateway account balance (multi-strategy shared)
+    ``account_equity`` is always populated when available so the frontend
+    can switch labels without a DB migration.
+
+    Index design (both are required, covered by EXPLAIN QUERY PLAN):
+      1. ``ix_ses_identity_ts`` — leftmost-prefix covers _read_curve's
+         ``WHERE node_id=? AND engine=? AND strategy_name=? AND ts>=?
+         ORDER BY ts DESC``; the trailing ``ts`` column also serves the
+         ORDER BY without a filesort.
+      2. ``ix_ses_ts`` — single-column ts index for the retention DELETE
+         (``WHERE ts < cutoff``) and any future time-window scans that
+         don't have identity predicates.
+      We intentionally do NOT add a ``(ts, node_id, engine, strategy_name)``
+      index: no current query has the ``ts range then identity`` shape, and
+      the snapshot_tick loop writes one row per active strategy every
+      VNPY_POLL_INTERVAL_SECONDS, so any unused index is pure write overhead.
+    """
+
+    __tablename__ = "strategy_equity_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    node_id = Column(String(64), nullable=False)
+    engine = Column(String(64), nullable=False)
+    strategy_name = Column(String(128), nullable=False)
+    ts = Column(DateTime, nullable=False)
+    strategy_value = Column(Float, nullable=True)
+    source_label = Column(String(32), nullable=True)
+    account_equity = Column(Float, nullable=True)
+    positions_count = Column(Integer, default=0)
+    raw_variables_json = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_ses_identity_ts", "node_id", "engine", "strategy_name", "ts"),
+        Index("ix_ses_ts", "ts"),
+    )
+
+
 class TrainingRunMapping(Base):
     __tablename__ = "training_run_mappings"
 
@@ -61,6 +120,48 @@ def init_db():
     _migrate_add_log_content()
     _migrate_add_memo()
     _migrate_add_group_favorite()
+    _migrate_strategy_equity_snapshot_indexes()
+
+
+def _migrate_strategy_equity_snapshot_indexes():
+    """Align indexes on strategy_equity_snapshots with the current model.
+
+    Early versions of this table used ``Column(ts, index=True)`` which caused
+    SQLAlchemy to auto-name the single-column index ``ix_strategy_equity_snapshots_ts``.
+    We now declare it explicitly as ``ix_ses_ts`` in ``__table_args__`` for
+    consistency, but ``Base.metadata.create_all`` does not retroactively add
+    or rename indexes on an existing table. This migration rebuilds the
+    single-column ts index under the new name idempotently.
+    """
+    import sqlite3
+
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='strategy_equity_snapshots'"
+        )
+        if not cursor.fetchone():
+            conn.close()
+            return
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='strategy_equity_snapshots'"
+        )
+        existing = {row[0] for row in cursor.fetchall()}
+        if "ix_strategy_equity_snapshots_ts" in existing:
+            cursor.execute("DROP INDEX IF EXISTS ix_strategy_equity_snapshots_ts")
+            conn.commit()
+            print("[DB Migration] Dropped legacy index ix_strategy_equity_snapshots_ts")
+        if "ix_ses_ts" not in existing:
+            cursor.execute("CREATE INDEX ix_ses_ts ON strategy_equity_snapshots(ts)")
+            conn.commit()
+            print("[DB Migration] Created index ix_ses_ts on strategy_equity_snapshots(ts)")
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] strategy_equity_snapshot indexes warning: {e}")
 
 
 def _migrate_add_group_favorite():

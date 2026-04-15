@@ -13,6 +13,8 @@ import FactorCategoriesPage from '@/pages/help/FactorCategoriesPage'
 import Alpha158DocsPage from '@/pages/help/Alpha158DocsPage'
 import Alpha101DocsPage from '@/pages/help/Alpha101DocsPage'
 import Alpha191DocsPage from '@/pages/help/Alpha191DocsPage'
+import LiveTradingPage from '@/pages/live-trading/LiveTradingPage'
+import LiveTradingStrategyDetailPage from '@/pages/live-trading/LiveTradingStrategyDetailPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -60,6 +62,11 @@ function App() {
                 <Route path="experiments" element={<HomePage />} />
                 <Route path="experiments/:expId" element={<ExperimentDetailPage />} />
                 <Route path="report/:expId/:runId" element={<ReportPage />} />
+                <Route path="live-trading" element={<LiveTradingPage />} />
+                <Route
+                  path="live-trading/:nodeId/:engine/:name"
+                  element={<LiveTradingStrategyDetailPage />}
+                />
                 <Route path="help" element={<HelpLayout />}>
                   <Route index element={<Navigate to="categories" replace />} />
                   <Route path="categories" element={<FactorCategoriesPage />} />

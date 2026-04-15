@@ -12,6 +12,8 @@ const Header: React.FC = () => {
 
   const isExperiments = location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
   const isHelp = location.pathname.startsWith('/help')
+  const isLiveTrading = location.pathname.startsWith('/live-trading')
+  const isTrainingRecords = !isExperiments && !isHelp && !isLiveTrading
 
   const helpMenuItems: MenuProps['items'] = [
     {
@@ -85,9 +87,9 @@ const Header: React.FC = () => {
               borderRadius: 6,
               cursor: 'pointer',
               fontSize: 13,
-              fontWeight: !isExperiments && !isHelp ? 600 : 400,
-              color: !isExperiments && !isHelp ? '#1677ff' : '#6b7280',
-              background: !isExperiments && !isHelp ? '#e8f4fd' : 'transparent',
+              fontWeight: isTrainingRecords ? 600 : 400,
+              color: isTrainingRecords ? '#1677ff' : '#6b7280',
+              background: isTrainingRecords ? '#e8f4fd' : 'transparent',
               transition: 'all 0.2s',
               userSelect: 'none',
             }}
@@ -109,6 +111,22 @@ const Header: React.FC = () => {
             }}
           >
             实验浏览
+          </div>
+          <div
+            onClick={() => navigate('/live-trading')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: isLiveTrading ? 600 : 400,
+              color: isLiveTrading ? '#1677ff' : '#6b7280',
+              background: isLiveTrading ? '#e8f4fd' : 'transparent',
+              transition: 'all 0.2s',
+              userSelect: 'none',
+            }}
+          >
+            实盘交易
           </div>
           <Dropdown menu={{ items: helpMenuItems }} trigger={['click']}>
             <div

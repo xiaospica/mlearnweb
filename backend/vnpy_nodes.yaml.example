@@ -1,0 +1,27 @@
+# mlearnweb 实盘交易节点注册
+# 复制为 vnpy_nodes.yaml 后编辑（vnpy_nodes.yaml 已被 .gitignore 忽略）
+# 每个节点对应一台运行 vnpy_webtrader 的主机（或 SSH 本地转发到云端的端口）
+
+nodes:
+  - node_id: local
+    base_url: http://127.0.0.1:8001
+    username: vnpy
+    password: vnpy
+    enabled: true
+
+  # 多节点（通过 SSH 端口转发）示例：
+  #
+  # autossh -fN -M 0 -L 18001:127.0.0.1:8001 user@cloud1
+  # autossh -fN -M 0 -L 18002:127.0.0.1:8001 user@cloud2
+  #
+  # - node_id: cloud1
+  #   base_url: http://127.0.0.1:18001
+  #   username: vnpy
+  #   password: vnpy
+  #   enabled: true
+  #
+  # - node_id: cloud2
+  #   base_url: http://127.0.0.1:18002
+  #   username: vnpy
+  #   password: vnpy
+  #   enabled: true
