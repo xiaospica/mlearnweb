@@ -452,6 +452,17 @@ const TrainingRecordsPage: React.FC = () => {
       ),
     },
     {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 60,
+      render: (id: number) => (
+        <Text type="secondary" style={{ fontSize: 12, fontFamily: "'SF Mono', 'Consolas', monospace" }}>
+          #{id}
+        </Text>
+      ),
+    },
+    {
       title: '名称',
       dataIndex: 'name',
       key: 'name',
@@ -980,6 +991,7 @@ const TrainingRecordsPage: React.FC = () => {
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />
+                            <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                             <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {record.name}
                             </Title>
@@ -1150,6 +1162,7 @@ const TrainingRecordsPage: React.FC = () => {
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                                   <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {record.name}
                                   </Title>
@@ -1312,6 +1325,7 @@ const TrainingRecordsPage: React.FC = () => {
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />}
+                            <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                             <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {record.name}
                             </Title>

@@ -332,7 +332,7 @@ async def get_strategy_detail(
             caps = list(e.get("capabilities", []) or [])
             break
 
-    since = datetime.utcnow() - timedelta(days=window_days)
+    since = datetime.now() - timedelta(days=window_days)
     full_curve = _read_curve(db, node_id, engine, strategy_name, since=since)
 
     inited = bool(strategy.get("inited"))
@@ -407,7 +407,7 @@ async def snapshot_tick() -> None:
     accounts_by_node = _group_by_node(accounts_fo)
     positions_by_node = _group_by_node(positions_fo)
 
-    now = datetime.utcnow()
+    now = datetime.now()
     SessionLocal = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
     session = SessionLocal()
     try:

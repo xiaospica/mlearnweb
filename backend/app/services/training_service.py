@@ -140,7 +140,7 @@ class TrainingService:
             category=category,
             tags=tags or [],
             status="running",
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(),
             hostname=socket.gethostname(),
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         )
@@ -324,7 +324,7 @@ class TrainingService:
             if run_id not in current_ids:
                 current_ids.append(run_id)
                 record.run_ids = current_ids
-                record.updated_at = datetime.utcnow()
+                record.updated_at = datetime.now()
 
         db.commit()
         db.refresh(mapping)

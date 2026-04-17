@@ -46,8 +46,8 @@ class TrainingRecord(Base):
     memo = Column(Text, nullable=True)
     group_name = Column(String(64), nullable=True, index=True, default="default")
     is_favorite = Column(Boolean, default=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     run_mappings = relationship("TrainingRunMapping", back_populates="training_record", cascade="all, delete-orphan")
 
