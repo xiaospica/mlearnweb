@@ -5,9 +5,15 @@ import os
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 默认 mlruns 路径: 假定 mlearnweb 作为 qlib_strategy_dev 的子模块部署, 其
+# `app/core/config.py` 位于 <repo_root>/mlearnweb/backend/app/core/. 从此处上溯
+# 4 层到 qlib_strategy_dev 根, 再进入 mlruns/.  独立部署时用 `.env` 里的
+# MLRUNS_DIR 显式覆盖.
+_DEFAULT_MLRUNS_DIR = str(Path(_BASE_DIR).parent.parent / "mlruns")
+
 
 class Settings(BaseSettings):
-    mlruns_dir: str = r"F:\Quant\code\qlib_strategy_dev\mlruns"
+    mlruns_dir: str = _DEFAULT_MLRUNS_DIR
     database_url: str = f"sqlite:///{os.path.join(_BASE_DIR, 'mlearnweb.db')}"
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 

@@ -29,13 +29,17 @@ router = APIRouter(prefix="/api/training-records", tags=["training-records"])
 @router.post("", response_model=ApiResponse)
 def create_training_record(body: TrainingRecordCreate, db: Session = Depends(get_db_session)):
     init_db()
+    # config_snapshot is declared as Dict[str, Any] in schema; pass through directly.
+    snapshot_dict = body.config_snapshot
+    if snapshot_dict is not None and hasattr(snapshot_dict, "model_dump"):
+        snapshot_dict = snapshot_dict.model_dump()
     record = TrainingService.create_record(
         db=db,
         name=body.name,
         experiment_id=body.experiment_id,
         experiment_name=body.experiment_name,
         description=body.description,
-        config_snapshot=body.config_snapshot.model_dump() if body.config_snapshot else None,
+        config_snapshot=snapshot_dict,
         command_line=body.command_line,
         category=body.category or "single",
         tags=body.tags,

@@ -88,6 +88,7 @@ class TrainingRecordUpdate(BaseModel):
     memo: Optional[str] = None
     group_name: Optional[str] = None
     is_favorite: Optional[bool] = None
+    log_content: Optional[str] = None
 
 
 class TrainingRecordResponse(BaseModel):

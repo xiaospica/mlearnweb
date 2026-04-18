@@ -17,6 +17,14 @@ import pandas as pd
 from app.core.config import settings
 from app.utils.mlflow_reader import mlflow_reader
 
+# 注册 MetaPathFinder: 旧 MLflow 工件的 "module_path" 可能是
+# "factor_factory.alphas.alpha_158_custom_qlib" 或 "factor_factory.alpha_factor_store",
+# 这些路径现在重定向到 qlib_strategy_core.*  — 即便 strategy_dev 仓库不在 sys.path
+# (例如 mlearnweb 独立部署场景) 也能反序列化成功.
+from qlib_strategy_core._compat import install_finder as _install_legacy_finder
+
+_install_legacy_finder()
+
 
 class ModelInterpretabilityService:
     """模型可解释性分析服务"""
@@ -56,15 +64,22 @@ class ModelInterpretabilityService:
             print(f"[SHAP] Using provider_uri from env: {env_provider}", file=__import__('sys').stderr)
             return env_provider
 
+        # 优先用 qlib_strategy_core.QSConfig 的 env 默认, 再退化到相对路径
+        try:
+            from qlib_strategy_core.config import QSConfig
+
+            cfg = QSConfig.from_env()
+            if cfg.provider_uri and Path(cfg.provider_uri).exists():
+                print(f"[SHAP] Using provider_uri from QSConfig: {cfg.provider_uri}", file=__import__('sys').stderr)
+                return cfg.provider_uri
+        except Exception:
+            pass
+
         project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
-        default_paths = [
-            str(project_root / "factor_factory" / "qlib_data_bin"),
-            r"F:\Quant\code\qlib_strategy_dev\factor_factory\qlib_data_bin",
-        ]
-        for p in default_paths:
-            if Path(p).exists():
-                print(f"[SHAP] Using default provider_uri: {p}", file=__import__('sys').stderr)
-                return p
+        fallback = project_root / "factor_factory" / "qlib_data_bin"
+        if fallback.exists():
+            print(f"[SHAP] Using default provider_uri: {fallback}", file=__import__('sys').stderr)
+            return str(fallback)
 
         return None
 
