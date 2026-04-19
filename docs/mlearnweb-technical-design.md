@@ -3,6 +3,14 @@
 > 量化研究可视化平台 + vnpy 实盘交易监控与控制
 > 版本 1.0 · 最后更新 2026-04-15
 
+> **配套文档(Phase 4, 2026-04-19)**:
+> - [DEVELOPMENT.md](./DEVELOPMENT.md) — 开发环境 + 启动 + 分层纪律 + 常见问题
+> - [DEPLOYMENT.md](./DEPLOYMENT.md) — systemd / Nginx / 数据库备份 / autossh 隧道
+> - [ARCHITECTURE.md](./ARCHITECTURE.md) — Router/Service/Model 分层 + 路由全表 + DB schema + 和 vnpy 契约
+> - [TESTING.md](./TESTING.md) — 测试矩阵 + 回归基线 + CI 样板
+>
+> 本文件保留历史"为什么这么设计"的**原始意图**;实施细节以上四份为准。
+
 ## 目录
 
 1. [定位与总体目标](#1-定位与总体目标)
