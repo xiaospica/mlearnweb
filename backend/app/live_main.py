@@ -21,9 +21,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.models.database import init_db
-from app.routers import live_trading
+from app.routers import live_trading, ml_monitoring
 from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
+from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +33,16 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # eager-build the multi-node client so any yaml / network issue surfaces at startup
     get_vnpy_client()
-    task = asyncio.create_task(snapshot_loop())
+    equity_task = asyncio.create_task(snapshot_loop())
+    ml_task = asyncio.create_task(ml_snapshot_loop())
     try:
         yield
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for task in (equity_task, ml_task):
+            task.cancel()
+        for task in (equity_task, ml_task):
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         await get_vnpy_client().close()
 
 
@@ -63,6 +67,7 @@ app.add_middleware(
 init_db()
 
 app.include_router(live_trading.router)
+app.include_router(ml_monitoring.router)
 
 
 @app.get("/")

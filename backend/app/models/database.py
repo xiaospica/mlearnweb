@@ -116,6 +116,11 @@ class TrainingRunMapping(Base):
 
 
 def init_db():
+    # Import ML monitoring models here to register them on Base.metadata
+    # before create_all runs. Module-level import in __init__.py would
+    # cause circular imports (models/__init__ → database → models).
+    from . import ml_monitoring  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     _migrate_add_log_content()
     _migrate_add_memo()

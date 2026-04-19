@@ -144,6 +144,30 @@ class _PerNodeClient:
     async def get_node_health(self) -> Dict[str, Any]:
         return await self._request("GET", "/api/v1/node/health") or {}
 
+    # --- ML monitoring (Phase 3.2) -----------------------------------------
+
+    async def get_ml_metrics_latest(self, strategy_name: str) -> Dict[str, Any]:
+        return await self._request(
+            "GET", f"/api/v1/ml/strategies/{strategy_name}/metrics/latest"
+        ) or {}
+
+    async def get_ml_metrics_history(
+        self, strategy_name: str, days: int = 30
+    ) -> List[Dict[str, Any]]:
+        return await self._request(
+            "GET",
+            f"/api/v1/ml/strategies/{strategy_name}/metrics",
+            params={"days": days},
+        ) or []
+
+    async def get_ml_prediction_summary(self, strategy_name: str) -> Dict[str, Any]:
+        return await self._request(
+            "GET", f"/api/v1/ml/strategies/{strategy_name}/prediction/latest/summary"
+        ) or {}
+
+    async def get_ml_health(self) -> Dict[str, Any]:
+        return await self._request("GET", "/api/v1/ml/health") or {}
+
     # --- write endpoints ----------------------------------------------------
 
     async def create_strategy(self, engine: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -241,6 +265,65 @@ class VnpyMultiNodeClient:
 
     async def get_positions(self) -> List[FanoutItem]:
         return await self._fanout("get_positions")
+
+    # --- ML fanout reads (Phase 3.2) ----------------------------------------
+
+    async def get_ml_health_all(self) -> List[FanoutItem]:
+        """Fanout /api/v1/ml/health across nodes. Used by ml_snapshot_loop to
+        discover which (node, strategy_name) pairs to poll.
+        """
+        return await self._fanout("get_ml_health")
+
+    async def get_ml_metrics_latest_all(self, strategy_name: str) -> List[FanoutItem]:
+        """Fanout /api/v1/ml/strategies/{name}/metrics/latest across nodes."""
+        async def _one(nid: str, client: _PerNodeClient) -> FanoutItem:
+            try:
+                data = await client.get_ml_metrics_latest(strategy_name)
+                return {"node_id": nid, "ok": True, "data": data, "error": None}
+            except Exception as e:
+                logger.warning(
+                    "[vnpy.client] node=%s get_ml_metrics_latest(%s) failed: %s",
+                    nid, strategy_name, e,
+                )
+                return {"node_id": nid, "ok": False, "data": {}, "error": str(e)}
+
+        return await asyncio.gather(
+            *(_one(nid, c) for nid, c in self._clients.items())
+        )
+
+    async def get_ml_prediction_summary_all(self, strategy_name: str) -> List[FanoutItem]:
+        """Fanout /api/v1/ml/strategies/{name}/prediction/latest/summary across nodes."""
+        async def _one(nid: str, client: _PerNodeClient) -> FanoutItem:
+            try:
+                data = await client.get_ml_prediction_summary(strategy_name)
+                return {"node_id": nid, "ok": True, "data": data, "error": None}
+            except Exception as e:
+                logger.warning(
+                    "[vnpy.client] node=%s get_ml_prediction_summary(%s) failed: %s",
+                    nid, strategy_name, e,
+                )
+                return {"node_id": nid, "ok": False, "data": {}, "error": str(e)}
+
+        return await asyncio.gather(
+            *(_one(nid, c) for nid, c in self._clients.items())
+        )
+
+    # --- single-node ML reads (routed by node_id) --------------------------
+
+    async def get_ml_metrics_history(
+        self, node_id: str, strategy_name: str, days: int = 30
+    ) -> List[Dict[str, Any]]:
+        return await self.get_per_node(node_id).get_ml_metrics_history(strategy_name, days)
+
+    async def get_ml_metrics_latest(
+        self, node_id: str, strategy_name: str
+    ) -> Dict[str, Any]:
+        return await self.get_per_node(node_id).get_ml_metrics_latest(strategy_name)
+
+    async def get_ml_prediction_summary(
+        self, node_id: str, strategy_name: str
+    ) -> Dict[str, Any]:
+        return await self.get_per_node(node_id).get_ml_prediction_summary(strategy_name)
 
     async def probe_nodes(self) -> List[Dict[str, Any]]:
         """Lightweight liveness probe. Never raises."""
