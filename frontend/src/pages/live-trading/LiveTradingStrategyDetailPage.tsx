@@ -19,6 +19,7 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
+import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
@@ -191,9 +192,7 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
               key: 'monitor',
               label: '策略监控',
               children: (
-                <Card>
-                  <Empty description="即将上线" />
-                </Card>
+                <MlMonitorPanel nodeId={nodeId} strategyName={name} />
               ),
             },
           ]}
