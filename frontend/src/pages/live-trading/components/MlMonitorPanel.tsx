@@ -25,6 +25,8 @@ import type {
   PsiByFeature,
   RollingSummary,
 } from '@/services/mlMonitoringService'
+import BacktestDiffPanel from './BacktestDiffPanel'
+import PredictionHistoryPanel from './PredictionHistoryPanel'
 
 const { Text } = Typography
 
@@ -127,10 +129,11 @@ function buildTopPsiFeaturesOption(psiByFeature: PsiByFeature | null) {
 }
 
 const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
-  // Refetch interval: 60s to match ml_snapshot_loop cadence (no point polling faster)
+  // 180 日窗口覆盖实盘积累和 backfill 测试数据. ICIR window 维持 30 日
+  // (与原 Phase 3 设计一致). Refetch 60s 匹配 ml_snapshot_loop 节奏.
   const history = useQuery({
     queryKey: ['ml-metrics-history', nodeId, strategyName],
-    queryFn: () => mlMonitoringService.metricsHistory(nodeId, strategyName, 30),
+    queryFn: () => mlMonitoringService.metricsHistory(nodeId, strategyName, 180),
     refetchInterval: 60000,
     staleTime: 30000,
   })
@@ -242,6 +245,20 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
         />
       )}
 
+      {/* IC 衰减告警 */}
+      {rollingData?.ic_decay?.triggered && (
+        <Alert
+          type="error"
+          showIcon
+          message={`IC 衰减告警: ${rollingData.ic_decay.reason}`}
+          description={
+            `近期 ${rollingData.ic_decay.n_recent} 日 vs 前期 ${rollingData.ic_decay.n_prior} 日. ` +
+            `衰减比例 ${rollingData.ic_decay.decay_ratio !== null ? (rollingData.ic_decay.decay_ratio * 100).toFixed(1) + '%' : '—'}. ` +
+            `建议评估模型可用性, 必要时重训.`
+          }
+        />
+      )}
+
       {/* 时序图 */}
       <Row gutter={12}>
         <Col xs={24} lg={8}>
@@ -282,6 +299,14 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
           </Card>
         </Col>
       </Row>
+
+      <PredictionHistoryPanel
+        nodeId={nodeId}
+        strategyName={strategyName}
+        historyDates={historyData.map((m) => m.trade_date || '').filter(Boolean)}
+      />
+
+      <BacktestDiffPanel nodeId={nodeId} strategyName={strategyName} />
     </div>
   )
 }

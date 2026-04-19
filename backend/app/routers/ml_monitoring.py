@@ -105,6 +105,47 @@ def prediction_by_date(
 
 
 # ---------------------------------------------------------------------------
+# Backtest vs live predictions diff (解读 A — MLflow artifacts 对齐)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{node_id}/{strategy_name}/backtest-diff",
+    response_model=LiveTradingListResponse,
+)
+def backtest_diff(
+    node_id: str,
+    strategy_name: str,
+    mlflow_run_dir: str = Query(..., description="训练侧 MLflow run artifacts dir, 含 pred.pkl"),
+    live_output_root: str | None = Query(None, description="live 推理 predictions 根目录, 默认 settings.ml_live_output_root"),
+    recent_days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db_session),
+) -> LiveTradingListResponse:
+    """对比训练侧 backtest pred.pkl 与 live predictions per date."""
+    from app.core.config import settings
+    root = live_output_root or settings.ml_live_output_root
+    if not root:
+        return LiveTradingListResponse(
+            success=False, data=None,
+            warning="需配置 live_output_root 或设置 ML_LIVE_OUTPUT_ROOT 环境变量",
+            message="missing live_output_root",
+        )
+    try:
+        data = agg_svc.backtest_vs_live_diff(
+            db, node_id, strategy_name,
+            mlflow_artifacts_dir=mlflow_run_dir,
+            live_output_root=root,
+            recent_days=recent_days,
+        )
+        return _ok(data)
+    except Exception as e:
+        logger.exception("[ml-monitoring] backtest_diff failed: %s", e)
+        return LiveTradingListResponse(
+            success=False, data=None, warning=f"对比失败: {e}", message=str(e),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Pass-through to vnpy node /api/v1/ml/* (realtime latest, bypasses cache)
 # ---------------------------------------------------------------------------
 
@@ -128,13 +169,22 @@ async def metrics_latest(node_id: str, strategy_name: str) -> LiveTradingListRes
     response_model=LiveTradingListResponse,
 )
 async def prediction_latest_summary(
-    node_id: str, strategy_name: str,
+    node_id: str,
+    strategy_name: str,
+    db: Session = Depends(get_db_session),
 ) -> LiveTradingListResponse:
+    """优先穿透到 vnpy 节点拿实时; 失败则退化用 SQLite 最新缓存.
+
+    这让 UI 在 trader 未运行(只有 SQLite 历史数据)时也能拿到 topk.
+    """
     client = get_vnpy_client()
     try:
         data = await client.get_ml_prediction_summary(node_id, strategy_name)
         return _ok(data)
     except VnpyClientError as e:
+        cached = agg_svc.get_latest_prediction(db, node_id, strategy_name)
+        if cached is not None:
+            return _ok(cached, warning=f"vnpy 穿透失败({e}), 已退化到 SQLite 最新记录")
         raise _fail(str(e))
 
 

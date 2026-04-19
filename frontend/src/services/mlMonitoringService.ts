@@ -54,7 +54,34 @@ export interface RollingSummary {
     max_streak_days: number
     first_alert_date: string | null
   }
+  ic_decay: {
+    triggered: boolean
+    reason: string
+    recent_ic_mean: number | null
+    prior_ic_mean: number | null
+    decay_ratio: number | null
+    n_recent: number
+    n_prior: number
+  }
   history_count: number
+}
+
+export interface BacktestDiffPerDate {
+  trade_date: string
+  corr: number | null
+  mean_abs_diff: number
+  coverage: number
+  n_overlap: number
+}
+
+export interface BacktestDiff {
+  available: boolean
+  reason?: string
+  backtest_source?: string
+  per_date?: BacktestDiffPerDate[]
+  coverage_ratio?: number
+  corr_mean?: number | null
+  n_dates_in_overlap?: number
 }
 
 export interface TopkEntry {
@@ -159,6 +186,24 @@ export const mlMonitoringService = {
 
   globalHealth(): Promise<LiveTradingResponse<MlHealthItem[]>> {
     return apiClient.get('/live-trading/ml/health').then((r) => r.data)
+  },
+
+  /** Backtest-vs-live diff (解读 A — 对齐 training MLflow pred.pkl 与 live predictions). */
+  backtestDiff(
+    nodeId: string,
+    strategyName: string,
+    mlflowRunDir: string,
+    liveOutputRoot?: string,
+    recentDays = 30,
+  ): Promise<LiveTradingResponse<BacktestDiff>> {
+    const params: Record<string, string | number> = {
+      mlflow_run_dir: mlflowRunDir,
+      recent_days: recentDays,
+    }
+    if (liveOutputRoot) params.live_output_root = liveOutputRoot
+    return apiClient
+      .get(`/live-trading/ml/${enc(nodeId)}/${enc(strategyName)}/backtest-diff`, { params })
+      .then((r) => r.data)
   },
 }
 

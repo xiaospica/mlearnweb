@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     vnpy_snapshot_retention_days: int = 30
     live_trading_ops_password: Optional[str] = None
 
+    # ML strategy live output root (where subprocess writes predictions.parquet
+    # per day). Used by backtest-vs-live diff route. Override via env
+    # ``ML_LIVE_OUTPUT_ROOT``.
+    ml_live_output_root: Optional[str] = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

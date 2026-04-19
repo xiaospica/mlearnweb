@@ -106,6 +106,31 @@ def get_metrics_history(
     return [_metric_row_to_dict(r) for r in rows]
 
 
+def get_latest_prediction(
+    db: Session,
+    node_id: str,
+    strategy_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Most recent cached prediction from SQLite (ml_prediction_daily).
+
+    Used as a fallback when the realtime pass-through to vnpy webtrader is
+    unavailable (trader down) — backfill/testing scenarios rely on this.
+    """
+    row = (
+        db.query(MLPredictionDaily)
+        .filter(
+            MLPredictionDaily.node_id == node_id,
+            MLPredictionDaily.engine == ML_ENGINE_NAME,
+            MLPredictionDaily.strategy_name == strategy_name,
+        )
+        .order_by(MLPredictionDaily.trade_date.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return _prediction_row_to_dict(row)
+
+
 def get_prediction_by_date(
     db: Session,
     node_id: str,
@@ -137,64 +162,15 @@ def get_prediction_by_date(
 # ---------------------------------------------------------------------------
 
 
-def _mean_std(values: List[float]) -> Tuple[Optional[float], Optional[float]]:
-    """numpy-free mean/std. Returns (None, None) on empty."""
-    valid = [v for v in values if v is not None]
-    if len(valid) < 2:
-        return (valid[0] if valid else None, None)
-    m = sum(valid) / len(valid)
-    var = sum((v - m) ** 2 for v in valid) / (len(valid) - 1)
-    return m, var ** 0.5
-
-
-def compute_icir(metrics_series: List[Dict[str, Any]], window: int) -> Dict[str, Any]:
-    """Rolling ICIR = mean(ic) / std(ic) over the last ``window`` days.
-
-    Returns ``{window, icir, ic_mean, ic_std, n_samples}``.
-    """
-    recent = metrics_series[-window:] if len(metrics_series) > window else metrics_series
-    ics = [m.get("ic") for m in recent]
-    mean, std = _mean_std(ics)
-    icir = (mean / std) if (mean is not None and std not in (None, 0.0)) else None
-    return {
-        "window": window,
-        "icir": icir,
-        "ic_mean": mean,
-        "ic_std": std,
-        "n_samples": sum(1 for v in ics if v is not None),
-    }
-
-
-def psi_trend_alerts(
-    metrics_series: List[Dict[str, Any]],
-    threshold: float = 0.25,
-    consecutive_days: int = 3,
-) -> Dict[str, Any]:
-    """连续 N 日 psi_mean > threshold 触发告警.
-
-    Returns ``{triggered, threshold, consecutive_days, last_streak_days,
-               first_alert_date}``.
-    """
-    streak = 0
-    max_streak = 0
-    first_alert_date: Optional[str] = None
-    for m in metrics_series:
-        psi = m.get("psi_mean")
-        if psi is not None and psi > threshold:
-            streak += 1
-            if streak == consecutive_days and first_alert_date is None:
-                first_alert_date = m.get("trade_date")
-            max_streak = max(max_streak, streak)
-        else:
-            streak = 0
-    return {
-        "triggered": max_streak >= consecutive_days,
-        "threshold": threshold,
-        "consecutive_days": consecutive_days,
-        "last_streak_days": streak,
-        "max_streak_days": max_streak,
-        "first_alert_date": first_alert_date,
-    }
+# Import pure algorithmic functions from core — single source of truth for all
+# cross-day aggregation (compute_icir / psi_trend_alerts / detect_ic_decay /
+# compute_live_vs_backtest_diff). mlearnweb only glues DB-fetch + HTTP here.
+from qlib_strategy_core.metrics import (
+    compute_icir,
+    psi_trend_alerts,
+    detect_ic_decay,
+    compute_live_vs_backtest_diff,
+)
 
 
 def compute_rolling_summary(
@@ -203,11 +179,15 @@ def compute_rolling_summary(
     strategy_name: str,
     window: int = 30,
 ) -> Dict[str, Any]:
-    """组合 ICIR + PSI trend alert 的打包视图.
+    """组合 ICIR + PSI trend alert + IC decay 的打包视图.
 
     前端 Tab2 只调这一个, 减少请求数.
+
+    采集历史时按 days=365 取, 让 compute_icir/psi_trend_alerts/detect_ic_decay
+    基于 "最近 N 条记录" 而非 "最近 N 天" 滑窗. 这样即使数据间断或只在测试期
+    有几十条旧数据, ICIR/告警依然有统计意义.
     """
-    history = get_metrics_history(db, node_id, strategy_name, days=max(window * 2, 60))
+    history = get_metrics_history(db, node_id, strategy_name, days=365)
     return {
         "node_id": node_id,
         "strategy_name": strategy_name,
@@ -215,27 +195,91 @@ def compute_rolling_summary(
         "icir_30d": compute_icir(history, 30),
         "icir_60d": compute_icir(history, 60),
         "psi_alert": psi_trend_alerts(history),
+        "ic_decay": detect_ic_decay(history),
         "history_count": len(history),
     }
 
 
 # ---------------------------------------------------------------------------
-# backtest vs live diff — Phase 3.5+ 扩展位
+# backtest vs live diff — 解读 A: 对齐训练侧 MLflow pred.pkl 与 live predictions
 # ---------------------------------------------------------------------------
+
+
+def load_backtest_predictions(mlflow_artifacts_dir: str) -> Optional[object]:
+    """Read training-side pred.pkl (MultiIndex (datetime, instrument), score)."""
+    import pickle
+    from pathlib import Path
+    p = Path(mlflow_artifacts_dir) / "pred.pkl"
+    if not p.exists():
+        return None
+    try:
+        with open(p, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def load_live_predictions(
+    output_root: str,
+    strategy_name: str,
+    days: int = 30,
+) -> Optional[object]:
+    """Concatenate recent days' predictions.parquet from disk.
+
+    Reads ``{output_root}/{strategy_name}/{yyyymmdd}/predictions.parquet``.
+    Returns a MultiIndex (datetime, instrument) DataFrame with column ``score``.
+    """
+    import pandas as pd
+    from pathlib import Path
+    strat_dir = Path(output_root) / strategy_name
+    if not strat_dir.exists():
+        return None
+    day_dirs = sorted(
+        (d for d in strat_dir.iterdir() if d.is_dir() and d.name.isdigit() and len(d.name) == 8),
+        reverse=True,
+    )[:days]
+    frames = []
+    for d in day_dirs:
+        p = d / "predictions.parquet"
+        if not p.exists():
+            continue
+        try:
+            frames.append(pd.read_parquet(p))
+        except Exception:
+            continue
+    if not frames:
+        return None
+    # Concatenated pred_df; duplicates handled by (datetime,instrument) uniqueness
+    return pd.concat(frames).sort_index()
 
 
 def backtest_vs_live_diff(
     db: Session,
     node_id: str,
     strategy_name: str,
-    backtest_dir: Optional[str] = None,
+    mlflow_artifacts_dir: Optional[str] = None,
+    live_output_root: Optional[str] = None,
+    recent_days: int = 30,
 ) -> Dict[str, Any]:
-    """对齐 backtest/ 目录与 live predictions/ 算差异. 当前返回占位.
+    """解读 A: 对比训练侧 backtest predictions 与 live predictions per date.
 
-    真实实现需要读 bundle 里带的 backtest predictions parquet — 留到有实际
-    回测数据后再启用.
+    输入: MLflow artifacts 目录 (pred.pkl) + live predictions 目录根.
+    输出: per_date correlation + coverage_ratio + corr_mean + n_dates_in_overlap.
     """
+    if not mlflow_artifacts_dir or not live_output_root:
+        return {
+            "available": False,
+            "reason": "需配置 mlflow_artifacts_dir 和 live_output_root",
+        }
+    bt = load_backtest_predictions(mlflow_artifacts_dir)
+    if bt is None:
+        return {"available": False, "reason": f"pred.pkl 不存在: {mlflow_artifacts_dir}"}
+    live = load_live_predictions(live_output_root, strategy_name, days=recent_days)
+    if live is None:
+        return {"available": False, "reason": f"live predictions 不存在: {live_output_root}/{strategy_name}"}
+    result = compute_live_vs_backtest_diff(live, bt)
     return {
-        "available": False,
-        "reason": "backtest vs live diff pending Phase 3.5+ wiring",
+        "available": True,
+        "backtest_source": mlflow_artifacts_dir,
+        **result,
     }

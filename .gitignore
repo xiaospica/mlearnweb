@@ -1,0 +1,19 @@
+node_modules
+__pycache__
+
+# SQLite (WAL mode) — per-deployment state, never commit
+*.db
+*.db-shm
+*.db-wal
+
+# Local runtime artifacts
+backend/uploads/
+backend/vnpy_nodes.yaml
+!backend/vnpy_nodes.yaml.example
+
+# Build / incremental compile artifacts
+frontend/tsconfig.tsbuildinfo
+
+# Editor
+.vscode
+.idea
