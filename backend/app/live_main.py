@@ -25,6 +25,7 @@ from app.routers import live_trading, ml_monitoring
 from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
+from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,15 @@ async def lifespan(app: FastAPI):
     get_vnpy_client()
     equity_task = asyncio.create_task(snapshot_loop())
     ml_task = asyncio.create_task(ml_snapshot_loop())
+    # 方案 §2.4.5 — 同步推理机回填的历史 IC 到 SQLite (5min 一次)
+    hist_sync_task = asyncio.create_task(historical_metrics_sync_loop())
+    tasks = (equity_task, ml_task, hist_sync_task)
     try:
         yield
     finally:
-        for task in (equity_task, ml_task):
+        for task in tasks:
             task.cancel()
-        for task in (equity_task, ml_task):
+        for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await get_vnpy_client().close()
