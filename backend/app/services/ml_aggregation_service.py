@@ -253,6 +253,170 @@ def load_live_predictions(
     return pd.concat(frames).sort_index()
 
 
+# ---------------------------------------------------------------------------
+# 股票代码 → 名称 lookup (读 vnpy_tushare_pro 落盘的 stock_list.parquet)
+# ---------------------------------------------------------------------------
+
+
+_STOCK_NAME_CACHE: Dict[str, Any] = {"mtime": 0.0, "mapping": {}, "path": None}
+
+
+def _resolve_stock_list_path() -> Optional["Path"]:
+    """查找 stock_list.parquet.
+
+    1. env ``TUSHARE_STOCK_LIST_PATH`` 显式指定 (含文件名)
+    2. env ``QS_DATA_ROOT`` 推导 ``{root}/stock_data/stock_list.parquet``
+    3. vnpy_strategy_dev 默认位置 ``F:/Quant/vnpy/vnpy_strategy_dev/stock_data/stock_list.parquet``
+       (与 ``TushareApiClient`` 当前 ``DATA_DIR = cwd/stock_data`` 一致)
+    """
+    import os
+    from pathlib import Path
+    env = os.getenv("TUSHARE_STOCK_LIST_PATH")
+    if env:
+        p = Path(env)
+        if p.exists():
+            return p
+    qs_root = os.getenv("QS_DATA_ROOT")
+    if qs_root:
+        p = Path(qs_root) / "stock_data" / "stock_list.parquet"
+        if p.exists():
+            return p
+    default = Path("F:/Quant/vnpy/vnpy_strategy_dev/stock_data/stock_list.parquet")
+    if default.exists():
+        return default
+    return None
+
+
+def get_stock_name_map() -> Dict[str, str]:
+    """返回 ts_code → 股票中文简称字典 (带 mtime 缓存).
+
+    查不到或文件不存在返回空字典, 调用方应 fallback 到 ts_code 显示.
+    """
+    import pandas as pd
+    path = _resolve_stock_list_path()
+    if path is None:
+        return {}
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return _STOCK_NAME_CACHE.get("mapping", {}) or {}
+    if (
+        _STOCK_NAME_CACHE["mapping"]
+        and _STOCK_NAME_CACHE["path"] == path
+        and _STOCK_NAME_CACHE["mtime"] == mtime
+    ):
+        return _STOCK_NAME_CACHE["mapping"]
+    try:
+        df = pd.read_parquet(path, columns=["ts_code", "name"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("读取 stock_list.parquet 失败 path=%s err=%s", path, e)
+        return _STOCK_NAME_CACHE.get("mapping", {}) or {}
+    mapping = {
+        str(c): str(n)
+        for c, n in zip(df["ts_code"].tolist(), df["name"].tolist())
+        if isinstance(c, str) and c
+    }
+    _STOCK_NAME_CACHE.update({"mtime": mtime, "mapping": mapping, "path": path})
+    logger.info("stock_name_map reloaded: path=%s rows=%d", path, len(mapping))
+    return mapping
+
+
+# ---------------------------------------------------------------------------
+# 最新 metric snapshot (用于 RPC 超时时的 SQLite fallback)
+# ---------------------------------------------------------------------------
+
+
+def get_latest_metric_snapshot(
+    db: Session,
+    node_id: str,
+    strategy_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Most-recent cached metric snapshot from SQLite.
+
+    Used as fallback when realtime pass-through to vnpy fails (RPC timeout / trader down).
+    """
+    row = (
+        db.query(MLMetricSnapshot)
+        .filter(
+            MLMetricSnapshot.node_id == node_id,
+            MLMetricSnapshot.engine == ML_ENGINE_NAME,
+            MLMetricSnapshot.strategy_name == strategy_name,
+        )
+        .order_by(MLMetricSnapshot.trade_date.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return _metric_row_to_dict(row)
+
+
+# ---------------------------------------------------------------------------
+# 全量预测 — 读 predictions.parquet (qlib subprocess 产物) + name enrichment
+# ---------------------------------------------------------------------------
+
+
+def get_all_predictions_by_date(
+    strategy_name: str,
+    yyyymmdd: str,
+    live_output_root: str,
+) -> List[Dict[str, Any]]:
+    """读 ``{live_output_root}/{strategy_name}/{yyyymmdd}/predictions.parquet``,
+    返回全量预测列表 (按 score 降序排序, 已加 rank + 股票中文名).
+
+    Returns
+    -------
+    list of dict: ``[{"rank": int, "instrument": str, "name": str|None,
+                      "score": float}, ...]``; 文件不存在时返回 ``[]``.
+    """
+    import pandas as pd
+    from pathlib import Path
+    path = Path(live_output_root) / strategy_name / yyyymmdd / "predictions.parquet"
+    if not path.exists():
+        return []
+    try:
+        df = pd.read_parquet(path)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("读取 predictions.parquet 失败 path=%s err=%s", path, e)
+        return []
+
+    # predictions.parquet 是 MultiIndex (datetime, instrument), column "score"
+    df = df.reset_index()
+    if "instrument" not in df.columns:
+        # 尝试常见的列名兜底
+        for cand in ("symbol", "ts_code", "code"):
+            if cand in df.columns:
+                df = df.rename(columns={cand: "instrument"})
+                break
+        else:
+            logger.warning("predictions.parquet 缺 instrument 列: %s", df.columns.tolist())
+            return []
+    if "score" not in df.columns:
+        logger.warning("predictions.parquet 缺 score 列: %s", df.columns.tolist())
+        return []
+
+    # 若有多个 datetime (不应出现, 但防御性处理), 只保留最大日期
+    if "datetime" in df.columns:
+        last_dt = df["datetime"].max()
+        df = df[df["datetime"] == last_dt]
+
+    name_map = get_stock_name_map()
+    df = df[["instrument", "score"]].copy()
+    df["name"] = df["instrument"].map(name_map)
+    df = df.sort_values("score", ascending=False).reset_index(drop=True)
+    df["rank"] = range(1, len(df) + 1)
+
+    out: List[Dict[str, Any]] = []
+    for _, r in df.iterrows():
+        score_val = r.get("score")
+        out.append({
+            "rank": int(r["rank"]),
+            "instrument": str(r["instrument"]),
+            "name": (str(r["name"]) if pd.notna(r.get("name")) else None),
+            "score": float(score_val) if pd.notna(score_val) else None,
+        })
+    return out
+
+
 def backtest_vs_live_diff(
     db: Session,
     node_id: str,

@@ -1,13 +1,16 @@
 /**
  * 最新 TopK 信号 — 从 latest prediction summary 读 selections top-N.
  * 挂在 Tab1 "收益曲线与持仓" 的 "当前持仓" 之后.
+ *
+ * Stale-while-error: RPC 超时或业务失败时, 保留上次成功的 topk 继续展示,
+ * 顶部加黄色 Alert 提示"节点暂时异常", 而不是清空.
  */
-import React from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Card, Empty, Spin, Table, Typography } from 'antd'
+import React, { useEffect, useRef } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Alert, Card, Empty, Spin, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { mlMonitoringService } from '@/services/mlMonitoringService'
-import type { TopkEntry } from '@/services/mlMonitoringService'
+import type { PredictionSummary, TopkEntry } from '@/services/mlMonitoringService'
 
 const { Text } = Typography
 
@@ -18,7 +21,15 @@ interface Props {
 
 const columns: ColumnsType<TopkEntry> = [
   { title: '#', dataIndex: 'rank', key: 'rank', width: 48, align: 'center' },
-  { title: '股票', dataIndex: 'instrument', key: 'instrument', width: 120 },
+  { title: '代码', dataIndex: 'instrument', key: 'instrument', width: 110 },
+  {
+    title: '名称',
+    dataIndex: 'name',
+    key: 'name',
+    width: 100,
+    render: (v: string | null | undefined, r: TopkEntry) =>
+      v || r.instrument || '—',
+  },
   {
     title: '预测分数',
     dataIndex: 'score',
@@ -40,27 +51,42 @@ const columns: ColumnsType<TopkEntry> = [
 ]
 
 const LatestTopkCard: React.FC<Props> = ({ nodeId, strategyName }) => {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['ml-topk-latest', nodeId, strategyName],
     queryFn: () => mlMonitoringService.predictionLatestSummary(nodeId, strategyName),
     refetchInterval: 60000,
     staleTime: 30000,
     retry: 1,
+    // refetch 失败时保留上一次成功数据, 避免表格闪空
+    placeholderData: keepPreviousData,
   })
 
-  const summary = data?.success ? data.data : null
-  const topk = summary?.topk || []
+  // 最后一次 success=true 的 summary, 用于 data.success=false 的业务失败场景
+  // (HTTP 200 但业务不成功, useQuery 不会触发 isError)
+  const lastGoodRef = useRef<PredictionSummary | null>(null)
+  useEffect(() => {
+    if (data?.success && data.data) {
+      lastGoodRef.current = data.data
+    }
+  }, [data])
+
+  const currentSummary = data?.success ? data.data : null
+  const staleSummary = currentSummary ?? lastGoodRef.current
+  const businessWarning = data && !data.success ? (data.warning || data.message) : null
+  const showStaleBanner = (isError || !!businessWarning) && !!lastGoodRef.current && !currentSummary
+
+  const topk = (staleSummary?.topk || []) as TopkEntry[]
 
   return (
     <Card
       title={
         <div>
           最新 TopK 信号
-          {summary?.trade_date && (
+          {staleSummary?.trade_date && (
             <Text type="secondary" style={{ marginLeft: 12, fontSize: 12, fontWeight: 'normal' }}>
-              trade_date: {summary.trade_date}
-              {summary.model_run_id &&
-                ` · model: ${summary.model_run_id.slice(0, 8)}`}
+              trade_date: {staleSummary.trade_date}
+              {staleSummary.model_run_id &&
+                ` · model: ${staleSummary.model_run_id.slice(0, 8)}`}
             </Text>
           )}
         </div>
@@ -68,7 +94,20 @@ const LatestTopkCard: React.FC<Props> = ({ nodeId, strategyName }) => {
       style={{ marginTop: 16 }}
       styles={{ body: { padding: 0 } }}
     >
-      {isLoading ? (
+      {showStaleBanner && (
+        <Alert
+          type="warning"
+          showIcon
+          closable
+          style={{ margin: 0, borderRadius: 0 }}
+          message={
+            isError
+              ? `节点暂时异常, 显示上次缓存 (trade_date: ${lastGoodRef.current?.trade_date || '—'}). ${error instanceof Error ? error.message : ''}`
+              : `${businessWarning || '数据获取失败'} — 显示上次缓存`
+          }
+        />
+      )}
+      {isLoading && !staleSummary ? (
         <div style={{ padding: 24, textAlign: 'center' }}>
           <Spin size="small" />
         </div>
@@ -80,7 +119,7 @@ const LatestTopkCard: React.FC<Props> = ({ nodeId, strategyName }) => {
         <Table<TopkEntry>
           size="small"
           rowKey={(r) => `${r.rank}-${r.instrument}`}
-          dataSource={topk as TopkEntry[]}
+          dataSource={topk}
           columns={columns}
           pagination={false}
         />

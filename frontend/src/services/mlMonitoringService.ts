@@ -86,9 +86,20 @@ export interface BacktestDiff {
 
 export interface TopkEntry {
   instrument?: string
-  score?: number
+  /** 股票中文简称 (selections.parquet 写时 enrichment, 可能为 null). */
+  name?: string | null
+  score?: number | null
   rank?: number
+  weight?: number | null
   [key: string]: unknown
+}
+
+/** 单条全量预测 (/prediction/all/{yyyymmdd} 返回的元素). */
+export interface AllPredictionEntry {
+  rank: number
+  instrument: string
+  name: string | null
+  score: number | null
 }
 
 export interface PredictionSummary {
@@ -161,6 +172,19 @@ export const mlMonitoringService = {
     return apiClient
       .get(
         `/live-trading/ml/${enc(nodeId)}/${enc(strategyName)}/prediction/summary/${enc(yyyymmdd)}`,
+      )
+      .then((r) => r.data)
+  },
+
+  /** Per-day **全量**预测 (股票池所有股票), 从 predictions.parquet 读, 带股票名. */
+  predictionAllByDate(
+    nodeId: string,
+    strategyName: string,
+    yyyymmdd: string,
+  ): Promise<LiveTradingResponse<AllPredictionEntry[]>> {
+    return apiClient
+      .get(
+        `/live-trading/ml/${enc(nodeId)}/${enc(strategyName)}/prediction/all/${enc(yyyymmdd)}`,
       )
       .then((r) => r.data)
   },
