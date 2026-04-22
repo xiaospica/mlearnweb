@@ -8,6 +8,7 @@ import ExperimentDetailPage from '@/pages/ExperimentDetailPage'
 import ReportPage from '@/pages/ReportPage'
 import TrainingRecordsPage from '@/pages/TrainingRecordsPage'
 import TrainingDetailPage from '@/pages/TrainingDetailPage'
+import TrainingComparePage from '@/pages/TrainingComparePage'
 import HelpLayout from '@/pages/help/HelpLayout'
 import FactorCategoriesPage from '@/pages/help/FactorCategoriesPage'
 import Alpha158DocsPage from '@/pages/help/Alpha158DocsPage'
@@ -58,6 +59,7 @@ function App() {
             <Routes>
               <Route path="/" element={<AppLayout />}>
                 <Route index element={<TrainingRecordsPage />} />
+                <Route path="training/compare" element={<TrainingComparePage />} />
                 <Route path="training/:id" element={<TrainingDetailPage />} />
                 <Route path="experiments" element={<HomePage />} />
                 <Route path="experiments/:expId" element={<ExperimentDetailPage />} />

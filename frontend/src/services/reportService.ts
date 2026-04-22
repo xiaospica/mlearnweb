@@ -1,5 +1,5 @@
 import apiClient from './apiClient'
-import type { ReportData, ApiSuccessResponse, QLibFiguresData, FeatureImportanceData, SHAPAnalysisData, SHAPHeatmapData } from '@/types'
+import type { ReportData, ApiSuccessResponse, QLibFiguresData, FeatureImportanceData, SHAPAnalysisData, SHAPHeatmapData, InsampleLayeredData } from '@/types'
 
 export const reportService = {
   getFullReport(expId: string, runId: string): Promise<ApiSuccessResponse<ReportData>> {
@@ -66,6 +66,12 @@ export const reportService = {
   getSHAPHeatmap(expId: string, runId: string): Promise<ApiSuccessResponse<SHAPHeatmapData>> {
     return apiClient
       .get(`/runs/${runId}/shap-heatmap`, { params: { experiment_id: expId } })
+      .then((r) => r.data)
+  },
+
+  getInsampleLayered(expId: string, runId: string): Promise<ApiSuccessResponse<InsampleLayeredData>> {
+    return apiClient
+      .get(`/runs/${runId}/insample-layered`, { params: { exp_id: expId } })
       .then((r) => r.data)
   },
 }

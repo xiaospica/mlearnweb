@@ -263,6 +263,24 @@ def get_qlib_figures(
     return ApiResponse(success=True, data=serializable_result)
 
 
+@router.get("/{run_id}/insample-layered", response_model=ApiResponse)
+def get_insample_layered(
+    run_id: str,
+    exp_id: str = Query(..., description="实验ID"),
+):
+    """获取 train/valid/test 三段分层回测图表（qlib model_performance_graph）"""
+    from app.services.insample_layered_service import InsampleLayeredService
+
+    result = InsampleLayeredService.get_layered_figures(exp_id, run_id)
+    if not result.get("available"):
+        return ApiResponse(
+            success=False,
+            message=result.get("detail") or "分层回测数据不可用",
+            data=result,
+        )
+    return ApiResponse(success=True, data=result)
+
+
 @router.get("/{run_id}/feature-importance")
 def get_feature_importance(
     run_id: str,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined, BarChartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
@@ -627,6 +627,17 @@ const TrainingRecordsPage: React.FC = () => {
           />
           {selectedIds.length > 0 && (
             <>
+              <Tooltip title={selectedIds.length < 2 ? '至少选择 2 条' : selectedIds.length > 3 ? '最多对比 3 条' : ''}>
+                <Button
+                  icon={<BarChartOutlined />}
+                  onClick={() => navigate(`/training/compare?ids=${selectedIds.join(',')}`)}
+                  size="small"
+                  type="primary"
+                  disabled={selectedIds.length < 2 || selectedIds.length > 3}
+                >
+                  对比 ({selectedIds.length}/3)
+                </Button>
+              </Tooltip>
               <Button
                 icon={<FolderAddOutlined />}
                 onClick={() => setCreateGroupModalVisible(true)}

@@ -1,5 +1,5 @@
 import apiClient from './apiClient'
-import type { TrainingRecord, ApiSuccessResponse } from '@/types'
+import type { TrainingRecord, ApiSuccessResponse, TrainingCompareData } from '@/types'
 
 export const trainingService = {
   create(data: { name: string; description?: string; experiment_id: string; experiment_name?: string; command_line?: string; category?: string }): Promise<ApiSuccessResponse<TrainingRecord>> {
@@ -66,6 +66,12 @@ export const trainingService = {
 
   getLog(recordId: number): Promise<ApiSuccessResponse<{ log_content: string; has_log: boolean }>> {
     return apiClient.get(`/training-records/${recordId}/log`).then((r) => r.data)
+  },
+
+  compare(ids: number[]): Promise<ApiSuccessResponse<TrainingCompareData>> {
+    return apiClient
+      .get('/training-records/compare', { params: { ids: ids.join(',') } })
+      .then((r) => r.data)
   },
 
   listGroups(): Promise<ApiSuccessResponse<Array<{ name: string; count: number; is_system: boolean }>>> {

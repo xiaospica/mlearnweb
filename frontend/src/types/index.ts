@@ -219,6 +219,99 @@ export interface QLibFiguresData {
   model_figures?: PlotlyFigure[]
 }
 
+export interface InsampleLayeredSegment {
+  available: boolean
+  sample_count?: number
+  time_range?: [string, string] | null
+  figures?: PlotlyFigure[]
+  error?: string
+  detail?: string
+}
+
+export interface InsampleLayeredData {
+  available: boolean
+  segments: Record<string, InsampleLayeredSegment>
+  error?: string
+  detail?: string
+}
+
+export interface TrainingCompareMergedReport {
+  available: boolean
+  dates: string[]
+  total_days?: number
+  cumulative_return: number[]
+  daily_return: number[]
+  run_boundaries?: Array<{ start_date: string; end_date: string; run_index: number | null; segment_label: string | null }>
+  benchmark_cum_return?: number[]
+  daily_benchmark?: number[]
+  turnover?: number[]
+}
+
+export interface TrainingCompareMergedMetrics {
+  available?: boolean
+  total_trading_days?: number
+  total_return?: number
+  annualized_return?: number
+  mean_daily_return?: number
+  std_daily_return?: number
+  max_drawdown?: number
+  sharpe_ratio?: number | null
+  sortino_ratio?: number
+  calmar_ratio?: number | null
+  win_rate?: number
+  profit_loss_ratio?: number | null
+  max_single_day_gain?: number
+  max_single_day_loss?: number
+  number_of_runs?: number
+  excess_annualized_return?: number
+  tracking_error?: number
+  information_ratio?: number | null
+  [key: string]: unknown
+}
+
+export interface TrainingCompareICAnalysis {
+  available: boolean
+  dates?: string[]
+  ic_values?: (number | null)[]
+  rank_ic_values?: (number | null)[]
+  mean_ic?: number
+  mean_rank_ic?: number
+  ic_std?: number
+  icir?: number
+  [key: string]: unknown
+}
+
+export interface TrainingCompareRecord {
+  id: number
+  available: boolean
+  name?: string
+  category?: string
+  experiment_id?: string
+  experiment_name?: string
+  status?: string
+  summary_metrics?: Record<string, unknown>
+  config_snapshot?: Record<string, unknown>
+  tags?: string[]
+  merged_report?: TrainingCompareMergedReport | null
+  merged_metrics?: TrainingCompareMergedMetrics | null
+  ic_analysis?: TrainingCompareICAnalysis | null
+  monthly_returns?: Record<string, unknown> | null
+  annual_returns?: Record<string, unknown> | null
+  rolling_stats?: Record<string, unknown> | null
+  individual_runs?: Array<{
+    run_id: string
+    rolling_index: number | null
+    segment_label: string | null
+    test_range: string
+    data_points: number
+  }>
+  error?: string
+}
+
+export interface TrainingCompareData {
+  records: TrainingCompareRecord[]
+}
+
 export interface InSampleSegmentResult {
   pred_shape?: number[]
   n_stocks?: number

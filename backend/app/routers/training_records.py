@@ -229,6 +229,31 @@ def get_existing_insample_results(experiment_id: str, run_id: str):
     )
 
 
+@router.get("/compare", response_model=ApiResponse)
+def compare_training_records(
+    ids: str = Query(..., description="训练记录ID，逗号分隔，2~3 条"),
+    db: Session = Depends(get_db_session),
+):
+    from app.services.training_compare_service import TrainingCompareService
+
+    try:
+        id_list = [int(x) for x in ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ids 格式错误，需为逗号分隔的整数")
+
+    try:
+        data = TrainingCompareService.get_compare_data(db, id_list)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        print(f"[TrainingCompare] error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"获取对比数据失败: {e}")
+
+    return ApiResponse(success=True, data=data)
+
+
 @router.get("/{record_id}", response_model=ApiResponse)
 def get_training_record(record_id: int, db: Session = Depends(get_db_session)):
     record = TrainingService.get_record(db, record_id)

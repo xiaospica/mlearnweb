@@ -11,6 +11,7 @@ import { trainingService } from '@/services/trainingService'
 import { factorDocService } from '@/services/factorDocService'
 import { FactorInfoModal } from '@/components/FactorInfoModal'
 import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData, LagICAnalysis, HoldingsAnalysis, SHAPHeatmapData } from '@/types'
+import { computeEqualScaleTicks, fixPlotlyFigureXAxis } from '@/utils/chartHelpers'
 
 const { Title, Text } = Typography
 
@@ -354,13 +355,38 @@ const RiskMetricsTable: React.FC<{ data: ReportData['risk_metrics'] }> = ({ data
   )
 }
 
+const useContainerSize = (defaultW = 400, defaultH = 280) => {
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [size, setSize] = React.useState({ w: defaultW, h: defaultH })
+  React.useEffect(() => {
+    if (!ref.current) return
+    const el = ref.current
+    const apply = () => {
+      const rect = el.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setSize({ w: rect.width, h: rect.height })
+      }
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return { ref, size }
+}
+
 const PredLabelScatterChart: React.FC<{ data?: { available: boolean; labels?: number[]; scores?: number[]; correlation?: number; count?: number } }> = ({ data }) => {
+  const GRID = { left: 60, right: 30, top: 20, bottom: 40 }
+  const { ref, size } = useContainerSize(400, 280)
   if (!data?.available || !data.labels || !data.scores) {
     return <Empty description="无预测-标签数据" style={{ padding: 40 }} />
   }
 
   const { labels, scores, correlation, count } = data
   const sampleData = labels.map((label, i) => [scores[i], label]).slice(0, 3000)
+  const plotW = Math.max(size.w - GRID.left - GRID.right, 1)
+  const plotH = Math.max(size.h - GRID.top - GRID.bottom, 1)
+  const ticks = computeEqualScaleTicks(scores, labels, plotW, plotH)
 
   return (
     <div>
@@ -368,29 +394,32 @@ const PredLabelScatterChart: React.FC<{ data?: { available: boolean; labels?: nu
         <Text type="secondary" style={{ fontSize: 12 }}>样本数: <Text strong>{count}</Text></Text>
         <Text type="secondary" style={{ fontSize: 12 }}>相关系数: <Text strong style={{ color: correlation && correlation > 0 ? '#52c41a' : '#ff4d4f' }}>{correlation?.toFixed(4) || '-'}</Text></Text>
       </div>
-      <ReactECharts
-        option={{
-          tooltip: { trigger: 'item', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' }, formatter: (p: any) => `Score: ${p.value[0]?.toFixed(4)}<br/>Label: ${p.value[1]?.toFixed(4)}` },
-          grid: { left: 60, right: 30, top: 20, bottom: 40 },
-          xAxis: { name: '预测分数', nameLocation: 'middle', nameGap: 25, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-          yAxis: { name: '真实标签', nameLocation: 'middle', nameGap: 40, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
-          series: [{ 
-            type: 'scatter', 
-            data: sampleData, 
-            symbolSize: 5,
-            itemStyle: (params: any) => {
-              const score = params.data[0]
-              const label = params.data[1]
-              const isCorrect = (score > 0 && label > 0) || (score < 0 && label < 0)
-              return {
-                color: isCorrect ? '#52c41a' : '#ff4d4f',
-                opacity: 0.6,
-              }
-            },
-          }],
-        }}
-        style={{ height: 280 }}
-      />
+      <div ref={ref} style={{ width: '100%', height: 280 }}>
+        <ReactECharts
+          option={{
+            tooltip: { trigger: 'item', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' }, formatter: (p: any) => `Score: ${p.value[0]?.toFixed(4)}<br/>Label: ${p.value[1]?.toFixed(4)}` },
+            grid: GRID,
+            xAxis: { type: 'value', min: ticks.xMin, max: ticks.xMax, interval: ticks.interval, name: '预测分数', nameLocation: 'middle', nameGap: 25, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
+            yAxis: { type: 'value', min: ticks.yMin, max: ticks.yMax, interval: ticks.interval, name: '真实标签', nameLocation: 'middle', nameGap: 40, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
+            series: [{
+              type: 'scatter',
+              data: sampleData,
+              symbolSize: 5,
+              itemStyle: (params: any) => {
+                const score = params.data[0]
+                const label = params.data[1]
+                const isCorrect = (score > 0 && label > 0) || (score < 0 && label < 0)
+                return {
+                  color: isCorrect ? '#52c41a' : '#ff4d4f',
+                  opacity: 0.6,
+                }
+              },
+            }],
+          }}
+          style={{ width: '100%', height: '100%' }}
+          notMerge
+        />
+      </div>
     </div>
   )
 }
@@ -3543,32 +3572,38 @@ const InSampleICIRChart: React.FC<{ segments: Record<string, InSampleSegmentResu
 
 // 新增：预测值 vs 标签值 散点图组件
 const InSampleScatterChart: React.FC<{ segments: Record<string, InSampleSegmentResult> }> = ({ segments }) => {
+  const GRID = { left: 70, right: 30, top: 50, bottom: 50 }
+  const { ref, size } = useContainerSize(500, 350)
   const orderedSegmentNames = ['train', 'valid', 'test'].filter(name => segments[name])
-  
+
   const series: Array<Record<string, unknown>> = []
-  
+  const allScores: number[] = []
+  const allLabels: number[] = []
+
   orderedSegmentNames.forEach(segName => {
     const segData = segments[segName]
     const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
     const predLabelData = segData.pred_label_data
-    
+
     if (!predLabelData?.available || !predLabelData.scores || !predLabelData.labels) {
       return
     }
-    
+
     const scores = predLabelData.scores
     const labels = predLabelData.labels
-    
+
     const sampleSize = Math.min(scores.length, 2000)
     const step = Math.max(1, Math.floor(scores.length / sampleSize))
     const sampledData: Array<[number, number]> = []
-    
+
     for (let i = 0; i < scores.length; i += step) {
       if (scores[i] != null && labels[i] != null && !isNaN(scores[i]) && !isNaN(labels[i])) {
         sampledData.push([scores[i], labels[i]])
+        allScores.push(scores[i])
+        allLabels.push(labels[i])
       }
     }
-    
+
     if (sampledData.length > 0) {
       series.push({
         name: config.label,
@@ -3582,51 +3617,64 @@ const InSampleScatterChart: React.FC<{ segments: Record<string, InSampleSegmentR
       })
     }
   })
-  
+
   if (series.length === 0) {
     return <Empty description="无预测值-标签值数据" style={{ padding: 40 }} />
   }
-  
+
+  const plotW = Math.max(size.w - GRID.left - GRID.right, 1)
+  const plotH = Math.max(size.h - GRID.top - GRID.bottom, 1)
+  const ticks = computeEqualScaleTicks(allScores, allLabels, plotW, plotH)
+
   return (
-    <ReactECharts
-      option={{
-        tooltip: {
-          trigger: 'item',
-          backgroundColor: '#fff',
-          borderColor: '#e8e8e8',
-          textStyle: { color: '#374151' },
-          formatter: (params: any) => {
-            return `预测值: ${params.value[0]?.toFixed(4)}<br/>标签值: ${params.value[1]?.toFixed(4)}`
+    <div ref={ref} style={{ width: '100%', height: 350 }}>
+      <ReactECharts
+        option={{
+          tooltip: {
+            trigger: 'item',
+            backgroundColor: '#fff',
+            borderColor: '#e8e8e8',
+            textStyle: { color: '#374151' },
+            formatter: (params: any) => {
+              return `预测值: ${params.value[0]?.toFixed(4)}<br/>标签值: ${params.value[1]?.toFixed(4)}`
+            },
           },
-        },
-        legend: {
-          data: series.map(s => s.name as string),
-          textStyle: { color: '#6b7280' },
-          top: 0,
-        },
-        grid: { left: 70, right: 30, top: 50, bottom: 50 },
-        xAxis: {
-          type: 'value',
-          name: '预测值 (Score)',
-          nameLocation: 'middle',
-          nameGap: 30,
-          axisLabel: { color: '#9ca3af' },
-          axisLine: { lineStyle: { color: '#e5e7eb' } },
-          splitLine: { lineStyle: { color: '#f0f0f0' } },
-        },
-        yAxis: {
-          type: 'value',
-          name: '标签值 (Label)',
-          nameLocation: 'middle',
-          nameGap: 50,
-          axisLabel: { color: '#9ca3af' },
-          axisLine: { lineStyle: { color: '#e5e7eb' } },
-          splitLine: { lineStyle: { color: '#f0f0f0' } },
-        },
-        series,
-      }}
-      style={{ height: 350 }}
-    />
+          legend: {
+            data: series.map(s => s.name as string),
+            textStyle: { color: '#6b7280' },
+            top: 0,
+          },
+          grid: GRID,
+          xAxis: {
+            type: 'value',
+            min: ticks.xMin,
+            max: ticks.xMax,
+            interval: ticks.interval,
+            name: '预测值 (Score)',
+            nameLocation: 'middle',
+            nameGap: 30,
+            axisLabel: { color: '#9ca3af' },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+          },
+          yAxis: {
+            type: 'value',
+            min: ticks.yMin,
+            max: ticks.yMax,
+            interval: ticks.interval,
+            name: '标签值 (Label)',
+            nameLocation: 'middle',
+            nameGap: 50,
+            axisLabel: { color: '#9ca3af' },
+            axisLine: { lineStyle: { color: '#e5e7eb' } },
+            splitLine: { lineStyle: { color: '#f0f0f0' } },
+          },
+          series,
+        }}
+        style={{ width: '100%', height: '100%' }}
+        notMerge
+      />
+    </div>
   )
 }
 
@@ -3777,6 +3825,74 @@ const InSampleLabelHistogramChart: React.FC<{ segments: Record<string, InSampleS
       }}
       style={{ height: 300 }}
     />
+  )
+}
+
+// 分层回测：调用后端 qlib model_performance_graph，三列并排展示 train/valid/test
+const InsampleLayeredBacktest: React.FC<{ expId: string; runId: string }> = ({ expId, runId }) => {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['insample-layered', expId, runId],
+    queryFn: () => reportService.getInsampleLayered(expId, runId),
+    enabled: !!expId && !!runId,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  if (isLoading) return <Spin style={{ display: 'block', margin: '40px auto' }} />
+  if (error) return <Empty description={`加载失败: ${(error as Error).message}`} style={{ padding: 40 }} />
+  if (!data?.success || !data.data?.available) {
+    return <Empty description={data?.message || '暂无分层回测数据（需要 MultiSegmentSignalRecord 产出的 pred_*.pkl / label_*.pkl）'} style={{ padding: 40 }} />
+  }
+
+  const segments = data.data.segments
+  const orderedSegmentNames = ['train', 'valid', 'test']
+
+  return (
+    <Row gutter={[12, 12]}>
+      {orderedSegmentNames.map(segName => {
+        const seg = segments[segName]
+        const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName, bgColor: 'rgba(140,140,140,0.08)' }
+        return (
+          <Col xs={24} lg={8} key={segName}>
+            <Card
+              size="small"
+              title={
+                <Space>
+                  <Tag color={config.color}>{config.label}</Tag>
+                  {seg?.available && seg.sample_count != null && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>样本: {seg.sample_count.toLocaleString()}</Text>
+                  )}
+                  {seg?.available && seg.time_range && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>{seg.time_range[0]} ~ {seg.time_range[1]}</Text>
+                  )}
+                </Space>
+              }
+              style={{ background: config.bgColor }}
+            >
+              {!seg || !seg.available ? (
+                <Empty description={seg?.detail || seg?.error || '该段无分层回测数据'} style={{ padding: 24 }} />
+              ) : (
+                <div>
+                  {(seg.figures || []).map((fig, i) => {
+                    const fixedFig = fixPlotlyFigureXAxis(fig)
+                    return (
+                      <div key={`${segName}-fig-${i}`} style={{ marginBottom: 12 }}>
+                        <Plot
+                          data={fixedFig.data}
+                          layout={{ ...fixedFig.layout, height: 300, autosize: true, margin: { l: 45, r: 20, t: 30, b: 50 } }}
+                          style={{ width: '100%', minHeight: 300 }}
+                          useResizeHandler
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </Card>
+          </Col>
+        )
+      })}
+    </Row>
   )
 }
 
@@ -4311,6 +4427,23 @@ const InSampleAnalysisPanel: React.FC<InSampleAnalysisPanelProps> = ({ expId, ru
               size="small"
             >
               <InSampleCumulativeReturnChart segments={result.data.segments} />
+            </Card>
+          </Col>
+
+          {/* 分层回测（train/valid/test 三列并排，qlib model_performance_graph） */}
+          <Col span={24}>
+            <Card
+              title={
+                <Space>
+                  <span>分层回测对比（5 组分位 + Long-Short）</span>
+                  <Text type="secondary" style={{ fontSize: 11, fontWeight: 'normal' }}>
+                    （基于 qlib model_performance_graph，训练集 / 验证集 / 测试集 三列并排，用于判断分层单调性与过拟合）
+                  </Text>
+                </Space>
+              }
+              size="small"
+            >
+              <InsampleLayeredBacktest expId={expId} runId={runId} />
             </Card>
           </Col>
 
