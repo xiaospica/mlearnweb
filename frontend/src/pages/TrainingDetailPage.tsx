@@ -15,6 +15,7 @@ const { TextArea } = Input
 const STATUS_MAP: Record<string, { color: string; label: string }> = {
   running: { color: '#faad14', label: '运行中' },
   completed: { color: '#52c41a', label: '已完成' },
+  partial: { color: '#fa8c16', label: '部分完成' },
   failed: { color: '#ff4d4f', label: '失败' },
 }
 
