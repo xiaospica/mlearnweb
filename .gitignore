@@ -17,3 +17,4 @@ frontend/tsconfig.tsbuildinfo
 # Editor
 .vscode
 .idea
+dist
