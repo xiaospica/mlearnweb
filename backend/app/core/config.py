@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # 单机部署时通常与 vnpy_qmt_sim 共用同一目录。
     daily_merged_root: str = r"D:\vnpy_data\snapshots\merged"
 
+    # Phase 3B: deployment 同步周期（秒）。10 分钟扫描一次 vnpy 节点策略并
+    # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
+    deployment_sync_interval_seconds: int = 600
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

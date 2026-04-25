@@ -152,6 +152,20 @@ export interface ReportData {
   tags: Record<string, string>
 }
 
+// Phase 3B: 训练记录的部署追踪。详见 vnpy_common/naming.py 命名约定。
+export interface TrainingDeployment {
+  node_id: string
+  engine: string
+  strategy_name: string
+  mode: 'live' | 'sim'
+  gateway_name: string
+  run_id: string
+  bundle_dir: string
+  first_seen_at: string
+  last_seen_at: string
+  active: boolean
+}
+
 export interface TrainingRecord {
   id: number
   name: string
@@ -174,6 +188,7 @@ export interface TrainingRecord {
   memo: string | null
   group_name: string
   is_favorite: boolean
+  deployments: TrainingDeployment[]
   created_at: string | null
   updated_at: string | null
   run_mappings?: RunMapping[]

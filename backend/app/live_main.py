@@ -22,12 +22,44 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.models.database import init_db
 from app.routers import live_trading, ml_monitoring
+from app.services.deployment_sync_service import sync_deployments
 from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
 
 logger = logging.getLogger(__name__)
+
+
+async def deployment_sync_loop():
+    """Phase 3B：周期扫描 vnpy 节点策略，反查 run_id，写 TrainingRecord.deployments。
+
+    启动时立即跑一次，之后每 settings.deployment_sync_interval_seconds 跑一次。
+    异常吞掉只 log warn，不影响主流程。
+    """
+    from app.models.database import get_db_session
+
+    interval = max(60, int(settings.deployment_sync_interval_seconds))
+    while True:
+        try:
+            client = get_vnpy_client()
+            db_gen = get_db_session()
+            db = next(db_gen)
+            try:
+                stats = await sync_deployments(db, client)
+                if stats.get("scanned", 0) > 0:
+                    logger.info("[deployment_sync] %s", stats)
+            finally:
+                with contextlib.suppress(Exception):
+                    db.close()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[deployment_sync] iteration failed: %s", exc)
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
 
 
 @asynccontextmanager
@@ -38,7 +70,9 @@ async def lifespan(app: FastAPI):
     ml_task = asyncio.create_task(ml_snapshot_loop())
     # 方案 §2.4.5 — 同步推理机回填的历史 IC 到 SQLite (5min 一次)
     hist_sync_task = asyncio.create_task(historical_metrics_sync_loop())
-    tasks = (equity_task, ml_task, hist_sync_task)
+    # Phase 3B — 部署追踪扫描 (10min 一次)
+    deployment_task = asyncio.create_task(deployment_sync_loop())
+    tasks = (equity_task, ml_task, hist_sync_task, deployment_task)
     try:
         yield
     finally:

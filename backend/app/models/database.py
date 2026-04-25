@@ -46,6 +46,11 @@ class TrainingRecord(Base):
     memo = Column(Text, nullable=True)
     group_name = Column(String(64), nullable=True, index=True, default="default")
     is_favorite = Column(Boolean, default=False, index=True)
+    # Phase 3B: 部署追踪。list of dict: {node_id, engine, strategy_name, mode,
+    # gateway_name, run_id, bundle_dir, first_seen_at, last_seen_at, active}
+    # 由 deployment_sync_service 周期扫描 vnpy 节点策略后写入。
+    # 详见 vnpy_common/naming.py 命名约定章节。
+    deployments = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -125,6 +130,7 @@ def init_db():
     _migrate_add_log_content()
     _migrate_add_memo()
     _migrate_add_group_favorite()
+    _migrate_add_deployments()
     _migrate_strategy_equity_snapshot_indexes()
 
 
@@ -226,18 +232,45 @@ def _migrate_add_log_content():
     db_path = settings.database_url.replace("sqlite:///", "")
     if not db_path or not db_path.endswith(".db"):
         return
-    
+
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(training_records)")
         columns = [col[1] for col in cursor.fetchall()]
-        
+
         if "log_content" not in columns:
             cursor.execute("ALTER TABLE training_records ADD COLUMN log_content TEXT")
             conn.commit()
             print("[DB Migration] Added log_content column to training_records table")
-        
+
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] Warning: {e}")
+
+
+def _migrate_add_deployments():
+    """Phase 3B 迁移：在 training_records 加 deployments JSON 列。
+
+    存储 list[dict] 部署追踪信息，由 deployment_sync_service 周期写入。
+    详见 vnpy_common/naming.py 命名约定章节。
+    """
+    import sqlite3
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(training_records)")
+        columns = [col[1] for col in cursor.fetchall()]
+
+        if "deployments" not in columns:
+            cursor.execute("ALTER TABLE training_records ADD COLUMN deployments JSON")
+            conn.commit()
+            print("[DB Migration] Added deployments column to training_records table")
+
         conn.close()
     except Exception as e:
         print(f"[DB Migration] Warning: {e}")

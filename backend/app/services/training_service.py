@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.database import TrainingRecord, TrainingRunMapping, get_db_session
 from app.utils.mlflow_reader import mlflow_reader
@@ -320,10 +321,12 @@ class TrainingService:
 
         record = db.query(TrainingRecord).filter(TrainingRecord.id == training_record_id).first()
         if record:
-            current_ids = record.run_ids or []
+            current_ids = list(record.run_ids or [])
             if run_id not in current_ids:
                 current_ids.append(run_id)
                 record.run_ids = current_ids
+                # Column(JSON) 默认不追踪 list.append 类 mutation；显式标脏确保 commit 落盘
+                flag_modified(record, "run_ids")
                 record.updated_at = datetime.now()
 
         db.commit()
@@ -358,6 +361,7 @@ def _record_to_dict(record: TrainingRecord, include_preview: bool = False, run_m
             "memo": record.memo,
             "group_name": getattr(record, 'group_name', 'default') or 'default',
             "is_favorite": getattr(record, 'is_favorite', False) or False,
+            "deployments": getattr(record, 'deployments', None) or [],
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,
         }

@@ -8,6 +8,7 @@ import ReactECharts from 'echarts-for-react'
 import { trainingService } from '@/services/trainingService'
 import type { TrainingRecord } from '@/types'
 import MemoPopover from '@/components/MemoPopover/MemoPopover'
+import DeploymentBadges from '@/components/DeploymentBadges'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -560,6 +561,15 @@ const TrainingRecordsPage: React.FC = () => {
             fontSize: 11,
           }}
         />
+      ),
+    },
+    {
+      title: '部署',
+      dataIndex: 'deployments',
+      key: 'deployments',
+      width: 220,
+      render: (_: unknown, record: TrainingRecord) => (
+        <DeploymentBadges deployments={record.deployments} maxVisible={2} />
       ),
     },
     {

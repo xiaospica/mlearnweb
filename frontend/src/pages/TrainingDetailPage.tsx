@@ -6,6 +6,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
 import ReactECharts from 'echarts-for-react'
+import DeploymentBadges from '@/components/DeploymentBadges'
 
 const MemoEditor = React.lazy(() => import('@/components/MemoEditor/MemoEditor'))
 
@@ -220,6 +221,53 @@ const TrainingDetailPage: React.FC = () => {
         <MergedReportPanel data={mergedReport} />
       ) : (
         <Empty description="无法加载合并报告数据" style={{ padding: 40 }} />
+      ),
+    })
+  }
+
+  // Phase 3B: 部署追踪 Tab
+  const deployments = record?.deployments || []
+  if (deployments.length > 0) {
+    const activeCount = deployments.filter((d) => d.active).length
+    tabItems.push({
+      key: 'deployments',
+      label: (
+        <span>
+          <LineChartOutlined /> 部署记录{' '}
+          <Badge count={activeCount} showZero={false} style={{ marginLeft: 4 }} />
+        </span>
+      ),
+      children: (
+        <Card size="small">
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              本训练记录的子运行（run_id）被部署到的 vnpy 实盘/模拟策略列表。
+              点击 chip 跳转到对应策略详情页。同步周期 10 分钟，可在
+              <Button
+                size="small"
+                type="link"
+                onClick={async () => {
+                  try {
+                    const resp = await fetch('/api/training-records/sync-deployments', { method: 'POST' })
+                    const json = await resp.json()
+                    if (json.success) {
+                      message.success(`同步完成: ${JSON.stringify(json.data?.stats || {})}`)
+                      queryClient.invalidateQueries({ queryKey: ['training-record', id] })
+                    } else {
+                      message.error(json.message || '同步失败')
+                    }
+                  } catch (e) {
+                    message.error(`同步出错: ${e}`)
+                  }
+                }}
+              >
+                立即同步
+              </Button>
+              触发。
+            </Text>
+          </div>
+          <DeploymentBadges deployments={deployments} maxVisible={20} showInactive={true} />
+        </Card>
       ),
     })
   }

@@ -735,3 +735,22 @@ def _compute_rolling_stats(merged_data: Dict[str, Any], window: int = 20) -> Dic
 def _record_to_response(record) -> dict:
     from app.services.training_service import _record_to_dict
     return _record_to_dict(record)
+
+
+@router.post("/sync-deployments", response_model=ApiResponse)
+async def sync_deployments_endpoint(db: Session = Depends(get_db_session)):
+    """Phase 3B: 手动触发部署追踪同步。
+
+    周期任务自动 10 分钟跑一次（live_main.py lifespan），本端点供运维即时刷新。
+
+    扫描所有 vnpy 节点的策略 → 解析 parameters.bundle_dir → 反查 mlflow run_id
+    → upsert 对应 TrainingRecord.deployments 字段。
+    """
+    from app.services.deployment_sync_service import sync_deployments
+    from app.services.vnpy.client import get_vnpy_client
+    try:
+        client = get_vnpy_client()
+        stats = await sync_deployments(db, client)
+        return ApiResponse(success=True, data={"stats": stats})
+    except Exception as exc:
+        return ApiResponse(success=False, message=f"deployment 同步失败: {exc}")
