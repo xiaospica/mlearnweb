@@ -12,6 +12,7 @@ from app.schemas.schemas import (
     StrategyCreateRequest,
     StrategyEditRequest,
 )
+from app.services import corp_actions_service
 from app.services.vnpy import live_trading_service as svc
 from app.services.vnpy.client import VnpyClientError
 from app.services.vnpy.deps import require_ops_password
@@ -73,6 +74,34 @@ async def get_strategy(
     if detail is None:
         return LiveTradingListResponse(success=False, data=None, warning=warning, message=warning or "")
     return _ok(detail, warning=warning)
+
+
+@router.get("/corp-actions", response_model=LiveTradingListResponse)
+async def list_corp_actions(
+    vt_symbols: str = Query(..., description="逗号分隔的 vt_symbol 列表，如 000001.SZSE,600519.SSE"),
+    days: int = Query(30, ge=1, le=180, description="向前回溯天数"),
+    threshold_pct: float = Query(0.5, ge=0.0, le=20.0, description="pct_chg 与原始 close 涨跌幅差异阈值（%）"),
+) -> LiveTradingListResponse:
+    """检测最近 N 日内持仓股票发生的除权除息事件。
+
+    用途：mlearnweb 前端策略详情页 CorpActionsCard 展示，让用户理解
+    持仓股票当日单价跳变的原因（除权日 pre_close ≠ 上一交易日 close）。
+    """
+    symbols = [s.strip() for s in vt_symbols.split(",") if s.strip()]
+    if not symbols:
+        return _ok([])
+    try:
+        events = corp_actions_service.detect_corp_actions(
+            vt_symbols=symbols,
+            lookback_days=days,
+            threshold_pct=threshold_pct,
+        )
+        # 序列化 dataclass → dict
+        payload = [e.__dict__ for e in events]
+        return _ok(payload)
+    except Exception as exc:
+        logger.exception("[live_trading] corp_actions detection failed: %s", exc)
+        return _ok([], warning=f"corp action 检测失败: {exc}")
 
 
 @router.get("/nodes/{node_id}/engines", response_model=LiveTradingListResponse)

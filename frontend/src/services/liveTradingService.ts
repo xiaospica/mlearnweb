@@ -1,6 +1,7 @@
 import type { AxiosRequestConfig } from 'axios'
 import apiClient from './apiClient'
 import type {
+  CorpActionEvent,
   LiveTradingResponse,
   NodeStatus,
   StrategyCreatePayload,
@@ -102,6 +103,25 @@ export const liveTradingService = {
       .get(
         `/live-trading/nodes/${enc(nodeId)}/engines/${enc(engine)}/classes/${enc(className)}/params`,
       )
+      .then((r) => r.data)
+  },
+
+  listCorpActions(
+    vtSymbols: string[],
+    days = 30,
+    thresholdPct = 0.5,
+  ): Promise<LiveTradingResponse<CorpActionEvent[]>> {
+    if (vtSymbols.length === 0) {
+      return Promise.resolve({ success: true, data: [], warning: null, message: '' })
+    }
+    return apiClient
+      .get('/live-trading/corp-actions', {
+        params: {
+          vt_symbols: vtSymbols.join(','),
+          days,
+          threshold_pct: thresholdPct,
+        },
+      })
       .then((r) => r.data)
   },
 

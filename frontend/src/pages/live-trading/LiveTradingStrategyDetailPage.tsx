@@ -19,6 +19,7 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
+import CorpActionsCard from './components/CorpActionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
@@ -157,6 +158,10 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                   {engine === 'MlStrategy' && (
                     <LatestTopkCard nodeId={nodeId} strategyName={name} />
                   )}
+                  <CorpActionsCard
+                    vtSymbols={(detail.positions || []).map((p) => p.vt_symbol)}
+                    days={30}
+                  />
                   <Card title="参数 / 运行时变量" style={{ marginTop: 16 }}>
                     <Descriptions
                       size="small"

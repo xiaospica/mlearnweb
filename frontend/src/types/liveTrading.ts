@@ -34,6 +34,17 @@ export interface LivePosition {
   frozen?: number | null
 }
 
+export interface CorpActionEvent {
+  vt_symbol: string
+  name: string
+  trade_date: string  // yyyy-mm-dd
+  pct_chg: number          // 复权涨跌幅 (%)
+  raw_change_pct: number   // 原始 close 涨跌幅 (%)
+  magnitude_pct: number    // 二者绝对差 (%)，越大越显著
+  pre_close: number
+  close: number
+}
+
 export interface StrategySummary {
   node_id: string
   engine: string

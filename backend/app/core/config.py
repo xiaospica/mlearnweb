@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # ``ML_LIVE_OUTPUT_ROOT``.
     ml_live_output_root: Optional[str] = None
 
+    # Tushare daily merged snapshots root (vnpy_tushare_pro 每日 20:00 产出
+    # daily_merged_YYYYMMDD.parquet). 用于 corp action 检测等数据查询。
+    # 单机部署时通常与 vnpy_qmt_sim 共用同一目录。
+    daily_merged_root: str = r"D:\vnpy_data\snapshots\merged"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
