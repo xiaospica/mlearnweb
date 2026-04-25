@@ -26,11 +26,52 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.database import StrategyEquitySnapshot, engine as db_engine
 from app.services.vnpy.client import VnpyClientError, get_vnpy_client
+from app.services.vnpy.naming import classify_gateway
 
 logger = logging.getLogger(__name__)
 
 # variables keys that commonly contain strategy-level PnL
 _PNL_VARIABLE_KEYS = ("total_pnl", "net_pnl", "strategy_pnl", "pnl")
+
+
+# ---------------------------------------------------------------------------
+# Strategy mode (live vs sim) inference
+# ---------------------------------------------------------------------------
+
+
+def _infer_strategy_mode(strategy_dict: Dict[str, Any], node_mode: str) -> Tuple[str, str]:
+    """根据策略 parameters.gateway + 节点 mode 推断策略 mode。
+
+    返回 ``(mode, gateway_name)``，其中 ``mode`` ∈ {"live", "sim"}。
+
+    判定规则（优先级递减）：
+      1. 策略 ``parameters.gateway`` 以 ``"QMT_SIM"`` 开头 → ``"sim"``（强制覆盖节点默认）
+      2. 策略 ``parameters.gateway`` 等于 ``"QMT"`` → ``"live"``（强制覆盖）
+      3. 否则（``parameters.gateway`` 缺失或非标准命名）→ fallback 到 ``node_mode``
+
+    详见 vnpy_common/naming.py 模块 docstring 的命名约定章节。
+    Lenient 行为：分类为 unknown 时不抛异常，仅 fallback；调用方决定要不要 log warn。
+
+    示例
+    ----
+    >>> _infer_strategy_mode({"parameters": {"gateway": "QMT_SIM_csi300"}}, "live")
+    ('sim', 'QMT_SIM_csi300')
+    >>> _infer_strategy_mode({"parameters": {"gateway": "QMT"}}, "sim")
+    ('live', 'QMT')
+    >>> _infer_strategy_mode({"parameters": {}}, "sim")
+    ('sim', '')
+    >>> _infer_strategy_mode({"parameters": {"gateway": "weird"}}, "live")
+    ('live', 'weird')
+    """
+    params = strategy_dict.get("parameters") or {}
+    gw = params.get("gateway", "") or ""
+    if not isinstance(gw, str):
+        gw = str(gw) if gw else ""
+
+    cls = classify_gateway(gw)
+    if cls in ("sim", "live"):
+        return cls, gw
+    return node_mode, gw
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +274,8 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
     accounts_by_node = _group_by_node(accounts_fo)
     positions_by_node = _group_by_node(positions_fo)
     capabilities = await _fetch_capabilities_per_node(client, client.node_ids)
+    # 测试用 FakeVnpyClient 可能没有 nodes 属性，兜底为空
+    node_modes = {n.node_id: getattr(n, "mode", "sim") for n in getattr(client, "nodes", [])}
 
     summaries: List[Dict[str, Any]] = []
     now_ms = int(time.time() * 1000)
@@ -243,6 +286,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
         node_id = item["node_id"]
         node_accounts = accounts_by_node.get(node_id, [])
         node_positions = positions_by_node.get(node_id, [])
+        node_mode = node_modes.get(node_id, "sim")
         for s in item.get("data") or []:
             engine_name = s.get("engine", "")
             name = s.get("name", "")
@@ -250,6 +294,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             curve = _read_curve(db, node_id, engine_name, name, limit=60)
             inited = bool(s.get("inited"))
             trading = bool(s.get("trading"))
+            mode, gateway_name = _infer_strategy_mode(s, node_mode)
             summaries.append({
                 "node_id": node_id,
                 "engine": engine_name,
@@ -267,6 +312,8 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
                 "last_update_ts": now_ms,
                 "mini_curve": curve,
                 "capabilities": capabilities.get(node_id, {}).get(engine_name, []),
+                "mode": mode,
+                "gateway_name": gateway_name,
             })
 
     return summaries, warning
@@ -337,6 +384,8 @@ async def get_strategy_detail(
 
     inited = bool(strategy.get("inited"))
     trading = bool(strategy.get("trading"))
+    node_mode = next((getattr(n, "mode", "sim") for n in getattr(client, "nodes", []) if n.node_id == node_id), "sim")
+    mode, gateway_name = _infer_strategy_mode(strategy, node_mode)
     detail = {
         "node_id": node_id,
         "engine": engine,
@@ -357,6 +406,8 @@ async def get_strategy_detail(
         "parameters": strategy.get("parameters") or {},
         "variables": strategy.get("variables") or {},
         "curve": full_curve,
+        "mode": mode,
+        "gateway_name": gateway_name,
         "positions": [
             {
                 "vt_symbol": p.get("vt_symbol", ""),

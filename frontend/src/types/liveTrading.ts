@@ -45,6 +45,8 @@ export interface CorpActionEvent {
   close: number
 }
 
+export type StrategyMode = 'live' | 'sim'
+
 export interface StrategySummary {
   node_id: string
   engine: string
@@ -62,6 +64,9 @@ export interface StrategySummary {
   last_update_ts: number | null
   mini_curve: EquityPoint[]
   capabilities: StrategyCapability[]
+  // 实盘 / 模拟 标识（详见 vnpy_common/naming.py 命名约定）
+  mode: StrategyMode
+  gateway_name: string
 }
 
 export type StrategyCapability = 'add' | 'edit' | 'init' | 'remove' | 'start' | 'stop'

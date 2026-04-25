@@ -1,6 +1,16 @@
 # mlearnweb 实盘交易节点注册
 # 复制为 vnpy_nodes.yaml 后编辑（vnpy_nodes.yaml 已被 .gitignore 忽略）
 # 每个节点对应一台运行 vnpy_webtrader 的主机（或 SSH 本地转发到云端的端口）
+#
+# 字段说明：
+#   node_id   : 节点唯一标识（用于路由）
+#   base_url  : vnpy_webtrader 的 HTTP 根 URL
+#   username/password : 登录凭证
+#   enabled   : 是否启用此节点
+#   mode      : 节点默认模式，取值 {"live", "sim"}，缺省取 "sim"（安全偏好）
+#               作为 mlearnweb 推断策略 mode 的 fallback。
+#               策略级 parameters.gateway 优先级更高（命名以 "QMT_SIM" 开头 → sim；
+#               命名为 "QMT" → live）。详见 vnpy_common/naming.py 模块 docstring。
 
 nodes:
   - node_id: local
@@ -8,6 +18,7 @@ nodes:
     username: vnpy
     password: vnpy
     enabled: true
+    mode: sim    # 本机研究节点，默认跑模拟策略
 
   # 多节点（通过 SSH 端口转发）示例：
   #
@@ -19,9 +30,11 @@ nodes:
   #   username: vnpy
   #   password: vnpy
   #   enabled: true
+  #   mode: live   # 实盘部署机
   #
   # - node_id: cloud2
   #   base_url: http://127.0.0.1:18002
   #   username: vnpy
   #   password: vnpy
   #   enabled: true
+  #   mode: sim    # 备份测试机

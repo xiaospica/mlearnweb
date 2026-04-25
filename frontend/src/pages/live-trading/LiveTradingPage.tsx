@@ -8,6 +8,7 @@ import {
   Col,
   Empty,
   Row,
+  Segmented,
   Space,
   Spin,
   Tag,
@@ -74,11 +75,21 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
     item.running ? 'processing' : item.inited ? 'warning' : 'default'
   const badgeText = item.running ? '运行中' : item.inited ? '已初始化' : '未初始化'
 
+  // mode 视觉编码：实盘红色警示，模拟绿色（详见 vnpy_common/naming.py 命名约定）
+  const isLive = item.mode === 'live'
+  const modeColor = isLive ? '#cf1322' : '#389e0d'
+  const modeBg = isLive ? '#fff1f0' : '#f6ffed'
+  const modeText = isLive ? '实盘' : '模拟'
+  const modeIcon = isLive ? '⚠' : '🧪'
+
   return (
     <Card
       hoverable
       onClick={onClick}
-      style={{ cursor: 'pointer' }}
+      style={{
+        cursor: 'pointer',
+        borderLeft: `4px solid ${modeColor}`,
+      }}
       styles={{ body: { padding: '16px 18px' } }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -94,6 +105,23 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
             }}
             title={item.strategy_name}
           >
+            <span
+              style={{
+                display: 'inline-block',
+                marginRight: 8,
+                padding: '1px 8px',
+                fontSize: 11,
+                fontWeight: 600,
+                color: modeColor,
+                background: modeBg,
+                border: `1px solid ${modeColor}`,
+                borderRadius: 3,
+                verticalAlign: 'middle',
+              }}
+              title={item.gateway_name ? `gateway: ${item.gateway_name}` : '未识别 gateway'}
+            >
+              {modeIcon} {modeText}
+            </span>
             {item.strategy_name}
           </div>
           <Space size={4} style={{ marginTop: 4 }}>
@@ -167,9 +195,12 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
   )
 }
 
+type ModeFilter = 'all' | 'live' | 'sim'
+
 const LiveTradingPage: React.FC = () => {
   const navigate = useNavigate()
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [modeFilter, setModeFilter] = useState<ModeFilter>('all')
 
   const nodesQuery = useQuery({
     queryKey: ['live-nodes'],
@@ -186,7 +217,12 @@ const LiveTradingPage: React.FC = () => {
   })
 
   const nodes = nodesQuery.data?.data || []
-  const strategies = strategiesQuery.data?.data || []
+  const allStrategies = strategiesQuery.data?.data || []
+  const strategies = modeFilter === 'all'
+    ? allStrategies
+    : allStrategies.filter((s) => s.mode === modeFilter)
+  const liveCount = allStrategies.filter((s) => s.mode === 'live').length
+  const simCount = allStrategies.filter((s) => s.mode === 'sim').length
   const warning = strategiesQuery.data?.warning || null
   const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
 
@@ -232,6 +268,18 @@ const LiveTradingPage: React.FC = () => {
       <Card styles={{ body: { padding: '12px 16px' } }} style={{ marginBottom: 12 }}>
         <NodeStatusBar nodes={nodes} />
       </Card>
+
+      <div style={{ marginBottom: 12 }}>
+        <Segmented
+          value={modeFilter}
+          onChange={(v) => setModeFilter(v as ModeFilter)}
+          options={[
+            { label: `全部 (${allStrategies.length})`, value: 'all' },
+            { label: `⚠ 实盘 (${liveCount})`, value: 'live' },
+            { label: `🧪 模拟 (${simCount})`, value: 'sim' },
+          ]}
+        />
+      </div>
 
       {allOffline && (
         <Alert

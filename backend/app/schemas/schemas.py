@@ -89,6 +89,7 @@ class TrainingRecordUpdate(BaseModel):
     group_name: Optional[str] = None
     is_favorite: Optional[bool] = None
     log_content: Optional[str] = None
+    config_snapshot: Optional[Dict[str, Any]] = None
 
 
 class TrainingRecordResponse(BaseModel):
@@ -112,6 +113,8 @@ class TrainingRecordResponse(BaseModel):
     memo: Optional[str] = None
     group_name: Optional[str] = "default"
     is_favorite: bool = False
+    # Phase 3B 部署追踪。详见 vnpy_common/naming.py 命名约定章节。
+    deployments: List[Dict[str, Any]] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -233,6 +236,9 @@ class StrategySummary(BaseModel):
     last_update_ts: Optional[int] = None
     mini_curve: List[EquityPoint] = []
     capabilities: List[str] = []
+    # 实盘 / 模拟 标识（详见 vnpy_common/naming.py 命名约定）
+    mode: str = "sim"  # "live" | "sim"
+    gateway_name: str = ""
 
 
 class StrategyDetail(StrategySummary):

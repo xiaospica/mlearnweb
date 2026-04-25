@@ -115,6 +115,26 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
         </div>
       </div>
 
+      {detail?.mode === 'live' && (
+        <Alert
+          type="error"
+          showIcon
+          message="⚠ 实盘策略 — 真实账户操作请谨慎"
+          description={detail.gateway_name ? `gateway: ${detail.gateway_name}` : undefined}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {detail?.mode === 'sim' && (
+        <Alert
+          type="success"
+          showIcon
+          message={`🧪 模拟策略 (gateway: ${detail.gateway_name || '—'})`}
+          description="本地撮合柜台，零真实下单。详见 vnpy_common/naming.py 命名约定。"
+          style={{ marginBottom: 12 }}
+          closable
+        />
+      )}
+
       {warning && (
         <Alert
           type={data?.success ? 'warning' : 'error'}

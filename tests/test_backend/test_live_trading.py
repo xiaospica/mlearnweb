@@ -533,3 +533,54 @@ class TestSnapshot:
             assert "cta1" in names
             assert "cta2" in names
             assert "signal1" in names
+
+
+# ---------------------------------------------------------------------------
+# Phase 3A: _infer_strategy_mode (live vs sim classification)
+# ---------------------------------------------------------------------------
+
+
+class TestInferStrategyMode:
+    """Verify strategy mode inference per naming convention.
+
+    Rules (priority desc):
+      1. parameters.gateway startswith "QMT_SIM" -> "sim" (overrides node mode)
+      2. parameters.gateway equals "QMT" -> "live" (overrides)
+      3. parameters.gateway empty / unknown -> fallback to node mode
+    """
+
+    def test_sim_gateway_overrides_live_node(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_mode
+        s = {"parameters": {"gateway": "QMT_SIM_csi300"}}
+        mode, gw = _infer_strategy_mode(s, node_mode="live")
+        assert mode == "sim"
+        assert gw == "QMT_SIM_csi300"
+
+    def test_live_gateway_overrides_sim_node(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_mode
+        s = {"parameters": {"gateway": "QMT"}}
+        mode, gw = _infer_strategy_mode(s, node_mode="sim")
+        assert mode == "live"
+        assert gw == "QMT"
+
+    def test_unknown_gateway_falls_back_to_node_mode(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_mode
+        s = {"parameters": {"gateway": "weird_gw"}}
+        mode_a, _ = _infer_strategy_mode(s, node_mode="sim")
+        mode_b, _ = _infer_strategy_mode(s, node_mode="live")
+        assert mode_a == "sim"
+        assert mode_b == "live"
+
+    def test_missing_gateway_falls_back_to_node_mode(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_mode
+        for s in [{"parameters": {}}, {}, {"parameters": None}]:
+            mode_sim, _ = _infer_strategy_mode(s, node_mode="sim")
+            mode_live, _ = _infer_strategy_mode(s, node_mode="live")
+            assert mode_sim == "sim"
+            assert mode_live == "live"
+
+    def test_qmt_sim_bare_classified_as_sim(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_mode
+        mode, gw = _infer_strategy_mode({"parameters": {"gateway": "QMT_SIM"}}, "live")
+        assert mode == "sim"
+        assert gw == "QMT_SIM"
