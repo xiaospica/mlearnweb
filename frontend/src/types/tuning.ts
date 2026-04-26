@@ -58,13 +58,22 @@ export interface BtStrategy {
   signal: string
 }
 
+export type SearchSpaceParam =
+  | { type: 'float'; low: number; high: number; log?: boolean }
+  | { type: 'int'; low: number; high: number; log?: boolean }
+  | { type: 'categorical'; choices: Array<string | number> }
+
+export type SearchSpace = Record<string, SearchSpaceParam>
+
 export interface TuningConfigSnapshot {
-  task_config?: TaskConfig
+  task_config?: TaskConfig | Record<string, unknown>
   custom_segments?: CustomSegment[]
   gbdt_model?: GbdtModelConfig
   bt_strategy?: BtStrategy
   /** RECORD_CONFIG 嵌套较深，前端按 raw JSON 编辑 */
   record_config?: Array<Record<string, unknown>>
+  /** Optuna 搜索空间（V3）：每参数 {type, low, high, log?} 或 {type:'categorical', choices} */
+  search_space?: SearchSpace
 }
 
 // ---------------------------------------------------------------------------

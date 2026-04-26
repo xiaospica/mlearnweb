@@ -34,6 +34,7 @@ import type {
   CustomSegment,
   GbdtModelConfig,
   BtStrategy,
+  SearchSpace,
 } from '@/types/tuning'
 
 const { Title, Text, Paragraph } = Typography
@@ -66,6 +67,21 @@ const DEFAULT_BT_STRATEGY: BtStrategy = {
   n_drop: 1,
   only_tradable: true,
   signal: '<PRED>',
+}
+
+// 默认 Optuna 搜索空间（与 run_optuna_search.DEFAULT_SEARCH_SPACE 对齐）
+// 用户可在前端改，提交时写成 search_space.json 注入
+const DEFAULT_SEARCH_SPACE: SearchSpace = {
+  learning_rate:         { type: 'float', low: 0.005, high: 0.1, log: true },
+  num_leaves:            { type: 'int',   low: 31,    high: 255 },
+  max_depth:             { type: 'int',   low: 4,     high: 10 },
+  min_child_samples:     { type: 'int',   low: 50,    high: 500 },
+  lambda_l1:             { type: 'float', low: 0.0,   high: 5.0 },
+  lambda_l2:             { type: 'float', low: 0.0,   high: 5.0 },
+  colsample_bytree:      { type: 'float', low: 0.5,   high: 1.0 },
+  subsample:             { type: 'float', low: 0.5,   high: 1.0 },
+  subsample_freq:        { type: 'int',   low: 1,     high: 10 },
+  early_stopping_rounds: { type: 'int',   low: 50,    high: 200 },
 }
 
 const DEFAULT_SEGMENTS_5P: CustomSegment[] = [
@@ -212,6 +228,7 @@ const WorkbenchCreatePage: React.FC = () => {
   const [recordConfig, setRecordConfig] = useState<Array<Record<string, unknown>>>(
     DEFAULT_RECORD_CONFIG,
   )
+  const [searchSpace, setSearchSpace] = useState<SearchSpace>(DEFAULT_SEARCH_SPACE)
 
   const configSnapshot: TuningConfigSnapshot = useMemo(
     () => ({
@@ -220,8 +237,9 @@ const WorkbenchCreatePage: React.FC = () => {
       gbdt_model: gbdtModel,
       bt_strategy: btStrategy,
       record_config: recordConfig,
+      search_space: searchSpace,
     }),
-    [taskConfig, customSegments, gbdtModel, btStrategy, recordConfig, searchMode],
+    [taskConfig, customSegments, gbdtModel, btStrategy, recordConfig, searchSpace, searchMode],
   )
 
   // ---------------- 提交 ----------------
@@ -422,6 +440,16 @@ const WorkbenchCreatePage: React.FC = () => {
                 ),
               },
               {
+                key: 'search_space',
+                label: 'search_space',
+                children: (
+                  <JsonCodeEditor
+                    value={searchSpace}
+                    onChange={(v) => setSearchSpace(v as SearchSpace)}
+                  />
+                ),
+              },
+              {
                 key: 'bt_strategy',
                 label: 'bt_strategy',
                 children: (
@@ -562,17 +590,54 @@ const WorkbenchCreatePage: React.FC = () => {
             </div>
           )}
 
-          {/* Step 2: 模型 */}
+          {/* Step 2: 模型（基线 + 搜索空间 两 Tab） */}
           {step === 2 && (
             <div>
-              <Paragraph>
-                LightGBM 超参基线值。Optuna 调参时会按内置搜索空间覆盖
-                <Text code>learning_rate / num_leaves / max_depth / min_child_samples / lambda_l1 / lambda_l2 / colsample_bytree / subsample / subsample_freq / early_stopping_rounds</Text>
-                10 个维度。其它参数（如 <Text code>n_estimators / num_threads / seed</Text>）保持基线。
+              <Paragraph type="secondary" style={{ marginBottom: 8 }}>
+                <Text strong>gbdt_model</Text>：LightGBM 全部基线参数；
+                <Text strong>search_space</Text>：Optuna 在该范围内采样覆盖（替换基线对应字段）。
+                未列入 search_space 的参数保留基线值（如 <Text code>n_estimators / num_threads / seed</Text>）。
               </Paragraph>
-              <JsonCodeEditor
-                value={gbdtModel}
-                onChange={(v) => setGbdtModel(v as GbdtModelConfig)}
+              <Tabs
+                type="card"
+                items={[
+                  {
+                    key: 'gbdt_model',
+                    label: 'gbdt_model（基线参数）',
+                    children: (
+                      <JsonCodeEditor
+                        value={gbdtModel}
+                        onChange={(v) => setGbdtModel(v as GbdtModelConfig)}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'search_space',
+                    label: 'search_space（Optuna 搜索范围）',
+                    children: (
+                      <div>
+                        <Alert
+                          type="info"
+                          showIcon
+                          style={{ marginBottom: 8 }}
+                          message="搜索空间格式"
+                          description={
+                            <span style={{ fontSize: 12 }}>
+                              每个参数对象支持 3 种类型：
+                              <Text code>{'{"type":"float","low":0.005,"high":0.1,"log":true}'}</Text> /
+                              <Text code>{'{"type":"int","low":31,"high":255}'}</Text> /
+                              <Text code>{'{"type":"categorical","choices":["mse","huber"]}'}</Text>
+                            </span>
+                          }
+                        />
+                        <JsonCodeEditor
+                          value={searchSpace}
+                          onChange={(v) => setSearchSpace(v as SearchSpace)}
+                        />
+                      </div>
+                    ),
+                  },
+                ]}
               />
             </div>
           )}

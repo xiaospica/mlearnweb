@@ -96,6 +96,7 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
         "custom_segments": None,
         "bt_strategy": None,
         "record_config": None,
+        "search_space": None,
         "single_segment": job.search_mode == "single_segment",
     }
 
@@ -117,6 +118,7 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
         out["custom_segments"] = _write("custom_segments", "custom_segments.json")
     out["bt_strategy"] = _write("bt_strategy", "bt_strategy.json")
     out["record_config"] = _write("record_config", "record_config.json")
+    out["search_space"] = _write("search_space", "search_space.json")
     return out
 
 
@@ -156,6 +158,8 @@ def _build_subprocess_cmd(
             cmd += ["--bt-strategy-json", str(extra_overrides["bt_strategy"])]
         if extra_overrides.get("record_config"):
             cmd += ["--record-config-json", str(extra_overrides["record_config"])]
+        if extra_overrides.get("search_space"):
+            cmd += ["--search-space-json", str(extra_overrides["search_space"])]
         if extra_overrides.get("single_segment"):
             cmd += ["--single-segment"]
     return cmd

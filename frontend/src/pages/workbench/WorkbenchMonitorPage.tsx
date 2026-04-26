@@ -801,10 +801,17 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
   }> = [
     {
       key: 'gbdt_model',
-      title: 'GBDT 模型超参（gbdt_model）',
+      title: 'GBDT 模型基线超参（gbdt_model）',
       effective: true,
-      note: '✅ 生效：--gbdt-overrides 注入 model.kwargs，Optuna 会按搜索空间覆盖 10 维',
+      note: '✅ 生效：--gbdt-overrides 注入 model.kwargs（基线值，Optuna 采样会按 search_space 覆盖部分维度）',
       value: config.gbdt_model,
+    },
+    {
+      key: 'search_space',
+      title: 'Optuna 搜索空间（search_space）',
+      effective: true,
+      note: '✅ 生效：--search-space-json 让 Optuna 在该范围内采样，覆盖 gbdt_model 中对应维度',
+      value: config.search_space,
     },
     {
       key: 'task_config',
