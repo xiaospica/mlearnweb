@@ -136,7 +136,12 @@ def start_job_subprocess(
         stdout=log_fp,
         stderr=subprocess.STDOUT,
         cwd=str(STRATEGY_DEV_ROOT),
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            # ⚠️ Windows 默认 stdout 是 GBK，必须强制 UTF-8 否则前端日志中文乱码
+            "PYTHONIOENCODING": "utf-8",
+        },
     )
 
     # 持久化 pid + create_time
@@ -567,7 +572,11 @@ def finalize_job(
         stdout=log_fp,
         stderr=subprocess.STDOUT,
         cwd=str(STRATEGY_DEV_ROOT),
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
+        },
     )
 
     # 更新 job 元数据
