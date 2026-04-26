@@ -160,7 +160,13 @@ def start_job_subprocess(
 
 
 def cancel_job_subprocess(db: Session, job: TuningJob, grace_sec: float = 5.0) -> TuningJob:
-    """优雅取消：terminate → grace → kill。"""
+    """优雅取消：terminate 整个进程树 → grace → kill。
+
+    Windows 上 subprocess 的 grandchild（run_optuna_search → train script
+    → qlib 内部 multiprocessing 等）默认不在父进程的 ProcessGroup 里，
+    单独 terminate 父进程不会传递到 grandchild。必须用 psutil.children
+    递归收集所有子孙进程，逐一终止。
+    """
     if job.status not in ("running", "searching"):
         return job
     if not is_pid_alive(job.pid, job.pid_started_at):
@@ -172,16 +178,32 @@ def cancel_job_subprocess(db: Session, job: TuningJob, grace_sec: float = 5.0) -
         return job
 
     try:
-        proc = psutil.Process(job.pid)
-        proc.terminate()
+        parent = psutil.Process(job.pid)
+        # 收集整棵进程树（含 grandchild）
         try:
-            proc.wait(timeout=grace_sec)
-        except psutil.TimeoutExpired:
-            proc.kill()
+            children = parent.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            children = []
+        all_procs = [parent] + children
+
+        # 全部 terminate（Windows 上 SIGTERM 等价 TerminateProcess）
+        for p in all_procs:
             try:
-                proc.wait(timeout=2.0)
-            except psutil.TimeoutExpired:
-                pass
+                p.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        # 等待 grace_sec
+        _, alive = psutil.wait_procs(all_procs, timeout=grace_sec)
+
+        # 还活的强 kill
+        for p in alive:
+            try:
+                p.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        if alive:
+            psutil.wait_procs(alive, timeout=2.0)
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         pass
 

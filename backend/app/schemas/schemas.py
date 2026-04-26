@@ -40,6 +40,18 @@ class RunDetailResponse(BaseModel):
     artifacts: List[Dict[str, Any]] = []
 
 
+class RunLinkSource(BaseModel):
+    """run_id 反向引用源（用于 RunListItem.linked_sources）。"""
+    type: str  # training_record / tuning_trial / deployment / ml_monitoring
+    id: Optional[int] = None
+    name: Optional[str] = None
+    trial_number: Optional[int] = None
+    node_id: Optional[str] = None
+    strategy_name: Optional[str] = None
+    active: Optional[bool] = None
+    subtype: Optional[str] = None
+
+
 class RunListItem(BaseModel):
     run_id: str
     run_name: str = ""
@@ -49,6 +61,39 @@ class RunListItem(BaseModel):
     end_time: Optional[int] = None
     lifecycle_stage: str = "active"
     artifact_uri: str = ""
+    is_linked: bool = False
+    linked_sources: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class UnlinkedRunItem(BaseModel):
+    run_id: str
+    run_name: str = ""
+    start_time: Optional[int] = None
+    end_time: Optional[int] = None
+    size_bytes: int = 0
+
+
+class UnlinkedRunsListResponse(BaseModel):
+    experiment_id: str
+    total_count: int = 0
+    total_size_bytes: int = 0
+    items: List[UnlinkedRunItem] = []
+
+
+class RunCleanupRequest(BaseModel):
+    """删除请求 body。
+
+    select="all_unlinked" 时后端实时扫一次再删（避免长时间持有 UI 列表导致漂移）。
+    select="manual" 时按 run_ids 删；后端依然会做二次保护校验，避免误删刚被关联的 run。
+    """
+    select: str = Field("manual", pattern="^(manual|all_unlinked)$")
+    run_ids: List[str] = Field(default_factory=list)
+
+
+class RunCleanupResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+    data: Dict[str, Any]
 
 
 class RunListResponse(BaseModel):
@@ -311,6 +356,7 @@ class TuningJobResponse(BaseModel):
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
     error: Optional[str] = None
+    config_snapshot: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 

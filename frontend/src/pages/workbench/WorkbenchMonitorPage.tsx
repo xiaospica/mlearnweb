@@ -202,7 +202,7 @@ const WorkbenchMonitorPage: React.FC = () => {
 
   const id = Number(jobId)
 
-  const [activeTab, setActiveTab] = useState<'trials' | 'logs'>('trials')
+  const [activeTab, setActiveTab] = useState<'trials' | 'logs' | 'config'>('trials')
   // 默认 stdout：看 train 子进程的实时进度（含 qlib 训练 / 回测 print 输出）；
   // 想看结构化的 trial 元事件（trial 0 done）切到 tuning
   const [logSource, setLogSource] = useState<'tuning' | 'stdout' | 'all'>('stdout')
@@ -525,11 +525,11 @@ const WorkbenchMonitorPage: React.FC = () => {
         </Row>
       </Card>
 
-      {/* Trials / 实时日志 Tabs */}
+      {/* Trials / 实时日志 / 配置快照 Tabs */}
       <Card>
         <Tabs
           activeKey={activeTab}
-          onChange={(k) => setActiveTab(k as 'trials' | 'logs')}
+          onChange={(k) => setActiveTab(k as 'trials' | 'logs' | 'config')}
           items={[
             {
               key: 'trials',
@@ -550,7 +550,7 @@ const WorkbenchMonitorPage: React.FC = () => {
                     </Button>
                   </div>
                   {trials.length === 0 ? (
-                    <Empty description="还没有 trial。等 subprocess 启动后会陆续出现。" />
+                    <Empty description="还没有 trial。等 subprocess 启动后会陆续出现（trial 启动时会先写一行 running 状态，完成后更新最终指标）。" />
                   ) : (
                     <Table
                       dataSource={trials}
@@ -584,6 +584,15 @@ const WorkbenchMonitorPage: React.FC = () => {
                   isTerminal={isTerminal(status)}
                 />
               ),
+            },
+            {
+              key: 'config',
+              label: (
+                <span>
+                  <FileTextOutlined /> 配置快照
+                </span>
+              ),
+              children: <ConfigSnapshotPanel job={job} />,
             },
           ]}
         />
@@ -769,6 +778,108 @@ const DeployModal: React.FC<{
         </Form.Item>
       </Form>
     </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// 配置快照面板（展示用户在创建页填的 5 类参数 + 运行参数）
+// ---------------------------------------------------------------------------
+
+const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
+  const config = job.config_snapshot
+  if (!config) {
+    return <Empty description="无配置快照（旧 job 可能未记录）" />
+  }
+
+  const sections: Array<{
+    key: string
+    title: string
+    effective: boolean
+    note: string
+    value: unknown
+  }> = [
+    {
+      key: 'gbdt_model',
+      title: 'GBDT 模型超参（gbdt_model）',
+      effective: true,
+      note: '✅ 生效：通过 --gbdt-overrides 传给 train script，Optuna 会按搜索空间覆盖 10 维',
+      value: config.gbdt_model,
+    },
+    {
+      key: 'task_config',
+      title: '任务配置（task_config / 数据集 / 特征 / 标签）',
+      effective: false,
+      note: '⚠️ 当前不生效：train script 用 tushare_hs300_rolling_train.py 内部硬编码值',
+      value: config.task_config,
+    },
+    {
+      key: 'custom_segments',
+      title: 'Walk-Forward 时间分段（custom_segments）',
+      effective: false,
+      note: '⚠️ 当前不生效：train script 用脚本内 CUSTOM_SEGMENTS 硬编码（这就是为什么前端配置 N 期但 train 仍跑 5 期的原因）',
+      value: config.custom_segments,
+    },
+    {
+      key: 'bt_strategy',
+      title: '回测策略（bt_strategy）',
+      effective: false,
+      note: '⚠️ 当前不生效：train 用 strategy_dev/config.py BT_STRATEGY',
+      value: config.bt_strategy,
+    },
+    {
+      key: 'record_config',
+      title: '评估记录器（record_config）',
+      effective: false,
+      note: '⚠️ 当前不生效：train 用 RECORD_CONFIG / MULTI_SEGMENT_RECORD_CONFIG',
+      value: config.record_config,
+    },
+  ]
+
+  return (
+    <div>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="本页展示创建该 job 时填的 config_snapshot"
+        description="提交给 Optuna 的实际配置只有 GBDT 超参和搜索元参数（n_trials/seed 等）。其他 4 类参数当前是占位（V2 实现注入），帮助记录用户意图便于追溯。"
+      />
+      {sections.map((sec) => (
+        <Card
+          key={sec.key}
+          size="small"
+          style={{ marginBottom: 12 }}
+          title={
+            <Space>
+              <Tag color={sec.effective ? 'success' : 'warning'}>
+                {sec.effective ? '生效' : '占位'}
+              </Tag>
+              <span>{sec.title}</span>
+            </Space>
+          }
+        >
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+            {sec.note}
+          </Text>
+          <pre
+            style={{
+              fontSize: 11,
+              fontFamily: "'SF Mono', 'Consolas', monospace",
+              background: '#fafbfc',
+              padding: 12,
+              borderRadius: 4,
+              margin: 0,
+              maxHeight: 200,
+              overflow: 'auto',
+            }}
+          >
+            {sec.value !== undefined && sec.value !== null
+              ? JSON.stringify(sec.value, null, 2)
+              : '（未配置）'}
+          </pre>
+        </Card>
+      ))}
+    </div>
   )
 }
 

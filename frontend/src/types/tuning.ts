@@ -99,6 +99,7 @@ export interface TuningJob {
   completed_at?: string | null
   duration_seconds?: number | null
   error?: string | null
+  config_snapshot?: TuningConfigSnapshot | null
   created_at: string
   updated_at: string
 }
