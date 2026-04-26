@@ -802,35 +802,35 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
       key: 'gbdt_model',
       title: 'GBDT 模型超参（gbdt_model）',
       effective: true,
-      note: '✅ 生效：通过 --gbdt-overrides 传给 train script，Optuna 会按搜索空间覆盖 10 维',
+      note: '✅ 生效：--gbdt-overrides 注入 model.kwargs，Optuna 会按搜索空间覆盖 10 维',
       value: config.gbdt_model,
     },
     {
       key: 'task_config',
       title: '任务配置（task_config / 数据集 / 特征 / 标签）',
-      effective: false,
-      note: '⚠️ 当前不生效：train script 用 tushare_hs300_rolling_train.py 内部硬编码值',
+      effective: true,
+      note: '✅ 生效：--task-config-json 深度合并（已填字段覆盖默认）',
       value: config.task_config,
     },
     {
       key: 'custom_segments',
       title: 'Walk-Forward 时间分段（custom_segments）',
-      effective: false,
-      note: '⚠️ 当前不生效：train script 用脚本内 CUSTOM_SEGMENTS 硬编码（这就是为什么前端配置 N 期但 train 仍跑 5 期的原因）',
+      effective: true,
+      note: '✅ 生效：--custom-segments-json 完全替换 train script 内 CUSTOM_SEGMENTS',
       value: config.custom_segments,
     },
     {
       key: 'bt_strategy',
       title: '回测策略（bt_strategy）',
-      effective: false,
-      note: '⚠️ 当前不生效：train 用 strategy_dev/config.py BT_STRATEGY',
+      effective: true,
+      note: '✅ 生效：--bt-strategy-json 替换 record 列表内 PortAnaRecord 的 strategy.kwargs',
       value: config.bt_strategy,
     },
     {
       key: 'record_config',
       title: '评估记录器（record_config）',
-      effective: false,
-      note: '⚠️ 当前不生效：train 用 RECORD_CONFIG / MULTI_SEGMENT_RECORD_CONFIG',
+      effective: true,
+      note: '✅ 生效：--record-config-json 完全替换 task_config["record"] 列表',
       value: config.record_config,
     },
   ]
@@ -838,11 +838,11 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
   return (
     <div>
       <Alert
-        type="info"
+        type="success"
         showIcon
         style={{ marginBottom: 16 }}
-        message="本页展示创建该 job 时填的 config_snapshot"
-        description="提交给 Optuna 的实际配置只有 GBDT 超参和搜索元参数（n_trials/seed 等）。其他 4 类参数当前是占位（V2 实现注入），帮助记录用户意图便于追溯。"
+        message="V2: 5 类配置全部已注入训练流程"
+        description="提交时这 5 类参数已分别写成 JSON 文件传给 train script。GBDT 超参由 Optuna 在搜索空间内采样覆盖；其余 4 类是 job 级常量。"
       />
       {sections.map((sec) => (
         <Card

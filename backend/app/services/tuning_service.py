@@ -78,14 +78,56 @@ def is_pid_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
         return False
 
 
-def _build_subprocess_cmd(job: TuningJob, n_jobs: int = 1, num_threads: int = 20, seed: int = 42) -> List[str]:
+def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Optional[Path]]:
+    """V2: 把 job.config_snapshot 的 4 类参数写出到 per-job 目录的 4 个 JSON 文件，
+    供 run_optuna_search → train script 通过 --*-json 参数读取并 override。
+
+    返回 dict: 每类参数对应 JSON 路径或 None（未配置则不传，train 用默认）。
+    """
+    cfg = job.config_snapshot or {}
+    overrides_dir = workdir / "config_overrides"
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+
+    out: Dict[str, Optional[Path]] = {
+        "task_config": None,
+        "custom_segments": None,
+        "bt_strategy": None,
+        "record_config": None,
+    }
+
+    def _write(key: str, filename: str) -> Optional[Path]:
+        value = cfg.get(key)
+        if value is None or (isinstance(value, (list, dict)) and len(value) == 0):
+            return None
+        path = overrides_dir / filename
+        path.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return path
+
+    # 字段名约定（与前端 TuningConfigSnapshot 一致）
+    out["task_config"] = _write("task_config", "task_config.json")
+    out["custom_segments"] = _write("custom_segments", "custom_segments.json")
+    out["bt_strategy"] = _write("bt_strategy", "bt_strategy.json")
+    out["record_config"] = _write("record_config", "record_config.json")
+    return out
+
+
+def _build_subprocess_cmd(
+    job: TuningJob,
+    n_jobs: int = 1,
+    num_threads: int = 20,
+    seed: int = 42,
+    extra_overrides: Optional[Dict[str, Optional[Path]]] = None,
+) -> List[str]:
     """组装 run_optuna_search subprocess 命令行.
 
     用 ``-u`` 标志强制 Python 解释器无缓冲（Windows 上 PYTHONUNBUFFERED 不可靠），
     保证 stdout/stderr 立即刷到 mlearnweb 后端 Popen 的 stdout fd（即 subprocess.stdout.log）。
     """
     workdir = get_job_workdir(job.id)
-    return [
+    cmd = [
         TUNING_PYTHON_EXE,
         "-u",  # ⚠️ 强制 unbuffered stdout/stderr，前端实时日志依赖这个
         "-m",
@@ -98,6 +140,17 @@ def _build_subprocess_cmd(job: TuningJob, n_jobs: int = 1, num_threads: int = 20
         "--study-name", job.optuna_study_name,
         "--description-prefix", f"Workbench job {job.id}",
     ]
+    # V2: 透传 4 类配置 override JSON
+    if extra_overrides:
+        if extra_overrides.get("task_config"):
+            cmd += ["--task-config-json", str(extra_overrides["task_config"])]
+        if extra_overrides.get("custom_segments"):
+            cmd += ["--custom-segments-json", str(extra_overrides["custom_segments"])]
+        if extra_overrides.get("bt_strategy"):
+            cmd += ["--bt-strategy-json", str(extra_overrides["bt_strategy"])]
+        if extra_overrides.get("record_config"):
+            cmd += ["--record-config-json", str(extra_overrides["record_config"])]
+    return cmd
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +176,12 @@ def start_job_subprocess(
     workdir = get_job_workdir(job.id)
     workdir.mkdir(parents=True, exist_ok=True)
 
-    cmd = _build_subprocess_cmd(job, n_jobs=n_jobs, num_threads=num_threads, seed=seed)
+    # V2: 把 config_snapshot 拆成 4 个 JSON 文件供 train script 读取
+    extra_overrides = _write_config_overrides(job, workdir)
+    cmd = _build_subprocess_cmd(
+        job, n_jobs=n_jobs, num_threads=num_threads, seed=seed,
+        extra_overrides=extra_overrides,
+    )
     log_path = workdir / "subprocess.stdout.log"
     job.log_path = str(log_path)
     job.optuna_study_db_path = str(workdir / "optuna_study.db")

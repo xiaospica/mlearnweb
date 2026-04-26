@@ -285,29 +285,28 @@ const WorkbenchCreatePage: React.FC = () => {
         </div>
       </Card>
 
-      {/* ⚠️ 当前版本能力边界提示（避免用户误以为所有 5 类配置都生效）*/}
       <Alert
-        type="warning"
+        type="success"
         showIcon
         style={{ marginBottom: 16 }}
-        message="当前版本能力边界"
+        message="V2: 5 类参数全部生效"
         description={
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <div>
-              <Text strong>✅ 真正生效</Text>：基本信息（名称/搜索模式/n_trials/n_jobs/seed）+ <Text code>gbdt_model.kwargs</Text>（10 维 GBDT 超参由 Optuna 采样覆盖）
-            </div>
-            <div>
-              <Text strong style={{ color: '#faad14' }}>⚠️ 暂不生效（V2 实现）</Text>：
-              <Text code>task_config</Text>（数据集/特征/标签）、<Text code>custom_segments</Text>（时间分段）、
-              <Text code>bt_strategy</Text>（回测 topk/n_drop）、<Text code>record_config</Text>（评估器）。
-              这 4 类参数会被存到 <Text code>config_snapshot</Text>，但 train 子进程实际跑时
-              用的是 <Text code>strategy_dev/tushare_hs300_rolling_train.py</Text> 内部硬编码值
-              （见 <Text code>CSI300_RECORD_LGB_TASK_CONFIG</Text> + <Text code>CUSTOM_SEGMENTS</Text>）。
+              ✅ 提交后：5 类参数（<Text code>task_config</Text> / <Text code>custom_segments</Text> /
+              <Text code>gbdt_model</Text> / <Text code>bt_strategy</Text> / <Text code>record_config</Text>）
+              会写成 4 个 JSON 文件，通过 <Text code>--task-config-json</Text> /
+              <Text code>--custom-segments-json</Text> /
+              <Text code>--bt-strategy-json</Text> /
+              <Text code>--record-config-json</Text> 透传给训练脚本，全部进入实际训练。
             </div>
             <div style={{ marginTop: 6 }}>
-              想改这 4 类配置：直接改命令行训练脚本 + 重启 mlearnweb 后端；
-              或等 V2 版本（路线：让 train script 接受
-              <Text code>--task-config-json</Text> / <Text code>--custom-segments-json</Text> 等参数 override）。
+              <Text type="secondary">
+                注意：<Text code>task_config</Text> 用深度合并（仅覆盖填的字段），
+                <Text code>record_config</Text> 完全替换，<Text code>bt_strategy</Text> 替换 record 内
+                PortAna 策略的 kwargs，<Text code>custom_segments</Text> 完全替换。
+                提交后可在监控页"配置快照"Tab 看到实际写入的内容。
+              </Text>
             </div>
           </div>
         }
