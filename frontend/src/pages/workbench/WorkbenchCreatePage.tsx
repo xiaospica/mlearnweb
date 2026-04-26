@@ -114,6 +114,7 @@ const DEFAULT_SEGMENTS_5P: CustomSegment[] = [
 
 // 完整 record_config（含 PortAnaRecord 嵌套 strategy.kwargs，让 bt_strategy 注入有目标）
 // 与 strategy_dev/config.py MULTI_SEGMENT_RECORD_CONFIG 对齐（multi-segment 版）
+// ⚠️ benchmark='000300.SH' 是 tushare 风格命名，与本工程 qlib_data_bin 一致
 const DEFAULT_RECORD_CONFIG: Array<Record<string, unknown>> = [
   {
     class: 'MultiSegmentSignalRecord',
@@ -143,7 +144,7 @@ const DEFAULT_RECORD_CONFIG: Array<Record<string, unknown>> = [
           start_time: null,
           end_time: null,
           account: 1000000,
-          benchmark: 'SH000300',
+          benchmark: '000300.SH',
           exchange_kwargs: {
             freq: 'day',
             limit_threshold: 0.095,
@@ -161,6 +162,7 @@ const DEFAULT_RECORD_CONFIG: Array<Record<string, unknown>> = [
 
 // 完整 task_config（与 train script CSI300_RECORD_LGB_TASK_CONFIG 对齐）
 // 注意：不含 model（由 gbdt_model 注入）+ 不含 record（由 record_config 注入）
+// 默认 train=2015-2021 / valid=2022-2023 / test=2024-2026（短 test 让 RollingGen 自然 1 期）
 const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
   dataset: {
     class: 'DatasetH',
@@ -170,10 +172,20 @@ const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
         class: 'Alpha158Custom',
         module_path: 'factor_factory.alphas.alpha_158_custom_qlib',
         kwargs: {
-          start_time: '2007-01-01',
-          end_time: '2026-01-28',
-          fit_start_time: '2007-01-01',
-          fit_end_time: '2013-12-31',
+          cache_root: 'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\.cache\\factor_store',
+          end_time: '2026-01-23 00:00:00',
+          filter_instruments_dir:
+            'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\qlib_data_bin\\instruments',
+          filter_market: null,
+          filter_parquet:
+            'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\all_ma20_vol_filtered.parquet',
+          filter_parquet_date_col: 'trade_date',
+          filter_parquet_inst_col: 'ts_code',
+          fit_end_time: '2021-12-31 00:00:00',
+          fit_start_time: '2015-01-05 00:00:00',
+          infer_processors: [
+            { class: 'CSZScoreNorm', kwargs: { fields_group: 'feature' } },
+          ],
           instruments: 'all',
           label: ['Ref($close, -11) / Ref($close, -1) - 1'],
           learn_processors: [
@@ -181,17 +193,14 @@ const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
             { class: 'CSZScoreNorm', kwargs: { fields_group: 'feature' } },
             { class: 'CSZScoreNorm', kwargs: { fields_group: 'label' } },
           ],
-          infer_processors: [
-            { class: 'CSZScoreNorm', kwargs: { fields_group: 'feature' } },
-          ],
+          start_time: '2015-01-05 00:00:00',
           use_cache: true,
         },
       },
-      // 单期模式用：train/valid/test 三个时间段（walk_forward 模式下被 custom_segments 覆盖）
       segments: {
-        train: ['2007-01-01', '2013-12-31'],
-        valid: ['2014-01-01', '2015-12-31'],
-        test: ['2016-01-01', '2026-01-28'],
+        test: ['2024-01-02 00:00:00', '2026-01-23 00:00:00'],
+        train: ['2015-01-05 00:00:00', '2021-12-31 00:00:00'],
+        valid: ['2022-01-04 00:00:00', '2023-12-29 00:00:00'],
       },
     },
   },
