@@ -72,7 +72,11 @@ const isTerminal = (status: TuningJobStatus) =>
 // Trial 表
 // ---------------------------------------------------------------------------
 
-const trialColumns: ColumnsType<TuningTrial> = [
+// 工厂方法：trial 表列定义（需要 navigate + experiment_id 闭包）
+const buildTrialColumns = (
+  navigate: (path: string) => void,
+  experimentId: string,
+): ColumnsType<TuningTrial> => [
   {
     title: '#',
     dataIndex: 'trial_number',
@@ -189,6 +193,26 @@ const trialColumns: ColumnsType<TuningTrial> = [
     render: (v: number | null) =>
       v != null ? `${Math.round(v)}s` : <Text type="secondary">—</Text>,
   },
+  {
+    title: '报告',
+    dataIndex: 'run_id',
+    key: 'run_id',
+    width: 110,
+    render: (run_id: string | null) =>
+      run_id ? (
+        <Tooltip title={`mlflow run_id: ${run_id}`}>
+          <Button
+            type="link"
+            size="small"
+            onClick={() => navigate(`/report/${experimentId}/${run_id}`)}
+          >
+            查看报告
+          </Button>
+        </Tooltip>
+      ) : (
+        <Text type="secondary">—</Text>
+      ),
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -202,6 +226,7 @@ const WorkbenchMonitorPage: React.FC = () => {
   const queryClient = useQueryClient()
 
   const id = Number(jobId)
+  const experimentId = '374089520733232109'  // mlflow rolling_exp（与命令行同实验）
 
   const [activeTab, setActiveTab] = useState<'trials' | 'logs' | 'config'>('trials')
   // 默认 stdout：看 train 子进程的实时进度（含 qlib 训练 / 回测 print 输出）；
@@ -555,7 +580,7 @@ const WorkbenchMonitorPage: React.FC = () => {
                   ) : (
                     <Table
                       dataSource={trials}
-                      columns={trialColumns}
+                      columns={buildTrialColumns(navigate, experimentId)}
                       rowKey="trial_number"
                       size="small"
                       pagination={{ pageSize: 30 }}
@@ -828,15 +853,8 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
       value: config.custom_segments,
     },
     {
-      key: 'bt_strategy',
-      title: '回测策略（bt_strategy）',
-      effective: true,
-      note: '✅ 生效：--bt-strategy-json 替换 record 列表内 PortAnaRecord 的 strategy.kwargs',
-      value: config.bt_strategy,
-    },
-    {
       key: 'record_config',
-      title: '评估记录器（record_config）',
+      title: '评估记录器（record_config，含回测策略 strategy.kwargs）',
       effective: true,
       note: '✅ 生效：--record-config-json 完全替换 task_config["record"] 列表',
       value: config.record_config,

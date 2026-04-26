@@ -94,7 +94,6 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         "task_config": None,
         "custom_segments": None,
-        "bt_strategy": None,
         "record_config": None,
         "search_space": None,
         "single_segment": job.search_mode == "single_segment",
@@ -116,7 +115,7 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
     # 单期模式不写 custom_segments（让 --single-segment 标志生效）
     if not out["single_segment"]:
         out["custom_segments"] = _write("custom_segments", "custom_segments.json")
-    out["bt_strategy"] = _write("bt_strategy", "bt_strategy.json")
+    # V3.1: bt_strategy 已废弃为独立字段，前端直接 merge 到 record_config
     out["record_config"] = _write("record_config", "record_config.json")
     out["search_space"] = _write("search_space", "search_space.json")
     return out
@@ -147,15 +146,17 @@ def _build_subprocess_cmd(
         "--workdir", str(workdir),
         "--study-name", job.optuna_study_name,
         "--description-prefix", f"Workbench job {job.id}",
+        # V3.1: trial 的 mlflow run_name / description 继承调参 job
+        "--job-name", job.name,
     ]
-    # V2: 透传 4 类配置 override JSON + 单期标志
+    if job.description:
+        cmd += ["--job-description", job.description]
+    # V2/V3: 透传配置 override JSON + 单期标志（V3.1 删除 --bt-strategy-json）
     if extra_overrides:
         if extra_overrides.get("task_config"):
             cmd += ["--task-config-json", str(extra_overrides["task_config"])]
         if extra_overrides.get("custom_segments"):
             cmd += ["--custom-segments-json", str(extra_overrides["custom_segments"])]
-        if extra_overrides.get("bt_strategy"):
-            cmd += ["--bt-strategy-json", str(extra_overrides["bt_strategy"])]
         if extra_overrides.get("record_config"):
             cmd += ["--record-config-json", str(extra_overrides["record_config"])]
         if extra_overrides.get("search_space"):

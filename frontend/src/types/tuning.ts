@@ -69,8 +69,10 @@ export interface TuningConfigSnapshot {
   task_config?: TaskConfig | Record<string, unknown>
   custom_segments?: CustomSegment[]
   gbdt_model?: GbdtModelConfig
-  bt_strategy?: BtStrategy
-  /** RECORD_CONFIG 嵌套较深，前端按 raw JSON 编辑 */
+  /**
+   * RECORD_CONFIG 嵌套较深，前端按 raw JSON 编辑。
+   * V3.1: bt_strategy 已合并到 record_config 内 PortAnaRecord 的 strategy.kwargs（不再独立字段）
+   */
   record_config?: Array<Record<string, unknown>>
   /** Optuna 搜索空间（V3）：每参数 {type, low, high, log?} 或 {type:'categorical', choices} */
   search_space?: SearchSpace

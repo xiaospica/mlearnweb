@@ -239,16 +239,34 @@ const WorkbenchCreatePage: React.FC = () => {
   )
   const [searchSpace, setSearchSpace] = useState<SearchSpace>(DEFAULT_SEARCH_SPACE)
 
+  // bt_strategy 不再独立发送：提交时把 4 字段 merge 到 record_config 内
+  // PortAnaRecord/MultiSegmentPortAnaRecord 的 strategy.kwargs（避免与
+  // record_config 重复 + 老的 --bt-strategy-json 链路冗余）
+  const mergedRecordConfig = useMemo(() => {
+    const cloned = JSON.parse(JSON.stringify(recordConfig)) as Array<Record<string, unknown>>
+    for (const rec of cloned) {
+      const klass = rec?.class
+      if (klass !== 'PortAnaRecord' && klass !== 'MultiSegmentPortAnaRecord') continue
+      const kwargs = rec.kwargs as Record<string, unknown> | undefined
+      const cfg = kwargs?.config as Record<string, unknown> | undefined
+      const strat = cfg?.strategy as Record<string, unknown> | undefined
+      const stratKwargs = strat?.kwargs as Record<string, unknown> | undefined
+      if (stratKwargs) {
+        Object.assign(stratKwargs, btStrategy)
+      }
+    }
+    return cloned
+  }, [recordConfig, btStrategy])
+
   const configSnapshot: TuningConfigSnapshot = useMemo(
     () => ({
       task_config: taskConfig,
       custom_segments: searchMode === 'walk_forward_5p' ? customSegments : undefined,
       gbdt_model: gbdtModel,
-      bt_strategy: btStrategy,
-      record_config: recordConfig,
+      record_config: mergedRecordConfig,
       search_space: searchSpace,
     }),
-    [taskConfig, customSegments, gbdtModel, btStrategy, recordConfig, searchSpace, searchMode],
+    [taskConfig, customSegments, gbdtModel, mergedRecordConfig, searchSpace, searchMode],
   )
 
   // ---------------- 提交 ----------------
@@ -455,16 +473,6 @@ const WorkbenchCreatePage: React.FC = () => {
                   <JsonCodeEditor
                     value={searchSpace}
                     onChange={(v) => setSearchSpace(v as SearchSpace)}
-                  />
-                ),
-              },
-              {
-                key: 'bt_strategy',
-                label: 'bt_strategy',
-                children: (
-                  <JsonCodeEditor
-                    value={btStrategy}
-                    onChange={(v) => setBtStrategy(v as BtStrategy)}
                   />
                 ),
               },
