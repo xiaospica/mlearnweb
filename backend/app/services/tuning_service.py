@@ -78,21 +78,25 @@ def is_pid_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
         return False
 
 
-def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Optional[Path]]:
+def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
     """V2: 把 job.config_snapshot 的 4 类参数写出到 per-job 目录的 4 个 JSON 文件，
     供 run_optuna_search → train script 通过 --*-json 参数读取并 override。
 
-    返回 dict: 每类参数对应 JSON 路径或 None（未配置则不传，train 用默认）。
+    返回 dict:
+        - task_config / custom_segments / bt_strategy / record_config: JSON 路径或 None
+        - single_segment: bool（search_mode='single_segment' 时为 True，
+                          train script 据此忽略默认 CUSTOM_SEGMENTS）
     """
     cfg = job.config_snapshot or {}
     overrides_dir = workdir / "config_overrides"
     overrides_dir.mkdir(parents=True, exist_ok=True)
 
-    out: Dict[str, Optional[Path]] = {
+    out: Dict[str, Any] = {
         "task_config": None,
         "custom_segments": None,
         "bt_strategy": None,
         "record_config": None,
+        "single_segment": job.search_mode == "single_segment",
     }
 
     def _write(key: str, filename: str) -> Optional[Path]:
@@ -108,7 +112,9 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Optional
 
     # 字段名约定（与前端 TuningConfigSnapshot 一致）
     out["task_config"] = _write("task_config", "task_config.json")
-    out["custom_segments"] = _write("custom_segments", "custom_segments.json")
+    # 单期模式不写 custom_segments（让 --single-segment 标志生效）
+    if not out["single_segment"]:
+        out["custom_segments"] = _write("custom_segments", "custom_segments.json")
     out["bt_strategy"] = _write("bt_strategy", "bt_strategy.json")
     out["record_config"] = _write("record_config", "record_config.json")
     return out
@@ -119,7 +125,7 @@ def _build_subprocess_cmd(
     n_jobs: int = 1,
     num_threads: int = 20,
     seed: int = 42,
-    extra_overrides: Optional[Dict[str, Optional[Path]]] = None,
+    extra_overrides: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """组装 run_optuna_search subprocess 命令行.
 
@@ -140,7 +146,7 @@ def _build_subprocess_cmd(
         "--study-name", job.optuna_study_name,
         "--description-prefix", f"Workbench job {job.id}",
     ]
-    # V2: 透传 4 类配置 override JSON
+    # V2: 透传 4 类配置 override JSON + 单期标志
     if extra_overrides:
         if extra_overrides.get("task_config"):
             cmd += ["--task-config-json", str(extra_overrides["task_config"])]
@@ -150,6 +156,8 @@ def _build_subprocess_cmd(
             cmd += ["--bt-strategy-json", str(extra_overrides["bt_strategy"])]
         if extra_overrides.get("record_config"):
             cmd += ["--record-config-json", str(extra_overrides["record_config"])]
+        if extra_overrides.get("single_segment"):
+            cmd += ["--single-segment"]
     return cmd
 
 

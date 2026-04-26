@@ -95,10 +95,90 @@ const DEFAULT_SEGMENTS_5P: CustomSegment[] = [
   },
 ]
 
+// 完整 record_config（含 PortAnaRecord 嵌套 strategy.kwargs，让 bt_strategy 注入有目标）
+// 与 strategy_dev/config.py MULTI_SEGMENT_RECORD_CONFIG 对齐（multi-segment 版）
 const DEFAULT_RECORD_CONFIG: Array<Record<string, unknown>> = [
-  { class: 'SignalRecord', module_path: 'qlib.workflow.record_temp' },
-  { class: 'PortAnaRecord', module_path: 'qlib.workflow.record_temp' },
+  {
+    class: 'MultiSegmentSignalRecord',
+    module_path: 'multi_segment_records',
+    kwargs: {
+      dataset: '<DATASET>',
+      model: '<MODEL>',
+      extra_segments: ['train', 'valid'],
+    },
+  },
+  {
+    class: 'SigAnaRecord',
+    module_path: 'qlib.workflow.record_temp',
+    kwargs: { ana_long_short: false, ann_scaler: 252 },
+  },
+  {
+    class: 'MultiSegmentPortAnaRecord',
+    module_path: 'multi_segment_records',
+    kwargs: {
+      config: {
+        strategy: {
+          class: 'TopkDropoutStrategy',
+          module_path: 'qlib.contrib.strategy',
+          kwargs: { topk: 7, n_drop: 1, only_tradable: true, signal: '<PRED>' },
+        },
+        backtest: {
+          start_time: null,
+          end_time: null,
+          account: 1000000,
+          benchmark: 'SH000300',
+          exchange_kwargs: {
+            freq: 'day',
+            limit_threshold: 0.095,
+            deal_price: 'close',
+            open_cost: 0.0005,
+            close_cost: 0.0015,
+            min_cost: 5,
+          },
+        },
+      },
+      extra_segments: ['train', 'valid'],
+    },
+  },
 ]
+
+// 完整 task_config（与 train script CSI300_RECORD_LGB_TASK_CONFIG 对齐）
+// 注意：不含 model（由 gbdt_model 注入）+ 不含 record（由 record_config 注入）
+const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
+  dataset: {
+    class: 'DatasetH',
+    module_path: 'qlib.data.dataset',
+    kwargs: {
+      handler: {
+        class: 'Alpha158Custom',
+        module_path: 'factor_factory.alphas.alpha_158_custom_qlib',
+        kwargs: {
+          start_time: '2007-01-01',
+          end_time: '2026-01-28',
+          fit_start_time: '2007-01-01',
+          fit_end_time: '2013-12-31',
+          instruments: 'all',
+          label: ['Ref($close, -11) / Ref($close, -1) - 1'],
+          learn_processors: [
+            { class: 'DropnaLabel' },
+            { class: 'CSZScoreNorm', kwargs: { fields_group: 'feature' } },
+            { class: 'CSZScoreNorm', kwargs: { fields_group: 'label' } },
+          ],
+          infer_processors: [
+            { class: 'CSZScoreNorm', kwargs: { fields_group: 'feature' } },
+          ],
+          use_cache: true,
+        },
+      },
+      // 单期模式用：train/valid/test 三个时间段（walk_forward 模式下被 custom_segments 覆盖）
+      segments: {
+        train: ['2007-01-01', '2013-12-31'],
+        valid: ['2014-01-01', '2015-12-31'],
+        test: ['2016-01-01', '2026-01-28'],
+      },
+    },
+  },
+}
 
 // ---------------------------------------------------------------------------
 // JSON 编辑器（用 textarea，避免引入 Monaco 重依赖）
@@ -175,11 +255,7 @@ const WorkbenchCreatePage: React.FC = () => {
   const [seed, setSeed] = useState(42)
 
   // 5 类配置（config_snapshot 内容）
-  const [taskConfig, setTaskConfig] = useState<Record<string, unknown>>({
-    dataset_class: 'Alpha158Custom',
-    instruments: 'all',
-    label: ['Ref($close, -11) / Ref($close, -1) - 1'],
-  })
+  const [taskConfig, setTaskConfig] = useState<Record<string, unknown>>(DEFAULT_TASK_CONFIG)
   const [customSegments, setCustomSegments] =
     useState<CustomSegment[]>(DEFAULT_SEGMENTS_5P)
   const [gbdtModel, setGbdtModel] = useState<GbdtModelConfig>(DEFAULT_GBDT)
