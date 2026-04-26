@@ -219,13 +219,19 @@ def get_tuning_progress(job_id: int, db: Session = Depends(get_db_session)):
 def get_tuning_logs(
     job_id: int,
     tail_bytes: int = Query(16384, ge=512, le=1048576),
+    source: str = Query("tuning", pattern="^(tuning|stdout|all)$"),
     db: Session = Depends(get_db_session),
 ):
     job = _get_job_or_404(db, job_id)
-    text = tuning_service.get_log_tail(job, tail_bytes=tail_bytes)
+    text = tuning_service.get_log_tail(job, tail_bytes=tail_bytes, source=source)
     return ApiResponse(
         success=True,
-        data={"job_id": job.id, "log_path": job.log_path, "text": text},
+        data={
+            "job_id": job.id,
+            "log_path": job.log_path,
+            "source": source,
+            "text": text,
+        },
     )
 
 

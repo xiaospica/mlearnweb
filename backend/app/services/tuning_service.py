@@ -79,10 +79,15 @@ def is_pid_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
 
 
 def _build_subprocess_cmd(job: TuningJob, n_jobs: int = 1, num_threads: int = 20, seed: int = 42) -> List[str]:
-    """组装 run_optuna_search subprocess 命令行."""
+    """组装 run_optuna_search subprocess 命令行.
+
+    用 ``-u`` 标志强制 Python 解释器无缓冲（Windows 上 PYTHONUNBUFFERED 不可靠），
+    保证 stdout/stderr 立即刷到 mlearnweb 后端 Popen 的 stdout fd（即 subprocess.stdout.log）。
+    """
     workdir = get_job_workdir(job.id)
     return [
         TUNING_PYTHON_EXE,
+        "-u",  # ⚠️ 强制 unbuffered stdout/stderr，前端实时日志依赖这个
         "-m",
         "strategy_dev.auto_tune.run_optuna_search",
         "--n-trials", str(job.n_trials_target),
@@ -447,19 +452,50 @@ def get_job_progress(db: Session, job: TuningJob) -> Dict[str, Any]:
     }
 
 
-def get_log_tail(job: TuningJob, tail_bytes: int = 16384) -> str:
-    """返回 subprocess 日志末尾若干字节（前端日志面板用）"""
-    if not job.log_path:
-        return ""
-    log_path = Path(job.log_path)
-    if not log_path.is_file():
+def _read_tail(path: Path, tail_bytes: int) -> str:
+    if not path.is_file():
         return ""
     try:
-        size = log_path.stat().st_size
-        with log_path.open("rb") as f:
+        size = path.stat().st_size
+        with path.open("rb") as f:
             if size > tail_bytes:
                 f.seek(size - tail_bytes)
             data = f.read()
         return data.decode("utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def get_log_tail(job: TuningJob, tail_bytes: int = 16384, source: str = "tuning") -> str:
+    """返回 subprocess 日志末尾若干字节（前端日志面板用）.
+
+    Args:
+        source:
+            - "tuning": 仅 tuning.log（structured logger，trial 完成事件等关键日志）
+            - "stdout": 仅 subprocess.stdout.log（原始 stdout，含 startup 信息）
+            - "all":    两个合并展示（tuning.log 优先，stdout 兜底）
+    """
+    if not job.workdir:
+        # 兼容旧 job 没记 workdir
+        if job.log_path and Path(job.log_path).is_file():
+            return _read_tail(Path(job.log_path), tail_bytes)
+        return ""
+
+    workdir = Path(job.workdir)
+    tuning_log = workdir / "tuning.log"
+    stdout_log = workdir / "subprocess.stdout.log"
+
+    if source == "tuning":
+        return _read_tail(tuning_log, tail_bytes)
+    if source == "stdout":
+        return _read_tail(stdout_log, tail_bytes)
+    # "all": 拼接，per-source 各取一半 tail
+    half = max(tail_bytes // 2, 4096)
+    parts = []
+    tuning_text = _read_tail(tuning_log, half)
+    if tuning_text:
+        parts.append(f"=== tuning.log (last {half} bytes) ===\n{tuning_text}")
+    stdout_text = _read_tail(stdout_log, half)
+    if stdout_text:
+        parts.append(f"\n=== subprocess.stdout.log (last {half} bytes) ===\n{stdout_text}")
+    return "\n".join(parts) if parts else ""

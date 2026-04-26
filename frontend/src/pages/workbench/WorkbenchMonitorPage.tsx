@@ -8,15 +8,17 @@ import {
   Button,
   Card,
   Col,
-  Drawer,
   Empty,
   Popconfirm,
   Progress,
+  Radio,
   Row,
   Space,
   Spin,
   Statistic,
+  Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -27,6 +29,7 @@ import {
   FileTextOutlined,
   ReloadOutlined,
   StopOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
@@ -193,7 +196,9 @@ const WorkbenchMonitorPage: React.FC = () => {
 
   const id = Number(jobId)
 
-  const [logDrawerOpen, setLogDrawerOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'trials' | 'logs'>('trials')
+  const [logSource, setLogSource] = useState<'tuning' | 'stdout' | 'all'>('tuning')
+  const [logAutoRefresh, setLogAutoRefresh] = useState(true)
   const [progress, setProgress] = useState<TuningProgress | null>(null)
   const [sseError, setSseError] = useState<string | null>(null)
 
@@ -320,12 +325,6 @@ const WorkbenchMonitorPage: React.FC = () => {
           <Badge status={liveCfg.badge} text={liveCfg.label} />
           {sseError && <Tag color="warning">{sseError}</Tag>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <Button
-              icon={<FileTextOutlined />}
-              onClick={() => setLogDrawerOpen(true)}
-            >
-              日志
-            </Button>
             {(['running', 'searching'] as TuningJobStatus[]).includes(status) && (
               <Popconfirm
                 title="确定取消该 job 吗？"
@@ -459,79 +458,168 @@ const WorkbenchMonitorPage: React.FC = () => {
         </Row>
       </Card>
 
-      {/* Trials 表 */}
-      <Card
-        title={`Trials 表（按 valid_sharpe 降序，共 ${trials.length} 行）`}
-        extra={
-          <Button
-            icon={<ReloadOutlined />}
-            size="small"
-            onClick={() => refetchTrials()}
-          >
-            刷新
-          </Button>
-        }
-      >
-        {trials.length === 0 ? (
-          <Empty description="还没有 trial。等 subprocess 启动后会陆续出现。" />
-        ) : (
-          <Table
-            dataSource={trials}
-            columns={trialColumns}
-            rowKey="trial_number"
-            size="small"
-            pagination={{ pageSize: 30 }}
-            scroll={{ x: 1000 }}
-            rowClassName={(record) =>
-              record.trial_number === bestNum ? 'best-trial-row' : ''
-            }
-          />
-        )}
+      {/* Trials / 实时日志 Tabs */}
+      <Card>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(k) => setActiveTab(k as 'trials' | 'logs')}
+          items={[
+            {
+              key: 'trials',
+              label: (
+                <span>
+                  <UnorderedListOutlined /> Trials 表（按 valid_sharpe 降序，共 {trials.length} 行）
+                </span>
+              ),
+              children: (
+                <div>
+                  <div style={{ marginBottom: 8, textAlign: 'right' }}>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      size="small"
+                      onClick={() => refetchTrials()}
+                    >
+                      刷新
+                    </Button>
+                  </div>
+                  {trials.length === 0 ? (
+                    <Empty description="还没有 trial。等 subprocess 启动后会陆续出现。" />
+                  ) : (
+                    <Table
+                      dataSource={trials}
+                      columns={trialColumns}
+                      rowKey="trial_number"
+                      size="small"
+                      pagination={{ pageSize: 30 }}
+                      scroll={{ x: 1000 }}
+                      rowClassName={(record) =>
+                        record.trial_number === bestNum ? 'best-trial-row' : ''
+                      }
+                    />
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'logs',
+              label: (
+                <span>
+                  <FileTextOutlined /> 实时日志
+                </span>
+              ),
+              children: (
+                <LogPanel
+                  jobId={id}
+                  source={logSource}
+                  onSourceChange={setLogSource}
+                  autoRefresh={logAutoRefresh && !isTerminal(status)}
+                  onAutoRefreshChange={setLogAutoRefresh}
+                  isTerminal={isTerminal(status)}
+                />
+              ),
+            },
+          ]}
+        />
       </Card>
 
       <style>{`
         .best-trial-row { background: #f6ffed !important; }
         .best-trial-row:hover td { background: #d9f7be !important; }
       `}</style>
-
-      {/* 日志 Drawer */}
-      <LogDrawer jobId={id} open={logDrawerOpen} onClose={() => setLogDrawerOpen(false)} />
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// 日志 Drawer
+// 实时日志面板（嵌入 Tab，2s 自动刷新）
 // ---------------------------------------------------------------------------
 
-const LogDrawer: React.FC<{
+const LogPanel: React.FC<{
   jobId: number
-  open: boolean
-  onClose: () => void
-}> = ({ jobId, open, onClose }) => {
-  const { data, refetch, isFetching } = useQuery({
-    queryKey: ['tuning-logs', jobId],
-    queryFn: () => tuningService.getLogs(jobId, 32768),
-    refetchInterval: open ? 5_000 : false,
-    enabled: open,
+  source: 'tuning' | 'stdout' | 'all'
+  onSourceChange: (s: 'tuning' | 'stdout' | 'all') => void
+  autoRefresh: boolean
+  onAutoRefreshChange: (v: boolean) => void
+  isTerminal: boolean
+}> = ({ jobId, source, onSourceChange, autoRefresh, onAutoRefreshChange, isTerminal }) => {
+  const preRef = useRef<HTMLPreElement | null>(null)
+  const [autoScroll, setAutoScroll] = useState(true)
+
+  const { data, refetch, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ['tuning-logs', jobId, source],
+    queryFn: () => tuningService.getLogs(jobId, 65536, source),
+    // 运行中 2s 自动刷新；终态时停止
+    refetchInterval: autoRefresh ? 2_000 : false,
   })
 
   const text = data?.data?.text ?? ''
 
+  // 自动滚动到底部
+  useEffect(() => {
+    if (autoScroll && preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight
+    }
+  }, [text, autoScroll])
+
   return (
-    <Drawer
-      title="Subprocess 日志（最后 32KB）"
-      placement="bottom"
-      height={400}
-      open={open}
-      onClose={onClose}
-      extra={
-        <Button size="small" loading={isFetching} onClick={() => refetch()}>
-          刷新
-        </Button>
-      }
-    >
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          marginBottom: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Radio.Group
+          value={source}
+          onChange={(e) => onSourceChange(e.target.value)}
+          size="small"
+        >
+          <Radio.Button value="tuning">tuning.log（结构化）</Radio.Button>
+          <Radio.Button value="stdout">subprocess.stdout</Radio.Button>
+          <Radio.Button value="all">合并</Radio.Button>
+        </Radio.Group>
+
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Switch
+            size="small"
+            checked={autoRefresh}
+            disabled={isTerminal}
+            onChange={onAutoRefreshChange}
+          />
+          <Typography.Text style={{ fontSize: 12 }}>
+            自动刷新 (2s){isTerminal && '（终态停止）'}
+          </Typography.Text>
+        </span>
+
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Switch size="small" checked={autoScroll} onChange={setAutoScroll} />
+          <Typography.Text style={{ fontSize: 12 }}>自动滚动到底</Typography.Text>
+        </span>
+
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+            {dataUpdatedAt
+              ? `更新于 ${dayjs(dataUpdatedAt).format('HH:mm:ss')}`
+              : '—'}
+            {' · '}
+            {(text.length / 1024).toFixed(1)} KB
+          </Typography.Text>
+          <Button
+            icon={<ReloadOutlined />}
+            size="small"
+            loading={isFetching}
+            onClick={() => refetch()}
+          >
+            刷新
+          </Button>
+        </span>
+      </div>
+
       <pre
+        ref={preRef}
         style={{
           fontSize: 11,
           fontFamily: "'SF Mono', 'Consolas', monospace",
@@ -541,13 +629,14 @@ const LogDrawer: React.FC<{
           color: '#e5e7eb',
           padding: 16,
           borderRadius: 6,
-          maxHeight: 'calc(100vh - 200px)',
+          height: 480,
           overflow: 'auto',
+          margin: 0,
         }}
       >
-        {text || '（日志为空）'}
+        {text || '（日志为空，等 subprocess 启动）'}
       </pre>
-    </Drawer>
+    </div>
   )
 }
 

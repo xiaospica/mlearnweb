@@ -78,11 +78,19 @@ export const tuningService = {
   getLogs(
     id: number,
     tailBytes = 16384,
+    source: 'tuning' | 'stdout' | 'all' = 'tuning',
   ): Promise<
-    ApiSuccessResponse<{ job_id: number; log_path: string; text: string }>
+    ApiSuccessResponse<{
+      job_id: number
+      log_path: string
+      source: string
+      text: string
+    }>
   > {
     return apiClient
-      .get(`/tuning/jobs/${id}/logs`, { params: { tail_bytes: tailBytes } })
+      .get(`/tuning/jobs/${id}/logs`, {
+        params: { tail_bytes: tailBytes, source },
+      })
       .then((r) => r.data)
   },
 
