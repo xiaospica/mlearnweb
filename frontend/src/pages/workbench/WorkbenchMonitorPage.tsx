@@ -197,7 +197,9 @@ const WorkbenchMonitorPage: React.FC = () => {
   const id = Number(jobId)
 
   const [activeTab, setActiveTab] = useState<'trials' | 'logs'>('trials')
-  const [logSource, setLogSource] = useState<'tuning' | 'stdout' | 'all'>('tuning')
+  // 默认 stdout：看 train 子进程的实时进度（含 qlib 训练 / 回测 print 输出）；
+  // 想看结构化的 trial 元事件（trial 0 done）切到 tuning
+  const [logSource, setLogSource] = useState<'tuning' | 'stdout' | 'all'>('stdout')
   const [logAutoRefresh, setLogAutoRefresh] = useState(true)
   const [progress, setProgress] = useState<TuningProgress | null>(null)
   const [sseError, setSseError] = useState<string | null>(null)
