@@ -786,6 +786,8 @@ const LogPanel: React.FC<{
 }> = ({ jobId, source, onSourceChange, autoRefresh, onAutoRefreshChange, isTerminal }) => {
   const preRef = useRef<HTMLPreElement | null>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  // 高度自适应：测 pre 顶部到 viewport bottom 的距离
+  const [logHeight, setLogHeight] = useState<number>(480)
 
   const { data, refetch, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['tuning-logs', jobId, source],
@@ -795,6 +797,24 @@ const LogPanel: React.FC<{
   })
 
   const text = data?.data?.text ?? ''
+
+  // 高度自适应：viewport 高度变化或 pre 位置变化时重算
+  useEffect(() => {
+    const update = () => {
+      if (preRef.current) {
+        const top = preRef.current.getBoundingClientRect().top
+        // 预留底部 24px 留白
+        setLogHeight(Math.max(280, window.innerHeight - top - 24))
+      }
+    }
+    // 用 rAF 等下一帧（DOM 完成布局后）
+    const raf = requestAnimationFrame(update)
+    window.addEventListener('resize', update)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
 
   // 自动滚动到底部
   useEffect(() => {
@@ -871,7 +891,7 @@ const LogPanel: React.FC<{
           color: '#e5e7eb',
           padding: 16,
           borderRadius: 6,
-          height: 480,
+          height: logHeight,
           overflow: 'auto',
           margin: 0,
         }}
