@@ -16,6 +16,9 @@ import Alpha101DocsPage from '@/pages/help/Alpha101DocsPage'
 import Alpha191DocsPage from '@/pages/help/Alpha191DocsPage'
 import LiveTradingPage from '@/pages/live-trading/LiveTradingPage'
 import LiveTradingStrategyDetailPage from '@/pages/live-trading/LiveTradingStrategyDetailPage'
+import WorkbenchHomePage from '@/pages/workbench/WorkbenchHomePage'
+import WorkbenchCreatePage from '@/pages/workbench/WorkbenchCreatePage'
+import WorkbenchMonitorPage from '@/pages/workbench/WorkbenchMonitorPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -69,6 +72,9 @@ function App() {
                   path="live-trading/:nodeId/:engine/:name"
                   element={<LiveTradingStrategyDetailPage />}
                 />
+                <Route path="workbench" element={<WorkbenchHomePage />} />
+                <Route path="workbench/new" element={<WorkbenchCreatePage />} />
+                <Route path="workbench/jobs/:jobId" element={<WorkbenchMonitorPage />} />
                 <Route path="help" element={<HelpLayout />}>
                   <Route index element={<Navigate to="categories" replace />} />
                   <Route path="categories" element={<FactorCategoriesPage />} />

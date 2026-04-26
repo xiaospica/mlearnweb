@@ -13,7 +13,8 @@ const Header: React.FC = () => {
   const isExperiments = location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
   const isHelp = location.pathname.startsWith('/help')
   const isLiveTrading = location.pathname.startsWith('/live-trading')
-  const isTrainingRecords = !isExperiments && !isHelp && !isLiveTrading
+  const isWorkbench = location.pathname.startsWith('/workbench')
+  const isTrainingRecords = !isExperiments && !isHelp && !isLiveTrading && !isWorkbench
 
   const helpMenuItems: MenuProps['items'] = [
     {
@@ -95,6 +96,22 @@ const Header: React.FC = () => {
             }}
           >
             训练记录
+          </div>
+          <div
+            onClick={() => navigate('/workbench')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: isWorkbench ? 600 : 400,
+              color: isWorkbench ? '#1677ff' : '#6b7280',
+              background: isWorkbench ? '#e8f4fd' : 'transparent',
+              transition: 'all 0.2s',
+              userSelect: 'none',
+            }}
+          >
+            训练工作台
           </div>
           <div
             onClick={() => navigate('/experiments')}
