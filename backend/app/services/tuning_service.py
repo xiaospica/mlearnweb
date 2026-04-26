@@ -466,6 +466,206 @@ def _read_tail(path: Path, tail_bytes: int) -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Finalize：用 best trial 跑正式训练（写 training_records 表，与命令行同链路）
+# ---------------------------------------------------------------------------
+
+
+def finalize_job(
+    db: Session,
+    job: TuningJob,
+    trial_number: int,
+    seed: int = 42,
+    num_threads: int = 20,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> int:
+    """用指定 trial 的超参跑一次正式训练，结果写入 training_records 表。
+
+    与命令行模式 100% 同链路：调用 tushare_hs300_rolling_train.py +
+    --training-record-id <id> 参数，让 RollingPipeline 内部的
+    DashboardRecorder 在 batch 模式下追加 run mapping，与
+    dashboard_batch.py start/finish 流程行为一致。
+
+    完成后 finalize_training_record 会出现在 / (TrainingRecordsPage)，
+    用户能像看任何普通训练一样看 train/valid/test 三段全部 artifacts。
+    """
+    from app.services.training_service import TrainingService
+
+    trial = (
+        db.query(TuningTrial)
+        .filter(
+            TuningTrial.tuning_job_id == job.id,
+            TuningTrial.trial_number == trial_number,
+        )
+        .first()
+    )
+    if not trial:
+        raise ValueError(f"trial {trial_number} 不存在于 job {job.id}")
+    if not trial.params:
+        raise ValueError(f"trial {trial_number} 缺少 params")
+
+    workdir = Path(job.workdir) if job.workdir else get_job_workdir(job.id)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    # 写 best_params.json（含 num_threads + seed，与 finalize_best.export 同格式）
+    overrides = {**trial.params, "num_threads": num_threads, "seed": seed}
+    overrides_path = workdir / "finalize_best_params.json"
+    overrides_path.write_text(
+        json.dumps(overrides, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    record_name = name or f"Tuning Job #{job.id} best (trial {trial_number})"
+    record_desc = description or (
+        f"由调参工作台 finalize：用 trial {trial_number} 最佳超参跑正式训练；"
+        f"valid_sharpe={trial.valid_sharpe} test_sharpe={trial.test_sharpe}"
+    )
+    # experiment_id 从既有 mlflow run 复用（保证 train script 创建的 run 落到同 experiment）
+    experiment_id = "374089520733232109"  # qlib_strategy_dev 默认 rolling_exp
+    experiment_name = "rolling_exp"
+    category = "rolling" if job.search_mode == "walk_forward_5p" else "single"
+
+    record = TrainingService.create_record(
+        db=db,
+        name=record_name,
+        experiment_id=experiment_id,
+        experiment_name=experiment_name,
+        description=record_desc,
+        category=category,
+        config_snapshot={
+            "_finalized_from_tuning_job": job.id,
+            "tuning_trial_number": trial_number,
+            "tuning_seed": seed,
+            "params": overrides,
+            "best_valid_sharpe": trial.valid_sharpe,
+            "best_test_sharpe": trial.test_sharpe,
+            "search_mode": job.search_mode,
+        },
+        command_line=(
+            f"finalize: tushare_hs300_rolling_train.py --training-record-id <id> "
+            f"--gbdt-overrides {overrides_path.name} --with-multi-segment"
+        ),
+    )
+
+    # 启动 train subprocess（独立后台，不阻塞 API）
+    cmd = [
+        TUNING_PYTHON_EXE,
+        "-u",
+        str(STRATEGY_DEV_ROOT / "strategy_dev" / "tushare_hs300_rolling_train.py"),
+        "--name", record_name,
+        "--description", record_desc,
+        "--with-multi-segment",
+        "--gbdt-overrides", str(overrides_path),
+        "--training-record-id", str(record.id),  # ← 关键：与命令行模式同链路
+    ]
+    finalize_log = workdir / f"finalize_record_{record.id}.stdout.log"
+    log_fp = open(finalize_log, "ab")
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_fp,
+        stderr=subprocess.STDOUT,
+        cwd=str(STRATEGY_DEV_ROOT),
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+
+    # 更新 job 元数据
+    job.finalized_training_record_id = record.id
+    job.status = "finalizing"
+    db.commit()
+
+    print(
+        f"[TuningService] finalize job={job.id} trial={trial_number} "
+        f"→ training_record={record.id} pid={proc.pid}"
+    )
+    return record.id
+
+
+# ---------------------------------------------------------------------------
+# Deploy：从工作台一键部署到 vnpy 实盘
+# ---------------------------------------------------------------------------
+
+
+# vnpy 实盘后端（mlearnweb 第二个进程）
+LIVE_BACKEND_URL = os.environ.get(
+    "MLEARNWEB_LIVE_URL",
+    "http://localhost:8100",
+)
+
+
+def deploy_job_to_vnpy(
+    job: TuningJob,
+    *,
+    node_id: str,
+    engine: str,
+    class_name: str,
+    strategy_name: str,
+    vt_symbol: Optional[str] = None,
+    setting_overrides: Optional[Dict[str, Any]] = None,
+    ops_password: Optional[str] = None,
+) -> Dict[str, Any]:
+    """从 finalize 产物组装 vnpy setting 并转调既有 live_trading API.
+
+    前提：job 必须已 finalize（finalized_training_record_id 不为空），
+    可从 deployment_manifest.json 读 mlflow_run_id + bundle_dir。
+    """
+    import httpx
+
+    if not job.finalized_training_record_id:
+        raise ValueError("job 尚未 finalize；请先 POST /finalize 完成正式训练")
+
+    workdir = Path(job.workdir) if job.workdir else get_job_workdir(job.id)
+    manifest_path = workdir / "deployment_manifest.json"
+
+    # 如果 manifest 还没生成（finalize subprocess 还没跑完），用 trial.run_id 兜底
+    if not manifest_path.is_file():
+        # 从 finalized training_record 反查最新 run_id（主 run）
+        from app.models.database import TrainingRunMapping
+        # 这里需要 db 但当前函数不接 db，暂时让调用方传入
+        raise ValueError(
+            f"deployment_manifest.json 不存在于 {workdir}；"
+            "请等 finalize subprocess 完成（看 finalize_record_*.stdout.log）"
+        )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    # 拼 vnpy setting
+    setting: Dict[str, Any] = {
+        "mlflow_run_id": manifest.get("mlflow_run_id"),
+        "bundle_dir": manifest.get("bundle_dir"),
+        "tuning_job_id": job.id,
+        "tuning_trial_number": manifest.get("trial_id"),
+    }
+    if setting_overrides:
+        setting.update(setting_overrides)
+
+    # 转调既有 vnpy create_strategy API
+    headers = {}
+    if ops_password:
+        headers["X-Ops-Password"] = ops_password
+
+    body = {
+        "class_name": class_name,
+        "strategy_name": strategy_name,
+        "vt_symbol": vt_symbol,
+        "setting": setting,
+    }
+    url = f"{LIVE_BACKEND_URL}/api/live-trading/strategies/{node_id}/{engine}"
+    with httpx.Client(timeout=30.0) as client:
+        resp = client.post(url, json=body, headers=headers)
+        resp.raise_for_status()
+        result = resp.json()
+
+    return {
+        "training_record_id": job.finalized_training_record_id,
+        "node_id": node_id,
+        "engine": engine,
+        "strategy_name": strategy_name,
+        "vnpy_response": result,
+    }
+
+
 def get_log_tail(job: TuningJob, tail_bytes: int = 16384, source: str = "tuning") -> str:
     """返回 subprocess 日志末尾若干字节（前端日志面板用）.
 

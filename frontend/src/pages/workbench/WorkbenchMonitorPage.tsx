@@ -9,6 +9,10 @@ import {
   Card,
   Col,
   Empty,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
   Popconfirm,
   Progress,
   Radio,
@@ -28,6 +32,8 @@ import {
   ClockCircleOutlined,
   FileTextOutlined,
   ReloadOutlined,
+  RocketOutlined,
+  SaveOutlined,
   StopOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
@@ -203,6 +209,8 @@ const WorkbenchMonitorPage: React.FC = () => {
   const [logAutoRefresh, setLogAutoRefresh] = useState(true)
   const [progress, setProgress] = useState<TuningProgress | null>(null)
   const [sseError, setSseError] = useState<string | null>(null)
+  const [finalizeModalOpen, setFinalizeModalOpen] = useState(false)
+  const [deployModalOpen, setDeployModalOpen] = useState(false)
 
   const { data: jobData, isLoading: jobLoading } = useQuery({
     queryKey: ['tuning-job', id],
@@ -288,6 +296,45 @@ const WorkbenchMonitorPage: React.FC = () => {
     },
   })
 
+  const finalizeMutation = useMutation({
+    mutationFn: (body: {
+      trial_number: number
+      seed: number
+      name?: string
+      description?: string
+    }) => tuningService.finalize(id, body),
+    onSuccess: (resp) => {
+      const recordId = (resp.data as { training_record_id?: number } | undefined)?.training_record_id
+      message.success(
+        recordId
+          ? `Finalize 启动，training_record_id=${recordId}（约 15 分钟后跳转训练记录页面看结果）`
+          : 'Finalize 启动',
+      )
+      setFinalizeModalOpen(false)
+      queryClient.invalidateQueries({ queryKey: ['tuning-job', id] })
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      message.error(err.response?.data?.detail ?? err.message)
+    },
+  })
+
+  const deployMutation = useMutation({
+    mutationFn: (body: {
+      node_id: string
+      engine: string
+      class_name: string
+      strategy_name: string
+      vt_symbol?: string
+    }) => tuningService.deploy(id, body),
+    onSuccess: () => {
+      message.success('已转调 vnpy create_strategy')
+      setDeployModalOpen(false)
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      message.error(err.response?.data?.detail ?? err.message)
+    },
+  })
+
   // ---------------- 渲染 ----------------
 
   if (Number.isNaN(id)) {
@@ -338,9 +385,27 @@ const WorkbenchMonitorPage: React.FC = () => {
                 </Button>
               </Popconfirm>
             )}
-            {(['created', 'cancelled', 'failed', 'zombie', 'done'] as TuningJobStatus[]).includes(status) && (
+            {(['done', 'cancelled'] as TuningJobStatus[]).includes(status) && (
+              <Button
+                icon={<SaveOutlined />}
+                disabled={!bestNum && bestNum !== 0}
+                onClick={() => setFinalizeModalOpen(true)}
+              >
+                Finalize 最佳模型
+              </Button>
+            )}
+            {job.finalized_training_record_id && (
               <Button
                 type="primary"
+                icon={<RocketOutlined />}
+                onClick={() => setDeployModalOpen(true)}
+              >
+                部署到实盘
+              </Button>
+            )}
+            {(['created', 'cancelled', 'failed', 'zombie', 'done'] as TuningJobStatus[]).includes(status) && (
+              <Button
+                type={status === 'created' ? 'primary' : 'default'}
                 onClick={() => startMutation.mutate(id)}
                 loading={startMutation.isPending}
               >
@@ -528,7 +593,182 @@ const WorkbenchMonitorPage: React.FC = () => {
         .best-trial-row { background: #f6ffed !important; }
         .best-trial-row:hover td { background: #d9f7be !important; }
       `}</style>
+
+      <FinalizeModal
+        open={finalizeModalOpen}
+        onClose={() => setFinalizeModalOpen(false)}
+        defaultTrialNumber={bestNum ?? 0}
+        bestSharpe={best ?? null}
+        loading={finalizeMutation.isPending}
+        onSubmit={(values) => finalizeMutation.mutate(values)}
+      />
+
+      <DeployModal
+        open={deployModalOpen}
+        onClose={() => setDeployModalOpen(false)}
+        finalizedRecordId={job.finalized_training_record_id ?? null}
+        loading={deployMutation.isPending}
+        onSubmit={(values) => deployMutation.mutate(values)}
+      />
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Finalize Modal：让用户确认 trial number + seed + 命名，然后启动正式训练
+// ---------------------------------------------------------------------------
+
+const FinalizeModal: React.FC<{
+  open: boolean
+  onClose: () => void
+  defaultTrialNumber: number
+  bestSharpe: number | null
+  loading: boolean
+  onSubmit: (values: {
+    trial_number: number
+    seed: number
+    name?: string
+    description?: string
+  }) => void
+}> = ({ open, onClose, defaultTrialNumber, bestSharpe, loading, onSubmit }) => {
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    if (open) {
+      form.setFieldsValue({
+        trial_number: defaultTrialNumber,
+        seed: 42,
+        name: '',
+        description: '',
+      })
+    }
+  }, [open, defaultTrialNumber, form])
+
+  return (
+    <Modal
+      title="Finalize 最佳模型 — 用 best trial 跑正式训练"
+      open={open}
+      onCancel={onClose}
+      onOk={() => {
+        form.validateFields().then((values) => onSubmit(values))
+      }}
+      okText="启动正式训练"
+      cancelText="取消"
+      confirmLoading={loading}
+      width={620}
+    >
+      <Alert
+        type="info"
+        showIcon
+        message="此操作将启动一次完整的正式训练，写入训练记录页面"
+        description={
+          <>
+            与命令行 <Typography.Text code>--training-record-id</Typography.Text> 同链路：
+            train script 自动追加 run mapping，结果会出现在
+            <Typography.Text code>/</Typography.Text>（训练记录页面）。
+            约耗时 3-15 分钟（取决于单期 / 跨期 5）。
+          </>
+        }
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={form} layout="vertical">
+        <Form.Item
+          label="trial_number"
+          name="trial_number"
+          rules={[{ required: true }]}
+          tooltip={
+            bestSharpe != null
+              ? `默认 best trial（valid_sharpe=${bestSharpe.toFixed(4)}）`
+              : '从 trial 表挑一个 trial number'
+          }
+        >
+          <InputNumber min={0} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label="seed" name="seed" rules={[{ required: true }]}>
+          <InputNumber min={0} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item label="名称（可选）" name="name">
+          <Input placeholder="留空将自动生成 'Tuning Job #N best (trial M)'" />
+        </Form.Item>
+        <Form.Item label="描述（可选）" name="description">
+          <Input.TextArea rows={2} placeholder="备注：为什么选这个 trial / 实盘上线计划等" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Deploy Modal：将 finalize 后的模型部署到 vnpy 实盘
+// ---------------------------------------------------------------------------
+
+const DeployModal: React.FC<{
+  open: boolean
+  onClose: () => void
+  finalizedRecordId: number | null
+  loading: boolean
+  onSubmit: (values: {
+    node_id: string
+    engine: string
+    class_name: string
+    strategy_name: string
+    vt_symbol?: string
+  }) => void
+}> = ({ open, onClose, finalizedRecordId, loading, onSubmit }) => {
+  const [form] = Form.useForm()
+
+  return (
+    <Modal
+      title="部署到 vnpy 实盘"
+      open={open}
+      onCancel={onClose}
+      onOk={() => {
+        form.validateFields().then((values) => onSubmit(values))
+      }}
+      okText="部署"
+      cancelText="取消"
+      confirmLoading={loading}
+      width={620}
+    >
+      <Alert
+        type="warning"
+        showIcon
+        message="实盘部署不可逆，请谨慎"
+        description={
+          finalizedRecordId
+            ? `将基于 finalize 产物 (training_record #${finalizedRecordId}) 的 mlflow run + bundle_dir 在 vnpy 节点创建策略实例。`
+            : 'job 尚未 finalize；请先点 Finalize 按钮跑正式训练'
+        }
+        style={{ marginBottom: 16 }}
+      />
+      <Form form={form} layout="vertical">
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item label="node_id" name="node_id" rules={[{ required: true }]}
+                       tooltip="vnpy 节点 ID（如 'local'，配置在 vnpy_nodes.yaml）">
+              <Input placeholder="local" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="engine" name="engine" rules={[{ required: true }]}
+                       tooltip="vnpy engine 名（如 'cta'）">
+              <Input placeholder="cta" />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Form.Item label="class_name" name="class_name" rules={[{ required: true }]}
+                   tooltip="vnpy 策略类名（与 vnpy_ml_strategy 中定义一致）">
+          <Input placeholder="MLPredictStrategy" />
+        </Form.Item>
+        <Form.Item label="strategy_name" name="strategy_name" rules={[{ required: true }]}
+                   tooltip="vnpy 策略实例名（唯一标识）">
+          <Input placeholder="ml_csi300_v1" />
+        </Form.Item>
+        <Form.Item label="vt_symbol（可选）" name="vt_symbol">
+          <Input placeholder="例如 000001.SZSE" />
+        </Form.Item>
+      </Form>
+    </Modal>
   )
 }
 
