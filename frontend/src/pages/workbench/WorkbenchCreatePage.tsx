@@ -15,9 +15,9 @@ import {
   Space,
   Steps,
   Switch,
+  Tabs,
   Tag,
   Typography,
-  Divider,
 } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons'
 
 import { tuningService } from '@/services/tuningService'
+import JsonCodeEditor from '@/components/workbench/JsonCodeEditor'
 import type {
   TuningJobCreateRequest,
   TuningConfigSnapshot,
@@ -181,59 +182,7 @@ const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
 }
 
 // ---------------------------------------------------------------------------
-// JSON 编辑器（用 textarea，避免引入 Monaco 重依赖）
-// ---------------------------------------------------------------------------
-
-const JsonEditor: React.FC<{
-  value: unknown
-  onChange: (value: unknown) => void
-  rows?: number
-  placeholder?: string
-}> = ({ value, onChange, rows = 8, placeholder }) => {
-  const [text, setText] = useState(() => JSON.stringify(value, null, 2))
-  const [error, setError] = useState<string | null>(null)
-
-  // 当外部 value 变化时同步 textarea
-  React.useEffect(() => {
-    setText(JSON.stringify(value, null, 2))
-    setError(null)
-  }, [value])
-
-  const handleBlur = () => {
-    try {
-      const parsed = JSON.parse(text)
-      setError(null)
-      onChange(parsed)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Invalid JSON')
-    }
-  }
-
-  return (
-    <div>
-      <Input.TextArea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={handleBlur}
-        rows={rows}
-        placeholder={placeholder}
-        style={{
-          fontFamily: "'SF Mono', 'Consolas', monospace",
-          fontSize: 12,
-          background: '#fafbfc',
-        }}
-      />
-      {error && (
-        <Text type="danger" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
-          ⚠ {error}
-        </Text>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// 主页面
+// 主页面（JsonCodeEditor 在 components/workbench/ 中独立组件）
 // ---------------------------------------------------------------------------
 
 const WorkbenchCreatePage: React.FC = () => {
@@ -389,17 +338,12 @@ const WorkbenchCreatePage: React.FC = () => {
       />
 
       {advancedJsonMode ? (
-        // ============ JSON 高级模式 ============
-        <Card title="config_snapshot 整体编辑（专家模式）">
-          <Paragraph type="secondary" style={{ fontSize: 13 }}>
-            直接编辑 5 类参数的 JSON。失焦校验，无错误才会同步回 Stepper 表单。
-          </Paragraph>
-          <Divider />
-
-          <Form layout="vertical">
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="Job 名称" required>
+        // ============ JSON 高级模式（5 类参数 Tab 切换，每个 Tab 高度填到底）============
+        <Card title="config_snapshot 整体编辑（专家模式）" styles={{ body: { padding: 12 } }}>
+          <Form layout="vertical" style={{ marginBottom: 12 }}>
+            <Row gutter={12}>
+              <Col span={10}>
+                <Form.Item label="Job 名称" required style={{ marginBottom: 0 }}>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
@@ -408,7 +352,7 @@ const WorkbenchCreatePage: React.FC = () => {
                 </Form.Item>
               </Col>
               <Col span={6}>
-                <Form.Item label="搜索模式">
+                <Form.Item label="搜索模式" style={{ marginBottom: 0 }}>
                   <Radio.Group
                     value={searchMode}
                     onChange={(e) => setSearchMode(e.target.value)}
@@ -418,8 +362,8 @@ const WorkbenchCreatePage: React.FC = () => {
                   </Radio.Group>
                 </Form.Item>
               </Col>
-              <Col span={6}>
-                <Form.Item label="n_trials">
+              <Col span={4}>
+                <Form.Item label="n_trials" style={{ marginBottom: 0 }}>
                   <InputNumber
                     value={nTrials}
                     onChange={(v) => setNTrials(v ?? 70)}
@@ -429,42 +373,76 @@ const WorkbenchCreatePage: React.FC = () => {
                   />
                 </Form.Item>
               </Col>
+              <Col span={4}>
+                <Form.Item label="seed" style={{ marginBottom: 0 }}>
+                  <InputNumber
+                    value={seed}
+                    onChange={(v) => setSeed(v ?? 42)}
+                    min={0}
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
+              </Col>
             </Row>
           </Form>
 
-          <Divider orientation="left">5 类配置 JSON</Divider>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Title level={5}>task_config (CSI300_RECORD_LGB_TASK_CONFIG)</Title>
-              <JsonEditor value={taskConfig} onChange={(v) => setTaskConfig(v as Record<string, unknown>)} rows={6} />
-            </Col>
-            <Col span={12}>
-              <Title level={5}>custom_segments</Title>
-              <JsonEditor
-                value={customSegments}
-                onChange={(v) => setCustomSegments(v as CustomSegment[])}
-                rows={6}
-              />
-            </Col>
-          </Row>
-          <Row gutter={16} style={{ marginTop: 16 }}>
-            <Col span={12}>
-              <Title level={5}>gbdt_model (GBDT_MODEL)</Title>
-              <JsonEditor value={gbdtModel} onChange={(v) => setGbdtModel(v as GbdtModelConfig)} rows={10} />
-            </Col>
-            <Col span={12}>
-              <Title level={5}>bt_strategy (BT_STRATEGY)</Title>
-              <JsonEditor value={btStrategy} onChange={(v) => setBtStrategy(v as BtStrategy)} rows={4} />
-              <Title level={5} style={{ marginTop: 16 }}>
-                record_config (RECORD_CONFIG)
-              </Title>
-              <JsonEditor
-                value={recordConfig}
-                onChange={(v) => setRecordConfig(v as Array<Record<string, unknown>>)}
-                rows={4}
-              />
-            </Col>
-          </Row>
+          <Tabs
+            type="card"
+            items={[
+              {
+                key: 'task_config',
+                label: 'task_config',
+                children: (
+                  <JsonCodeEditor
+                    value={taskConfig}
+                    onChange={(v) => setTaskConfig(v as Record<string, unknown>)}
+                  />
+                ),
+              },
+              {
+                key: 'custom_segments',
+                label: `custom_segments (${
+                  searchMode === 'walk_forward_5p' ? '生效' : '单期模式忽略'
+                })`,
+                children: (
+                  <JsonCodeEditor
+                    value={customSegments}
+                    onChange={(v) => setCustomSegments(v as CustomSegment[])}
+                  />
+                ),
+              },
+              {
+                key: 'gbdt_model',
+                label: 'gbdt_model',
+                children: (
+                  <JsonCodeEditor
+                    value={gbdtModel}
+                    onChange={(v) => setGbdtModel(v as GbdtModelConfig)}
+                  />
+                ),
+              },
+              {
+                key: 'bt_strategy',
+                label: 'bt_strategy',
+                children: (
+                  <JsonCodeEditor
+                    value={btStrategy}
+                    onChange={(v) => setBtStrategy(v as BtStrategy)}
+                  />
+                ),
+              },
+              {
+                key: 'record_config',
+                label: 'record_config',
+                children: (
+                  <JsonCodeEditor
+                    value={recordConfig}
+                    onChange={(v) => setRecordConfig(v as Array<Record<string, unknown>>)}
+                  />
+                ),
+              },
+            ]}
+          />
         </Card>
       ) : (
         // ============ Stepper 5 步模式 ============
@@ -576,10 +554,9 @@ const WorkbenchCreatePage: React.FC = () => {
                 )}
               </Paragraph>
               {searchMode === 'walk_forward_5p' && (
-                <JsonEditor
+                <JsonCodeEditor
                   value={customSegments}
                   onChange={(v) => setCustomSegments(v as CustomSegment[])}
-                  rows={20}
                 />
               )}
             </div>
@@ -593,10 +570,9 @@ const WorkbenchCreatePage: React.FC = () => {
                 <Text code>learning_rate / num_leaves / max_depth / min_child_samples / lambda_l1 / lambda_l2 / colsample_bytree / subsample / subsample_freq / early_stopping_rounds</Text>
                 10 个维度。其它参数（如 <Text code>n_estimators / num_threads / seed</Text>）保持基线。
               </Paragraph>
-              <JsonEditor
+              <JsonCodeEditor
                 value={gbdtModel}
                 onChange={(v) => setGbdtModel(v as GbdtModelConfig)}
-                rows={20}
               />
             </div>
           )}
@@ -654,25 +630,38 @@ const WorkbenchCreatePage: React.FC = () => {
             </Form>
           )}
 
-          {/* Step 4: 评估器 */}
+          {/* Step 4: 评估器（task_config + record_config 两 Tab） */}
           {step === 4 && (
             <div>
-              <Paragraph>
-                <Text code>RECORD_CONFIG</Text> 是 qlib 评估记录器列表（SignalRecord / SigAnaRecord / PortAnaRecord）。
-                调参时会自动启用 <Text code>--with-multi-segment</Text> 让 train/valid/test 三段都生成回测 + IC 分析。
+              <Paragraph type="secondary" style={{ marginBottom: 8 }}>
+                <Text code>task_config</Text> 含 dataset/handler/segments；
+                <Text code>record_config</Text> 是评估记录器列表（SignalRecord/SigAnaRecord/PortAnaRecord）。
+                两者都通过 <Text code>--task-config-json</Text> / <Text code>--record-config-json</Text> 注入 train script。
               </Paragraph>
-              <Paragraph>
-                <Text strong>task_config</Text>（task / dataset 配置）也在这里编辑：
-              </Paragraph>
-              <Title level={5}>task_config</Title>
-              <JsonEditor value={taskConfig} onChange={(v) => setTaskConfig(v as Record<string, unknown>)} rows={6} />
-              <Title level={5} style={{ marginTop: 16 }}>
-                record_config
-              </Title>
-              <JsonEditor
-                value={recordConfig}
-                onChange={(v) => setRecordConfig(v as Array<Record<string, unknown>>)}
-                rows={6}
+              <Tabs
+                type="card"
+                items={[
+                  {
+                    key: 'task_config',
+                    label: 'task_config',
+                    children: (
+                      <JsonCodeEditor
+                        value={taskConfig}
+                        onChange={(v) => setTaskConfig(v as Record<string, unknown>)}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'record_config',
+                    label: 'record_config',
+                    children: (
+                      <JsonCodeEditor
+                        value={recordConfig}
+                        onChange={(v) => setRecordConfig(v as Array<Record<string, unknown>>)}
+                      />
+                    ),
+                  },
+                ]}
               />
             </div>
           )}

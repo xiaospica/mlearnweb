@@ -41,6 +41,7 @@ import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 
 import { tuningService } from '@/services/tuningService'
+import JsonCodeEditor from '@/components/workbench/JsonCodeEditor'
 import type {
   TuningJob,
   TuningJobStatus,
@@ -840,45 +841,46 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
       <Alert
         type="success"
         showIcon
-        style={{ marginBottom: 16 }}
+        style={{ marginBottom: 12 }}
         message="V2: 5 类配置全部已注入训练流程"
         description="提交时这 5 类参数已分别写成 JSON 文件传给 train script。GBDT 超参由 Optuna 在搜索空间内采样覆盖；其余 4 类是 job 级常量。"
       />
-      {sections.map((sec) => (
-        <Card
-          key={sec.key}
-          size="small"
-          style={{ marginBottom: 12 }}
-          title={
-            <Space>
-              <Tag color={sec.effective ? 'success' : 'warning'}>
+      <Tabs
+        type="card"
+        items={sections.map((sec) => ({
+          key: sec.key,
+          label: (
+            <Space size={6}>
+              <Tag
+                color={sec.effective ? 'success' : 'warning'}
+                style={{ marginInlineEnd: 0 }}
+              >
                 {sec.effective ? '生效' : '占位'}
               </Tag>
-              <span>{sec.title}</span>
+              <span>{sec.title.split('（')[0]}</span>
             </Space>
-          }
-        >
-          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-            {sec.note}
-          </Text>
-          <pre
-            style={{
-              fontSize: 11,
-              fontFamily: "'SF Mono', 'Consolas', monospace",
-              background: '#fafbfc',
-              padding: 12,
-              borderRadius: 4,
-              margin: 0,
-              maxHeight: 200,
-              overflow: 'auto',
-            }}
-          >
-            {sec.value !== undefined && sec.value !== null
-              ? JSON.stringify(sec.value, null, 2)
-              : '（未配置）'}
-          </pre>
-        </Card>
-      ))}
+          ),
+          children: (
+            <div>
+              <Text
+                type="secondary"
+                style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
+              >
+                {sec.note}
+              </Text>
+              {sec.value !== undefined && sec.value !== null ? (
+                <JsonCodeEditor
+                  value={sec.value}
+                  onChange={() => undefined}
+                  readonly
+                />
+              ) : (
+                <Empty description="（未配置）" />
+              )}
+            </div>
+          ),
+        }))}
+      />
     </div>
   )
 }
