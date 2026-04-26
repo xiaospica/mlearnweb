@@ -272,3 +272,101 @@ class LiveTradingListResponse(BaseModel):
     message: str = ""
     data: Any = None
     warning: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Tuning Workbench (auto_tune)
+# ---------------------------------------------------------------------------
+
+
+class TuningJobCreate(BaseModel):
+    """创建调参 Job 请求体"""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    search_mode: str = Field("single_segment", pattern="^(single_segment|walk_forward_5p)$")
+    n_trials: int = Field(70, ge=1, le=500)
+    n_jobs: int = Field(1, ge=1, le=4, description="并行 trial 数；mlflow file backend 建议 1")
+    num_threads: int = Field(20, ge=1, le=64, description="单 trial LightGBM num_threads")
+    seed: int = Field(42, ge=0)
+    # 5 类配置参数（前端 Stepper 收集，不能为空）
+    config_snapshot: Dict[str, Any] = Field(
+        ...,
+        description="{csi300_record_lgb_task_config, custom_segments, gbdt_model, bt_strategy, record_config}"
+    )
+
+
+class TuningJobResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    status: str
+    search_mode: str
+    n_trials_target: int
+    n_trials_done: int
+    n_trials_failed: int
+    best_trial_number: Optional[int] = None
+    best_objective_value: Optional[float] = None
+    finalized_training_record_id: Optional[int] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TuningTrialResponse(BaseModel):
+    trial_number: int
+    state: str
+    params: Dict[str, Any] = {}
+    valid_sharpe: Optional[float] = None
+    test_sharpe: Optional[float] = None
+    overfit_ratio: Optional[float] = None
+    composite_scores: Dict[str, Optional[float]] = Field(default_factory=dict)
+    hard_constraint_passed: bool = False
+    hard_constraint_failed_items: List[str] = Field(default_factory=list)
+    run_id: Optional[str] = None
+    duration_sec: Optional[float] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class TuningProgressResponse(BaseModel):
+    """轻量进度响应（前端定期拉，避免 trials 表整体重传）"""
+    job_id: int
+    status: str
+    n_trials_target: int
+    n_trials_done: int
+    n_trials_failed: int
+    best_trial_number: Optional[int] = None
+    best_objective_value: Optional[float] = None
+    last_log_offset: int = 0
+    duration_seconds: Optional[float] = None
+
+
+class TuningFinalizeRequest(BaseModel):
+    """选定 trial 后触发 finalize：用其超参跑一次正式训练（写 training_records）"""
+    trial_number: int = Field(..., ge=0)
+    seed: int = Field(42, ge=0)
+    name: Optional[str] = Field(None, description="finalize 产出 training_record 的名称；None 自动生成")
+    description: Optional[str] = None
+
+
+class TuningDeployRequest(BaseModel):
+    """从工作台一键部署到 vnpy 实盘"""
+    node_id: str = Field(..., min_length=1)
+    engine: str = Field(..., min_length=1)
+    class_name: str = Field(..., min_length=1)
+    strategy_name: str = Field(..., min_length=1)
+    vt_symbol: Optional[str] = None
+    setting_overrides: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="覆盖 deployment_manifest 之外的 vnpy setting 字段"
+    )

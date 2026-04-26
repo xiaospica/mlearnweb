@@ -1,6 +1,8 @@
 import matplotlib
 matplotlib.use('Agg')
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -8,8 +10,25 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 
 from app.core.config import settings
-from app.models.database import init_db
-from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images
+from app.models.database import init_db, get_db_session
+from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images, tuning
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动时执行 tuning 孤儿恢复（防 --reload 重启留下的僵尸 job）"""
+    try:
+        from app.services.tuning_service import reconcile_orphans
+        db = next(get_db_session())
+        try:
+            stats = reconcile_orphans(db)
+            print(f"[Startup] tuning orphan reconcile: {stats}")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[Startup] tuning orphan reconcile failed (non-fatal): {exc}")
+    yield
+
 
 app = FastAPI(
     title="QLib Backtest Dashboard API",
@@ -17,6 +36,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 
@@ -46,6 +66,26 @@ app.include_router(reports.router)
 app.include_router(training_records.router)
 app.include_router(training_record_images.router)
 app.include_router(factor_docs.router)
+app.include_router(tuning.router)
+
+
+@app.on_event("startup")
+def _reconcile_tuning_orphans_on_startup():
+    """FastAPI 重启时扫描所有 status=running 的 tuning job，pid 不存在则置 zombie。
+
+    防止后端 --reload 重启后留下的孤儿状态污染前端 UI。
+    """
+    try:
+        from app.services.tuning_service import reconcile_orphans
+        from app.models.database import get_db_session
+        db = next(get_db_session())
+        try:
+            stats = reconcile_orphans(db)
+            print(f"[Startup] tuning orphan reconcile: {stats}")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"[Startup] tuning orphan reconcile failed (非阻塞): {exc}")
 
 
 @app.get("/")
@@ -59,6 +99,7 @@ def root():
             "runs": "/api/runs?exp_id=xxx",
             "reports": "/api/runs/{run_id}/report?exp_id=xxx",
             "training_records": "/api/training-records",
+            "tuning": "/api/tuning/jobs",
         },
     }
 

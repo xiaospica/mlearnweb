@@ -120,6 +120,96 @@ class TrainingRunMapping(Base):
     training_record = relationship("TrainingRecord", back_populates="run_mappings")
 
 
+class TuningJob(Base):
+    """调参作业（auto_tune Optuna study 包装）。
+
+    与 TrainingRecord 父子两级抽象（对齐 MLflow Experiment+Run / Optuna Study+Trial /
+    W&B Sweep+Run / Sagemaker HPO Job + Training Job 业界范式）：
+    - TuningJob = 搜索过程（N 个 trial 组成）
+    - finalized_training_record_id = export 后挂回的"正式训练"，复用现有 TrainingRecord 链路
+    """
+    __tablename__ = "tuning_jobs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    # status: created/running/searching/finalizing/done/cancelled/failed/zombie
+    status = Column(String(32), default="created", index=True)
+    # search_mode: single_segment / walk_forward_5p
+    search_mode = Column(String(32), default="single_segment", nullable=False)
+    # config_snapshot: 5 类参数快照
+    # {csi300_record_lgb_task_config, custom_segments, gbdt_model, bt_strategy, record_config}
+    config_snapshot = Column(JSON, nullable=False)
+    # Optuna study 持久化
+    optuna_study_name = Column(String(255), nullable=False)
+    optuna_study_db_path = Column(String(512), nullable=False)
+    # per-job 隔离工作目录：trials.csv / overrides/ / run_index/ / log
+    workdir = Column(String(512), nullable=False)
+    # subprocess 进程信息（用于孤儿恢复）
+    pid = Column(Integer, nullable=True)
+    pid_started_at = Column(Float, nullable=True)  # process create_time（防 PID 复用）
+    # 进度
+    n_trials_target = Column(Integer, nullable=False, default=0)
+    n_trials_done = Column(Integer, default=0)
+    n_trials_failed = Column(Integer, default=0)
+    best_trial_number = Column(Integer, nullable=True)
+    best_objective_value = Column(Float, nullable=True)
+    # finalize 阶段产出的 TrainingRecord（与命令行一致的链路）
+    finalized_training_record_id = Column(Integer, ForeignKey("training_records.id", ondelete="SET NULL"), nullable=True, index=True)
+    # 实时日志：append-only 文本，前端可拉
+    log_path = Column(String(512), nullable=True)
+    # 时间戳
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Float, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    trials = relationship("TuningTrial", back_populates="job", cascade="all, delete-orphan")
+
+
+class TuningTrial(Base):
+    """单个 Optuna trial 的持久化（每行一个 trial）。
+
+    SQL 查询/排序/筛选直接在表上做，避免把 70+ trial 塞 JSON 字段导致查询慢。
+    """
+    __tablename__ = "tuning_trials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tuning_job_id = Column(Integer, ForeignKey("tuning_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    trial_number = Column(Integer, nullable=False, index=True)
+    # state: running / completed / failed / pruned / metrics_missing / no_run_index
+    state = Column(String(32), default="running", index=True)
+    # 10 维 GBDT 搜索参数
+    params = Column(JSON, nullable=False)
+    # 40+ 全量指标（valid/train/test 三段所有口径）
+    metrics = Column(JSON, nullable=True)
+    # 关键标量列（建索引方便排序，避免 JSON path 查询）
+    valid_sharpe = Column(Float, nullable=True, index=True)
+    test_sharpe = Column(Float, nullable=True)
+    overfit_ratio = Column(Float, nullable=True)
+    # 4 个评分公式（仅记录，不参与 Optuna 目标）
+    composite_scores = Column(JSON, nullable=True)
+    # 硬约束
+    hard_constraint_passed = Column(Boolean, default=False)
+    hard_constraint_failed_items = Column(JSON, default=list)
+    # 关联 mlflow run
+    run_id = Column(String(64), nullable=True, index=True)
+    run_name = Column(String(255), nullable=True)
+    duration_sec = Column(Float, nullable=True)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    job = relationship("TuningJob", back_populates="trials")
+
+    __table_args__ = (
+        Index("ix_tt_job_trial", "tuning_job_id", "trial_number", unique=True),
+        Index("ix_tt_job_sharpe", "tuning_job_id", "valid_sharpe"),
+    )
+
+
 def init_db():
     # Import ML monitoring models here to register them on Base.metadata
     # before create_all runs. Module-level import in __init__.py would
