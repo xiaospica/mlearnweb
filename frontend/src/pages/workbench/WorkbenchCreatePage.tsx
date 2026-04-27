@@ -359,23 +359,22 @@ const WorkbenchCreatePage: React.FC = () => {
         type="success"
         showIcon
         style={{ marginBottom: 16 }}
-        message="V2: 5 类参数全部生效"
+        message="V3.2: WYSIWYG — 所见即所得"
         description={
           <div style={{ fontSize: 13, lineHeight: 1.7 }}>
             <div>
               ✅ 提交后：5 类参数（<Text code>task_config</Text> / <Text code>custom_segments</Text> /
-              <Text code>gbdt_model</Text> / <Text code>bt_strategy</Text> / <Text code>record_config</Text>）
-              会写成 4 个 JSON 文件，通过 <Text code>--task-config-json</Text> /
-              <Text code>--custom-segments-json</Text> /
-              <Text code>--bt-strategy-json</Text> /
-              <Text code>--record-config-json</Text> 透传给训练脚本，全部进入实际训练。
+              <Text code>gbdt_model</Text> / <Text code>record_config</Text> /
+              <Text code>search_space</Text>）会写成独立 JSON 文件，通过 CLI 透传给训练脚本，
+              全部进入实际训练。
             </div>
             <div style={{ marginTop: 6 }}>
               <Text type="secondary">
-                注意：<Text code>task_config</Text> 用深度合并（仅覆盖填的字段），
-                <Text code>record_config</Text> 完全替换，<Text code>bt_strategy</Text> 替换 record 内
-                PortAna 策略的 kwargs，<Text code>custom_segments</Text> 完全替换。
-                提交后可在监控页"配置快照"Tab 看到实际写入的内容。
+                注意：<Text code>task_config</Text> / <Text code>record_config</Text> /
+                <Text code>custom_segments</Text> 都是
+                <Text strong>完全替换</Text>语义（不深度合并 baseline，避免 baseline 内字段被静默注入）。
+                <Text code>gbdt_model.kwargs</Text> 由 Optuna 在 <Text code>search_space</Text> 范围内采样覆盖。
+                监控页"配置快照"Tab 显示的内容 = 训练实际使用的内容。
               </Text>
             </div>
           </div>

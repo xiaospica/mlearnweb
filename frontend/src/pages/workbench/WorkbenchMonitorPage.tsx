@@ -842,7 +842,7 @@ const ConfigSnapshotPanel: React.FC<{ job: TuningJob }> = ({ job }) => {
       key: 'task_config',
       title: '任务配置（task_config / 数据集 / 特征 / 标签）',
       effective: true,
-      note: '✅ 生效：--task-config-json 深度合并（已填字段覆盖默认）',
+      note: '✅ 生效：--task-config-json 完全替换 baseline（WYSIWYG — 这里显示什么 = 训练实际跑什么；缺失的 model / record 由 gbdt_model / record_config 字段单独提供）',
       value: config.task_config,
     },
     {
