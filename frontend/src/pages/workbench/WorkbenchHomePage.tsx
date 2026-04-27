@@ -238,11 +238,9 @@ const WorkbenchHomePage: React.FC = () => {
       width: 260,
       fixed: 'right',
       render: (_, record: TuningJob) => {
+        // 入队仅对 created 草稿生效；已运行过的 job 用 重新启动 按钮
         const canEnqueue =
-          record.queue_position == null &&
-          (['created', 'cancelled', 'failed', 'zombie', 'done'] as TuningJobStatus[]).includes(
-            record.status,
-          )
+          record.queue_position == null && record.status === 'created'
         return (
           <Space size="small">
             <Button

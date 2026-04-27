@@ -456,8 +456,10 @@ def sync_trials_from_csv(db: Session, job: TuningJob) -> int:
     }
 
     n_changed = 0
-    n_done = 0
-    n_failed = 0
+    # 按 trial_number 去重统计：csv 同 trial 通常有 running + completed 多行；
+    # 用户取消后重启 job 还会再次累加，所以 csv 行数 ≠ unique trial 数。
+    # 用 dict 记每个 trial 的最终 state（"最后一行 wins" — csv 顺序就是写入顺序）
+    final_state_by_trial: Dict[int, str] = {}
     best_value: Optional[float] = None
     best_number: Optional[int] = None
 
@@ -466,14 +468,13 @@ def sync_trials_from_csv(db: Session, job: TuningJob) -> int:
         trial_number = fields["trial_number"]
         if trial_number is None:
             continue
+        # 记最终状态 + 取最优（同 trial 多行时按 csv 顺序最后一次为准）
+        final_state_by_trial[trial_number] = fields["state"]
         if fields["state"] == "completed":
-            n_done += 1
             vs = fields["valid_sharpe"]
             if vs is not None and (best_value is None or vs > best_value):
                 best_value = vs
                 best_number = trial_number
-        elif fields["state"] in ("failed", "metrics_missing", "no_run_index", "empty_run_index", "no_sharpe"):
-            n_failed += 1
 
         if trial_number in existing:
             t = existing[trial_number]
@@ -489,10 +490,16 @@ def sync_trials_from_csv(db: Session, job: TuningJob) -> int:
         else:
             t = TuningTrial(tuning_job_id=job.id, **fields)
             db.add(t)
+            # 关键修复：trials.csv 一个 trial 通常有 2 行（先 running 后 completed），
+            # 把刚 add 的对象塞进 existing，下一行同 trial_number 走 UPDATE 分支，
+            # 避免 commit 时 UNIQUE(tuning_job_id, trial_number) 冲突
+            existing[trial_number] = t
             n_changed += 1
 
-    job.n_trials_done = n_done
-    job.n_trials_failed = n_failed
+    # 按 unique trial_number 计数（不是 csv 行数）
+    failed_states = {"failed", "metrics_missing", "no_run_index", "empty_run_index", "no_sharpe"}
+    job.n_trials_done = sum(1 for s in final_state_by_trial.values() if s == "completed")
+    job.n_trials_failed = sum(1 for s in final_state_by_trial.values() if s in failed_states)
     if best_number is not None:
         job.best_trial_number = best_number
         job.best_objective_value = best_value
@@ -832,11 +839,19 @@ def _runner_busy(db: Session) -> Optional[TuningJob]:
 
 
 def enqueue_job(db: Session, job: TuningJob) -> TuningJob:
-    """把 job 加入队尾。queue_position = max(existing) + 1，没有就是 1。"""
+    """把 job 加入队尾。queue_position = max(existing) + 1，没有就是 1。
+
+    仅 status='created' 的草稿 job 允许入队 — 队列语义是"待启动的 job 等
+    scheduler 自动跑"，已 done/cancelled/failed/zombie 的应由用户手动决策
+    （重启 / 删除 / 检查），不应被自动调度污染。
+    """
     if job.queue_position is not None:
         return job  # 幂等
-    if job.status not in ("created", "cancelled", "failed", "zombie", "done"):
-        raise ValueError(f"job 状态 {job.status} 不允许入队（仅可重启状态可入队）")
+    if job.status != "created":
+        raise ValueError(
+            f"job 状态 {job.status} 不允许入队（仅 created 草稿可入队；"
+            f"已运行过的 job 请用 重新启动 按钮）"
+        )
     max_pos = db.query(func.max(TuningJob.queue_position)).scalar()
     job.queue_position = (max_pos or 0) + 1
     db.commit()
@@ -868,14 +883,14 @@ def reorder_queue(db: Session, job_ids: List[int]) -> List[TuningJob]:
     )
     current_map = {j.id: j for j in current}
 
-    # 验证 job_ids 都存在且符合可入队状态
+    # 验证 job_ids 都存在且符合可入队状态（仅 created 草稿）
     new_jobs: List[TuningJob] = []
     for jid in job_ids:
         j = current_map.get(jid) or db.query(TuningJob).filter(TuningJob.id == jid).first()
         if not j:
             raise ValueError(f"job {jid} 不存在")
-        if j.status not in ("created", "cancelled", "failed", "zombie", "done"):
-            raise ValueError(f"job {jid} 状态 {j.status} 不允许入队")
+        if j.status != "created":
+            raise ValueError(f"job {jid} 状态 {j.status} 不允许入队（仅 created 草稿可入队）")
         new_jobs.append(j)
 
     # 先把所有当前队列 job 的 queue_position 清空
@@ -911,7 +926,7 @@ def try_start_next_queued_job(db: Session) -> Optional[TuningJob]:
         db.query(TuningJob)
         .filter(
             TuningJob.queue_position.isnot(None),
-            TuningJob.status.in_(["created", "cancelled", "failed", "zombie", "done"]),
+            TuningJob.status == "created",
         )
         .order_by(TuningJob.queue_position.asc(), TuningJob.id.asc())
         .first()
