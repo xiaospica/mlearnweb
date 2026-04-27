@@ -4,11 +4,15 @@
     1. subprocess 生命周期：启动 / 取消 / 孤儿恢复
     2. 增量解析 per-job trials.csv → 同步到 tuning_trials 表
     3. 计算 best trial 并维护 tuning_jobs 进度字段
+    4. V3.3 队列调度：scheduler async loop 串行启动 enqueue 的 job
 
 设计:
     - subprocess 用 Popen（不用 asyncio）：与现有同步 FastAPI 风格一致
     - 不常驻同步线程：前端轮询 /progress 时按需触发 csv → DB 同步
     - per-job workdir 隔离（auto_tune/runs/<job_id>/），避免多 job 串扰
+    - 队列串行：scheduler 任何时刻最多只启 1 个 job，避免 mlflow file
+      backend 并发 race（与多 job 并发的需求区分；并发版本待 mlflow 迁
+      SQLite backend 后再考虑）
 
 不在本 service 范围内：
     - SSE 推送（在 router 层用 sse-starlette 实现）
@@ -17,6 +21,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import os
@@ -27,6 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -801,3 +807,158 @@ def get_log_tail(job: TuningJob, tail_bytes: int = 16384, source: str = "tuning"
     if stdout_text:
         parts.append(f"\n=== subprocess.stdout.log (last {half} bytes) ===\n{stdout_text}")
     return "\n".join(parts) if parts else ""
+
+
+# ---------------------------------------------------------------------------
+# V3.3 搜索任务队列调度
+# ---------------------------------------------------------------------------
+
+
+def _runner_busy(db: Session) -> Optional[TuningJob]:
+    """检查是否有 job 在占用 runner（mlflow file backend 一次只能有 1 个跑）。
+
+    返回正在跑的 job（pid 仍存活），None 表示 runner 空闲。已死的 running job
+    会被忽略（应由 reconcile_orphans 标 zombie，不阻塞队列）。
+    """
+    busy = (
+        db.query(TuningJob)
+        .filter(TuningJob.status.in_(["running", "searching", "finalizing"]))
+        .all()
+    )
+    for job in busy:
+        if is_pid_alive(job.pid, job.pid_started_at):
+            return job
+    return None
+
+
+def enqueue_job(db: Session, job: TuningJob) -> TuningJob:
+    """把 job 加入队尾。queue_position = max(existing) + 1，没有就是 1。"""
+    if job.queue_position is not None:
+        return job  # 幂等
+    if job.status not in ("created", "cancelled", "failed", "zombie", "done"):
+        raise ValueError(f"job 状态 {job.status} 不允许入队（仅可重启状态可入队）")
+    max_pos = db.query(func.max(TuningJob.queue_position)).scalar()
+    job.queue_position = (max_pos or 0) + 1
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def dequeue_job(db: Session, job: TuningJob) -> TuningJob:
+    """把 job 移出队列（不影响其 status）。"""
+    if job.queue_position is None:
+        return job
+    job.queue_position = None
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def reorder_queue(db: Session, job_ids: List[int]) -> List[TuningJob]:
+    """按 job_ids 顺序重排队列：依次赋 queue_position = 1, 2, 3, ...
+
+    未在 job_ids 里的队列 job 会被踢出（queue_position=None），实现"全量替换"
+    语义；前端前先 GET 当前队列即可知道全集。
+    """
+    # 当前队列里的全部 job
+    current = (
+        db.query(TuningJob)
+        .filter(TuningJob.queue_position.isnot(None))
+        .all()
+    )
+    current_map = {j.id: j for j in current}
+
+    # 验证 job_ids 都存在且符合可入队状态
+    new_jobs: List[TuningJob] = []
+    for jid in job_ids:
+        j = current_map.get(jid) or db.query(TuningJob).filter(TuningJob.id == jid).first()
+        if not j:
+            raise ValueError(f"job {jid} 不存在")
+        if j.status not in ("created", "cancelled", "failed", "zombie", "done"):
+            raise ValueError(f"job {jid} 状态 {j.status} 不允许入队")
+        new_jobs.append(j)
+
+    # 先把所有当前队列 job 的 queue_position 清空
+    for j in current:
+        j.queue_position = None
+    db.flush()
+
+    # 按 job_ids 顺序重新赋 1..N
+    for idx, j in enumerate(new_jobs, start=1):
+        j.queue_position = idx
+    db.commit()
+    return new_jobs
+
+
+def get_queued_jobs(db: Session) -> List[TuningJob]:
+    """返回当前队列里的全部 job（按 queue_position ASC）。"""
+    return (
+        db.query(TuningJob)
+        .filter(TuningJob.queue_position.isnot(None))
+        .order_by(TuningJob.queue_position.asc(), TuningJob.id.asc())
+        .all()
+    )
+
+
+def try_start_next_queued_job(db: Session) -> Optional[TuningJob]:
+    """scheduler 单次 tick：runner 空闲且有队首 → 启动队首并出队，否则 no-op。
+
+    返回启动的 job，None 表示 no-op。
+    """
+    if _runner_busy(db):
+        return None
+    next_job = (
+        db.query(TuningJob)
+        .filter(
+            TuningJob.queue_position.isnot(None),
+            TuningJob.status.in_(["created", "cancelled", "failed", "zombie", "done"]),
+        )
+        .order_by(TuningJob.queue_position.asc(), TuningJob.id.asc())
+        .first()
+    )
+    if not next_job:
+        return None
+
+    # 出队（即使后续 start 失败也不再重试，避免死循环）
+    print(
+        f"[QueueScheduler] auto-starting queued job {next_job.id} "
+        f"(queue_position={next_job.queue_position}, name={next_job.name!r})"
+    )
+    next_job.queue_position = None
+    db.commit()
+
+    try:
+        return start_job_subprocess(
+            db,
+            next_job,
+            n_jobs=next_job.start_n_jobs or 1,
+            num_threads=next_job.start_num_threads or 20,
+            seed=next_job.start_seed or 42,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[QueueScheduler] start failed for job {next_job.id}: {exc}")
+        next_job.status = "failed"
+        next_job.error = f"队列调度启动失败: {exc}"
+        db.commit()
+        return None
+
+
+async def queue_scheduler_loop(get_db_session_func, interval_sec: float = 30.0) -> None:
+    """后台 asyncio 任务：每 interval_sec 秒 tick 一次队列调度。
+
+    设计要点：
+        - 单 worker uvicorn + 单事件循环 → 不用锁
+        - 串行启动：runner busy 时跳过，等下一 tick
+        - 例外不破坏循环：单次 tick 异常打印继续，不抛
+    """
+    print(f"[QueueScheduler] 启动 (interval={interval_sec}s)")
+    while True:
+        try:
+            db = next(get_db_session_func())
+            try:
+                try_start_next_queued_job(db)
+            finally:
+                db.close()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[QueueScheduler] tick error: {exc}")
+        await asyncio.sleep(interval_sec)

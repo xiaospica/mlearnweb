@@ -333,6 +333,8 @@ class TuningJobCreate(BaseModel):
     n_jobs: int = Field(1, ge=1, le=4, description="并行 trial 数；mlflow file backend 建议 1")
     num_threads: int = Field(20, ge=1, le=64, description="单 trial LightGBM num_threads")
     seed: int = Field(42, ge=0)
+    # V3.3: 创建后立即入队（搜索任务队列；scheduler 在没有 job 在跑时自动启动队首）
+    enqueue: bool = Field(False, description="True=创建后立即入队等待 scheduler 自动启动；False=仅创建草稿")
     # 5 类配置参数（前端 Stepper 收集，不能为空）
     config_snapshot: Dict[str, Any] = Field(
         ...,
@@ -357,11 +359,21 @@ class TuningJobResponse(BaseModel):
     duration_seconds: Optional[float] = None
     error: Optional[str] = None
     config_snapshot: Optional[Dict[str, Any]] = None
+    # V3.3 队列调度
+    queue_position: Optional[int] = None
+    start_n_jobs: Optional[int] = None
+    start_num_threads: Optional[int] = None
+    start_seed: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class TuningQueueReorderRequest(BaseModel):
+    """队列重排请求体：按数组顺序重新分配 queue_position（1, 2, 3, ...）。"""
+    job_ids: List[int] = Field(..., description="按期望顺序排列的 job_id 数组")
 
 
 class TuningTrialResponse(BaseModel):

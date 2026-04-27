@@ -16,7 +16,10 @@ from app.routers import experiments, runs, reports, training_records, factor_doc
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时执行 tuning 孤儿恢复（防 --reload 重启留下的僵尸 job）"""
+    """启动时执行 tuning 孤儿恢复 + 启动队列 scheduler 后台 task。"""
+    import asyncio
+
+    # 1) 孤儿恢复（防 --reload 重启留下的僵尸 job）
     try:
         from app.services.tuning_service import reconcile_orphans
         db = next(get_db_session())
@@ -27,7 +30,28 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception as exc:
         print(f"[Startup] tuning orphan reconcile failed (non-fatal): {exc}")
-    yield
+
+    # 2) 队列 scheduler（V3.3）：每 30s 检查一次，runner 空闲且有队首时自动启动
+    scheduler_task: "asyncio.Task | None" = None
+    try:
+        from app.services.tuning_service import queue_scheduler_loop
+        scheduler_task = asyncio.create_task(
+            queue_scheduler_loop(get_db_session, interval_sec=30.0)
+        )
+        print("[Startup] tuning queue scheduler started")
+    except Exception as exc:
+        print(f"[Startup] tuning queue scheduler failed to start (non-fatal): {exc}")
+
+    try:
+        yield
+    finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            print("[Shutdown] tuning queue scheduler stopped")
 
 
 app = FastAPI(
@@ -67,25 +91,6 @@ app.include_router(training_records.router)
 app.include_router(training_record_images.router)
 app.include_router(factor_docs.router)
 app.include_router(tuning.router)
-
-
-@app.on_event("startup")
-def _reconcile_tuning_orphans_on_startup():
-    """FastAPI 重启时扫描所有 status=running 的 tuning job，pid 不存在则置 zombie。
-
-    防止后端 --reload 重启后留下的孤儿状态污染前端 UI。
-    """
-    try:
-        from app.services.tuning_service import reconcile_orphans
-        from app.models.database import get_db_session
-        db = next(get_db_session())
-        try:
-            stats = reconcile_orphans(db)
-            print(f"[Startup] tuning orphan reconcile: {stats}")
-        finally:
-            db.close()
-    except Exception as exc:
-        print(f"[Startup] tuning orphan reconcile failed (非阻塞): {exc}")
 
 
 @app.get("/")

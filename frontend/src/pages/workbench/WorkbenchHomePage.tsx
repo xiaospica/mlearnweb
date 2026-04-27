@@ -16,6 +16,8 @@ import {
   Typography,
 } from 'antd'
 import {
+  ClockCircleOutlined,
+  CloseCircleOutlined,
   DeleteOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -81,6 +83,40 @@ const WorkbenchHomePage: React.FC = () => {
     },
   })
 
+  // V3.3 队列调度
+  const { data: queueData, refetch: refetchQueue } = useQuery({
+    queryKey: ['tuning-queue'],
+    queryFn: () => tuningService.getQueue(),
+    refetchInterval: 10_000,
+  })
+  const queueItems = queueData?.data?.items ?? []
+  const runnerBusy = queueData?.data?.runner_busy ?? null
+
+  const enqueueMutation = useMutation({
+    mutationFn: (id: number) => tuningService.enqueue(id),
+    onSuccess: (resp) => {
+      const pos = resp.data?.queue_position
+      message.success(pos ? `已入队（位置 #${pos}）` : '已入队')
+      queryClient.invalidateQueries({ queryKey: ['tuning-jobs'] })
+      refetchQueue()
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      message.error(err.response?.data?.detail ?? err.message)
+    },
+  })
+
+  const dequeueMutation = useMutation({
+    mutationFn: (id: number) => tuningService.dequeue(id),
+    onSuccess: () => {
+      message.success('已移出队列')
+      queryClient.invalidateQueries({ queryKey: ['tuning-jobs'] })
+      refetchQueue()
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      message.error(err.response?.data?.detail ?? err.message)
+    },
+  })
+
   const items = data?.data?.items ?? []
 
   const stats = React.useMemo(() => {
@@ -124,9 +160,18 @@ const WorkbenchHomePage: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 130,
-      render: (status: TuningJobStatus) => {
+      render: (status: TuningJobStatus, record: TuningJob) => {
         const cfg = STATUS_CONFIG[status] ?? { color: 'default', label: status }
-        return <Tag color={cfg.color}>{cfg.label}</Tag>
+        return (
+          <Space size={4} wrap>
+            <Tag color={cfg.color}>{cfg.label}</Tag>
+            {record.queue_position != null && (
+              <Tag color="purple" icon={<ClockCircleOutlined />}>
+                队列 #{record.queue_position}
+              </Tag>
+            )}
+          </Space>
+        )
       },
     },
     {
@@ -190,50 +235,78 @@ const WorkbenchHomePage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 200,
+      width: 260,
       fixed: 'right',
-      render: (_, record: TuningJob) => (
-        <Space size="small">
-          <Button
-            size="small"
-            type="link"
-            onClick={() => navigate(`/workbench/jobs/${record.id}`)}
-          >
-            查看
-          </Button>
-          {(record.status === 'running' || record.status === 'searching') && (
-            <Popconfirm
-              title="确定取消该 job 吗？"
-              description="将 SIGTERM 子进程，已完成的 trial 数据保留"
-              onConfirm={() => cancelMutation.mutate(record.id)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Button size="small" type="link" danger>
-                取消
-              </Button>
-            </Popconfirm>
-          )}
-          {!(['running', 'searching', 'finalizing'] as TuningJobStatus[]).includes(
+      render: (_, record: TuningJob) => {
+        const canEnqueue =
+          record.queue_position == null &&
+          (['created', 'cancelled', 'failed', 'zombie', 'done'] as TuningJobStatus[]).includes(
             record.status,
-          ) && (
-            <Popconfirm
-              title="确定删除该 job 吗？"
-              description="不可恢复"
-              onConfirm={() => deleteMutation.mutate(record.id)}
-              okText="确定"
-              cancelText="取消"
+          )
+        return (
+          <Space size="small">
+            <Button
+              size="small"
+              type="link"
+              onClick={() => navigate(`/workbench/jobs/${record.id}`)}
             >
+              查看
+            </Button>
+            {canEnqueue && (
               <Button
                 size="small"
                 type="link"
-                danger
-                icon={<DeleteOutlined />}
-              />
-            </Popconfirm>
-          )}
-        </Space>
-      ),
+                icon={<ClockCircleOutlined />}
+                onClick={() => enqueueMutation.mutate(record.id)}
+                title="加入队列：scheduler 在 runner 空闲时自动启动"
+              >
+                入队
+              </Button>
+            )}
+            {record.queue_position != null && (
+              <Button
+                size="small"
+                type="link"
+                icon={<CloseCircleOutlined />}
+                onClick={() => dequeueMutation.mutate(record.id)}
+              >
+                出队
+              </Button>
+            )}
+            {(record.status === 'running' || record.status === 'searching') && (
+              <Popconfirm
+                title="确定取消该 job 吗？"
+                description="将 SIGTERM 子进程，已完成的 trial 数据保留"
+                onConfirm={() => cancelMutation.mutate(record.id)}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button size="small" type="link" danger>
+                  取消
+                </Button>
+              </Popconfirm>
+            )}
+            {!(['running', 'searching', 'finalizing'] as TuningJobStatus[]).includes(
+              record.status,
+            ) && (
+              <Popconfirm
+                title="确定删除该 job 吗？"
+                description="不可恢复"
+                onConfirm={() => deleteMutation.mutate(record.id)}
+                okText="确定"
+                cancelText="取消"
+              >
+                <Button
+                  size="small"
+                  type="link"
+                  danger
+                  icon={<DeleteOutlined />}
+                />
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -264,6 +337,68 @@ const WorkbenchHomePage: React.FC = () => {
           </div>
         </div>
       </Card>
+
+      {/* V3.3 队列视图（runner 状态 + 队列预览） */}
+      {(queueItems.length > 0 || runnerBusy) && (
+        <Card
+          size="small"
+          title={
+            <Space>
+              <ClockCircleOutlined style={{ color: '#722ed1' }} />
+              <span>搜索任务队列</span>
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+                scheduler 每 30s 检查；runner 空闲时自动启动队首
+              </Text>
+            </Space>
+          }
+          style={{ marginBottom: 16 }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={6}>
+            <div>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>
+                runner 状态:
+              </Text>
+              {runnerBusy ? (
+                <Space>
+                  <Tag color="processing">运行中</Tag>
+                  <a onClick={() => navigate(`/workbench/jobs/${runnerBusy.id}`)}>
+                    #{runnerBusy.id} {runnerBusy.name}
+                  </a>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {runnerBusy.n_trials_done}/{runnerBusy.n_trials_target} trial
+                  </Text>
+                </Space>
+              ) : (
+                <Tag color="default">空闲（下次 tick 将启动队首）</Tag>
+              )}
+            </div>
+            {queueItems.length > 0 && (
+              <div>
+                <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>
+                  队列（{queueItems.length}）:
+                </Text>
+                <Space wrap size={6}>
+                  {queueItems.map((j) => (
+                    <Tag
+                      key={j.id}
+                      color="purple"
+                      closable
+                      onClose={(e) => {
+                        e.preventDefault()
+                        dequeueMutation.mutate(j.id)
+                      }}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/workbench/jobs/${j.id}`)}
+                    >
+                      #{j.queue_position} · {j.name}（{j.n_trials_target} trial）
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
+          </Space>
+        </Card>
+      )}
 
       {/* 引导卡（无数据时） */}
       {!isLoading && items.length === 0 && (

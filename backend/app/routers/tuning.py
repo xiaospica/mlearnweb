@@ -37,6 +37,7 @@ from app.schemas.schemas import (
     TuningProgressResponse,
     TuningFinalizeRequest,
     TuningDeployRequest,
+    TuningQueueReorderRequest,
 )
 from app.services import tuning_service
 
@@ -71,7 +72,12 @@ def _get_job_or_404(db: Session, job_id: int) -> TuningJob:
 
 @router.post("/jobs", response_model=ApiResponse)
 def create_tuning_job(body: TuningJobCreate, db: Session = Depends(get_db_session)):
-    """创建调参 job（仅入库，不启动 subprocess；调 /start 才启动）"""
+    """创建调参 job（仅入库，不启动 subprocess；调 /start 才启动）.
+
+    V3.3: body.enqueue=True 时创建后立即入队，由后台 scheduler 在 runner
+    空闲时自动启动；start_* 字段同时持久化到 job 行，确保 scheduler 能
+    用与手动启动一致的运行参数。
+    """
     study_name = f"workbench_job_{int(time.time() * 1000)}"
     job = TuningJob(
         name=body.name,
@@ -83,15 +89,25 @@ def create_tuning_job(body: TuningJobCreate, db: Session = Depends(get_db_sessio
         optuna_study_db_path="",  # start 时填
         workdir="",  # start 时填
         n_trials_target=body.n_trials,
+        start_n_jobs=body.n_jobs,
+        start_num_threads=body.num_threads,
+        start_seed=body.seed,
     )
     db.add(job)
     db.commit()
     db.refresh(job)
-    return ApiResponse(
-        success=True,
-        message=f"调参 job 已创建 (id={job.id})",
-        data=_job_to_response(job),
+
+    enqueued = False
+    if body.enqueue:
+        tuning_service.enqueue_job(db, job)
+        enqueued = True
+
+    msg = (
+        f"调参 job 已创建 (id={job.id}) 并入队 (queue_position={job.queue_position})"
+        if enqueued
+        else f"调参 job 已创建 (id={job.id})"
     )
+    return ApiResponse(success=True, message=msg, data=_job_to_response(job))
 
 
 @router.get("/jobs", response_model=ApiResponse)
@@ -173,6 +189,68 @@ def cancel_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
         success=True,
         message=f"job {job_id} 已取消",
         data=_job_to_response(job),
+    )
+
+
+# ---------------------------------------------------------------------------
+# V3.3 队列调度（搜索任务 queue：晚上批量提交，scheduler 串行自动跑）
+# ---------------------------------------------------------------------------
+
+
+@router.get("/queue", response_model=ApiResponse)
+def get_queue(db: Session = Depends(get_db_session)):
+    """返回当前队列里的全部 job（按 queue_position ASC）+ runner 状态。"""
+    queued = tuning_service.get_queued_jobs(db)
+    busy = tuning_service._runner_busy(db)
+    return ApiResponse(
+        success=True,
+        data={
+            "items": [_job_to_response(j) for j in queued],
+            "runner_busy": _job_to_response(busy) if busy else None,
+        },
+    )
+
+
+@router.post("/jobs/{job_id}/enqueue", response_model=ApiResponse)
+def enqueue_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
+    """把指定 job 加入队尾。"""
+    job = _get_job_or_404(db, job_id)
+    try:
+        job = tuning_service.enqueue_job(db, job)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return ApiResponse(
+        success=True,
+        message=f"job {job_id} 入队 (queue_position={job.queue_position})",
+        data=_job_to_response(job),
+    )
+
+
+@router.post("/jobs/{job_id}/dequeue", response_model=ApiResponse)
+def dequeue_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
+    """把指定 job 移出队列（不影响其 status）。"""
+    job = _get_job_or_404(db, job_id)
+    job = tuning_service.dequeue_job(db, job)
+    return ApiResponse(
+        success=True,
+        message=f"job {job_id} 已移出队列",
+        data=_job_to_response(job),
+    )
+
+
+@router.post("/queue/reorder", response_model=ApiResponse)
+def reorder_queue(
+    body: TuningQueueReorderRequest, db: Session = Depends(get_db_session)
+):
+    """按 body.job_ids 顺序重排队列（全量替换语义）。"""
+    try:
+        jobs = tuning_service.reorder_queue(db, body.job_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return ApiResponse(
+        success=True,
+        message=f"已重排队列（{len(jobs)} 项）",
+        data={"items": [_job_to_response(j) for j in jobs]},
     )
 
 

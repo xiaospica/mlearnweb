@@ -111,6 +111,11 @@ export interface TuningJob {
   duration_seconds?: number | null
   error?: string | null
   config_snapshot?: TuningConfigSnapshot | null
+  /** V3.3 队列调度：null=不在队列；非 null 数字越小越先跑 */
+  queue_position?: number | null
+  start_n_jobs?: number | null
+  start_num_threads?: number | null
+  start_seed?: number | null
   created_at: string
   updated_at: string
 }
@@ -167,6 +172,8 @@ export interface TuningJobCreateRequest {
   n_jobs?: number
   num_threads?: number
   seed?: number
+  /** V3.3: true=创建后立即入队等待 scheduler 自动启动；false=仅创建草稿 */
+  enqueue?: boolean
   config_snapshot: TuningConfigSnapshot
 }
 

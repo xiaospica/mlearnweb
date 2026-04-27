@@ -165,6 +165,13 @@ class TuningJob(Base):
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    # V3.3 队列调度：queue_position NULL 表示不在队列；非 NULL 数字越小越先跑。
+    # 配套字段 start_* 持久化创建时的运行参数，便于 scheduler 自动启动时复用
+    # （手动 POST /start 也仍然接受 query 参数 override）。
+    queue_position = Column(Integer, nullable=True, index=True)
+    start_n_jobs = Column(Integer, default=1)
+    start_num_threads = Column(Integer, default=20)
+    start_seed = Column(Integer, default=42)
 
     trials = relationship("TuningTrial", back_populates="job", cascade="all, delete-orphan")
 
@@ -222,6 +229,7 @@ def init_db():
     _migrate_add_group_favorite()
     _migrate_add_deployments()
     _migrate_strategy_equity_snapshot_indexes()
+    _migrate_add_tuning_queue_columns()
 
 
 def _migrate_strategy_equity_snapshot_indexes():
@@ -364,6 +372,38 @@ def _migrate_add_deployments():
         conn.close()
     except Exception as e:
         print(f"[DB Migration] Warning: {e}")
+
+
+def _migrate_add_tuning_queue_columns():
+    """V3.3 迁移：在 tuning_jobs 加 queue_position + start_* 列（搜索任务队列调度）。"""
+    import sqlite3
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(tuning_jobs)")
+        columns = [col[1] for col in cursor.fetchall()]
+        adds = [
+            ("queue_position", "INTEGER"),
+            ("start_n_jobs", "INTEGER DEFAULT 1"),
+            ("start_num_threads", "INTEGER DEFAULT 20"),
+            ("start_seed", "INTEGER DEFAULT 42"),
+        ]
+        for col_name, col_def in adds:
+            if col_name not in columns:
+                cursor.execute(f"ALTER TABLE tuning_jobs ADD COLUMN {col_name} {col_def}")
+                print(f"[DB Migration] Added {col_name} column to tuning_jobs table")
+        # 索引（queue_position 用于 scheduler 查队首；ALTER 加列不会自动建索引）
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS ix_tuning_jobs_queue_position "
+            "ON tuning_jobs(queue_position)"
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] tuning_jobs queue cols: {e}")
 
 
 def get_db_session():

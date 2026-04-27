@@ -118,4 +118,30 @@ export const tuningService = {
   ): Promise<ApiSuccessResponse<unknown>> {
     return apiClient.post(`/tuning/jobs/${id}/deploy`, body).then((r) => r.data)
   },
+
+  // -------------------------------------------------------------------------
+  // V3.3 队列调度（搜索任务 queue：晚上批量提交，scheduler 串行自动跑）
+  // -------------------------------------------------------------------------
+
+  getQueue(): Promise<
+    ApiSuccessResponse<{ items: TuningJob[]; runner_busy: TuningJob | null }>
+  > {
+    return apiClient.get('/tuning/queue').then((r) => r.data)
+  },
+
+  enqueue(id: number): Promise<ApiSuccessResponse<TuningJob>> {
+    return apiClient.post(`/tuning/jobs/${id}/enqueue`).then((r) => r.data)
+  },
+
+  dequeue(id: number): Promise<ApiSuccessResponse<TuningJob>> {
+    return apiClient.post(`/tuning/jobs/${id}/dequeue`).then((r) => r.data)
+  },
+
+  reorderQueue(
+    jobIds: number[],
+  ): Promise<ApiSuccessResponse<{ items: TuningJob[] }>> {
+    return apiClient
+      .post('/tuning/queue/reorder', { job_ids: jobIds })
+      .then((r) => r.data)
+  },
 }

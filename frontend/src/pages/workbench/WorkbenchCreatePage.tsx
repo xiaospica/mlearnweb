@@ -21,6 +21,7 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined,
+  ClockCircleOutlined,
   CodeOutlined,
   RocketOutlined,
   SaveOutlined,
@@ -292,7 +293,10 @@ const WorkbenchCreatePage: React.FC = () => {
       tuningService.start(id, { n_jobs: nJobs, num_threads: numThreads, seed }),
   })
 
-  const handleSubmit = async (alsoStart: boolean) => {
+  // 提交模式：draft = 仅保存；start = 创建后立即启动；queue = 加入队列由 scheduler 调度
+  type SubmitMode = 'draft' | 'start' | 'queue'
+
+  const handleSubmit = async (mode: SubmitMode) => {
     if (!name.trim()) {
       message.error('请填写 Job 名称')
       setStep(0)
@@ -306,10 +310,11 @@ const WorkbenchCreatePage: React.FC = () => {
       n_jobs: nJobs,
       num_threads: numThreads,
       seed,
+      enqueue: mode === 'queue',
       config_snapshot: configSnapshot,
     }
     const resp = await createMutation.mutateAsync(body)
-    if (alsoStart && resp.data?.id) {
+    if (mode === 'start' && resp.data?.id) {
       try {
         await startMutation.mutateAsync(resp.data.id)
         message.success('subprocess 已启动')
@@ -317,6 +322,8 @@ const WorkbenchCreatePage: React.FC = () => {
         const err = e as Error & { response?: { data?: { detail?: string } } }
         message.warning(`Job 已创建但启动失败：${err.response?.data?.detail ?? err.message}`)
       }
+    } else if (mode === 'queue' && resp.data?.queue_position != null) {
+      message.success(`已加入队列（位置 #${resp.data.queue_position}）；scheduler 将在 runner 空闲时自动启动`)
     }
   }
 
@@ -766,15 +773,23 @@ const WorkbenchCreatePage: React.FC = () => {
             <Button
               icon={<SaveOutlined />}
               loading={createMutation.isPending}
-              onClick={() => handleSubmit(false)}
+              onClick={() => handleSubmit('draft')}
             >
               保存草稿
+            </Button>
+            <Button
+              icon={<ClockCircleOutlined />}
+              loading={createMutation.isPending}
+              onClick={() => handleSubmit('queue')}
+              title="加入队列：scheduler 在 runner 空闲时自动启动（适合晚上批量提交无人值守）"
+            >
+              加入队列
             </Button>
             <Button
               type="primary"
               icon={<RocketOutlined />}
               loading={createMutation.isPending || startMutation.isPending}
-              onClick={() => handleSubmit(true)}
+              onClick={() => handleSubmit('start')}
             >
               立即启动
             </Button>
