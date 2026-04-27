@@ -943,6 +943,269 @@ def try_start_next_queued_job(db: Session) -> Optional[TuningJob]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# V3.4 跨期验证 + 多 seed 复跑（post-search 验证流程）
+# ---------------------------------------------------------------------------
+
+
+# 内存级 walk-forward 子进程注册（per-job 单实例）。
+# 进程信息（pid + create_time）用于查询是否还在跑；FastAPI 重启后
+# 此 dict 丢失但子进程在 Windows 默认连带退出，无遗留风险。
+_walk_forward_procs: Dict[int, Tuple[int, float]] = {}
+
+
+def start_walk_forward_subprocess(
+    db: Session,
+    job: TuningJob,
+    trial_numbers: List[int],
+    seed: int = 42,
+    num_threads: int = 20,
+    reproduce_seeds: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """启动 post_search_runner 子进程：先跑 walk_forward，再可选跑 reproduce。
+
+    要求：
+        - job 必须已完成搜索（status in done/cancelled/failed/zombie）
+        - trial_numbers 内每个 trial 必须存在于 tuning_trials 表（否则 walk_forward
+          子命令读 trials.csv 时会抛 ValueError）
+    """
+    if not trial_numbers:
+        raise ValueError("trial_numbers 不能为空")
+    if not job.workdir:
+        raise ValueError(f"job {job.id} 缺少 workdir（搜索未启动过？）")
+
+    # 重复启动防护：已有 walk-forward 在跑则直接返回当前 pid
+    existing = _walk_forward_procs.get(job.id)
+    if existing and is_pid_alive(existing[0], existing[1]):
+        return {
+            "job_id": job.id,
+            "status": "already_running",
+            "pid": existing[0],
+            "started_at": existing[1],
+        }
+
+    workdir = Path(job.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        TUNING_PYTHON_EXE,
+        "-u",
+        "-m",
+        "strategy_dev.auto_tune.post_search_runner",
+        "--workdir", str(workdir),
+        "--trial-ids", ",".join(str(t) for t in trial_numbers),
+        "--seed", str(seed),
+        "--num-threads", str(num_threads),
+    ]
+    if reproduce_seeds:
+        cmd += ["--reproduce-seeds", ",".join(str(s) for s in reproduce_seeds)]
+
+    log_path = workdir / "walk_forward.stdout.log"
+    log_fp = open(log_path, "ab")
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=log_fp,
+        stderr=subprocess.STDOUT,
+        cwd=str(STRATEGY_DEV_ROOT),
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "PYTHONIOENCODING": "utf-8",
+        },
+    )
+
+    # 持久化 pid + create_time 到内存 registry
+    try:
+        psutil_proc = psutil.Process(proc.pid)
+        started_at = psutil_proc.create_time()
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        started_at = 0.0
+    _walk_forward_procs[job.id] = (proc.pid, started_at)
+
+    print(
+        f"[TuningService] walk_forward subprocess 已启动 job={job.id} pid={proc.pid} "
+        f"trial_numbers={trial_numbers} seed={seed} reproduce_seeds={reproduce_seeds}"
+    )
+    return {
+        "job_id": job.id,
+        "status": "started",
+        "pid": proc.pid,
+        "started_at": started_at,
+        "log_path": str(log_path),
+        "trial_numbers": trial_numbers,
+        "reproduce_seeds": reproduce_seeds,
+    }
+
+
+def get_walk_forward_subprocess_status(job_id: int) -> Dict[str, Any]:
+    """查 walk-forward 子进程是否还在跑。"""
+    info = _walk_forward_procs.get(job_id)
+    if not info:
+        return {"running": False, "pid": None}
+    pid, started_at = info
+    alive = is_pid_alive(pid, started_at)
+    if not alive:
+        # 进程已退出，从 registry 清理（下次再启动时不会被重复防护卡住）
+        _walk_forward_procs.pop(job_id, None)
+    return {"running": alive, "pid": pid}
+
+
+def _parse_walk_forward_csv(workdir: Path) -> List[Dict[str, Any]]:
+    """读 walk_forward.csv → list of dict（每个 trial 一行，含跨期 valid/test sharpe 等）"""
+    csv_path = workdir / "walk_forward.csv"
+    if not csv_path.is_file():
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                parsed: Dict[str, Any] = {}
+                for k, v in row.items():
+                    if v == "" or v is None:
+                        parsed[k] = None
+                    elif k in ("valid_sharpe_per_period", "test_sharpe_per_period"):
+                        # 这两列是 JSON 序列化的 list
+                        try:
+                            parsed[k] = json.loads(v)
+                        except (TypeError, ValueError):
+                            parsed[k] = None
+                    elif k in ("trial_id", "n_periods", "cross_period_pass_count",
+                               "worst_period_idx", "subprocess_returncode"):
+                        parsed[k] = _safe_int(v)
+                    elif k in ("seed", "duration_sec"):
+                        parsed[k] = _safe_float(v)
+                    elif k == "all_positive":
+                        parsed[k] = _safe_bool(v)
+                    elif k in ("run_name", "run_ids", "error"):
+                        parsed[k] = v
+                    else:
+                        parsed[k] = _safe_float(v)
+                rows.append(parsed)
+    except OSError:
+        return []
+    return rows
+
+
+def _parse_reproduce_csv(workdir: Path) -> List[Dict[str, Any]]:
+    """读 reproduce.csv → list of dict（每个 (trial_id, seed) 组合一行）。"""
+    csv_path = workdir / "reproduce.csv"
+    if not csv_path.is_file():
+        return []
+    rows: List[Dict[str, Any]] = []
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                parsed: Dict[str, Any] = {}
+                for k, v in row.items():
+                    if v == "" or v is None:
+                        parsed[k] = None
+                    elif k in ("trial_id", "seed", "subprocess_returncode"):
+                        parsed[k] = _safe_int(v)
+                    elif k == "hard_constraint_passed":
+                        parsed[k] = _safe_bool(v)
+                    elif k in ("run_name", "run_id", "error", "hard_constraint_failed_items"):
+                        parsed[k] = v
+                    else:
+                        parsed[k] = _safe_float(v)
+                rows.append(parsed)
+    except OSError:
+        return []
+    return rows
+
+
+def _aggregate_reproduce_by_trial(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """对 reproduce 行按 trial_id 聚合 (mean / std / min / max of valid_sharpe + test_sharpe)。"""
+    import statistics
+
+    by_trial: Dict[int, List[Dict[str, Any]]] = {}
+    for r in rows:
+        tid = r.get("trial_id")
+        if tid is None:
+            continue
+        by_trial.setdefault(int(tid), []).append(r)
+
+    agg: List[Dict[str, Any]] = []
+    for tid, sub_rows in sorted(by_trial.items()):
+        def _vals(key: str) -> List[float]:
+            return [r[key] for r in sub_rows if r.get(key) is not None]
+
+        # reproduce.csv 仅记录 test_sharpe（cmd_reproduce 的当前实现）；
+        # valid_sharpe 列可能不在；如果未来加上则同步聚合
+        def _stats(key: str) -> Dict[str, Optional[float]]:
+            vals = _vals(key)
+            if not vals:
+                return {"n": 0, "mean": None, "std": None, "min": None, "max": None, "median": None}
+            return {
+                "n": len(vals),
+                "mean": sum(vals) / len(vals),
+                "std": statistics.pstdev(vals) if len(vals) >= 2 else 0.0,
+                "min": min(vals),
+                "max": max(vals),
+                "median": statistics.median(vals),
+            }
+
+        hard_pass_count = sum(1 for r in sub_rows if r.get("hard_constraint_passed"))
+        agg.append({
+            "trial_id": tid,
+            "n_seeds": len(sub_rows),
+            "hard_pass_count": hard_pass_count,
+            "test_sharpe": _stats("test_sharpe"),
+            "test_max_drawdown": _stats("test_max_drawdown"),
+            "test_annualized_return": _stats("test_annualized_return"),
+            "overfit_ratio": _stats("overfit_ratio"),
+            "rows": sub_rows,
+        })
+    return agg
+
+
+def get_walk_forward_results(job: TuningJob) -> Dict[str, Any]:
+    """读 walk_forward.csv + reproduce.csv（如有）返 JSON 给前端渲染。"""
+    if not job.workdir:
+        return {
+            "job_id": job.id,
+            "running": False,
+            "walk_forward": [],
+            "reproduce": [],
+            "reproduce_aggregate": [],
+            "summary_md": None,
+        }
+    workdir = Path(job.workdir)
+    wf_rows = _parse_walk_forward_csv(workdir)
+    rep_rows = _parse_reproduce_csv(workdir)
+    rep_agg = _aggregate_reproduce_by_trial(rep_rows) if rep_rows else []
+
+    summary_md_path = workdir / "walk_forward_summary.md"
+    summary_md = (
+        summary_md_path.read_text(encoding="utf-8") if summary_md_path.is_file() else None
+    )
+
+    status = get_walk_forward_subprocess_status(job.id)
+    return {
+        "job_id": job.id,
+        "running": status["running"],
+        "pid": status["pid"],
+        "walk_forward": wf_rows,
+        "reproduce": rep_rows,
+        "reproduce_aggregate": rep_agg,
+        "summary_md": summary_md,
+    }
+
+
+def get_walk_forward_log(job: TuningJob, tail_bytes: int = 16384) -> str:
+    """读 walk_forward.stdout.log 末尾。"""
+    if not job.workdir:
+        return ""
+    return _read_tail(Path(job.workdir) / "walk_forward.stdout.log", tail_bytes)
+
+
+# ---------------------------------------------------------------------------
+# V3.3 队列 scheduler async loop（接续）
+# ---------------------------------------------------------------------------
+
+
 async def queue_scheduler_loop(get_db_session_func, interval_sec: float = 30.0) -> None:
     """后台 asyncio 任务：每 interval_sec 秒 tick 一次队列调度。
 

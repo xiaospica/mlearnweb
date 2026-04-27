@@ -192,3 +192,95 @@ export interface TuningDeployRequest {
   vt_symbol?: string
   setting_overrides?: Record<string, unknown>
 }
+
+// ---------------------------------------------------------------------------
+// V3.4 跨期验证 + 多 seed 复跑
+// ---------------------------------------------------------------------------
+
+export interface TuningWalkForwardRequest {
+  trial_numbers: number[]
+  seed?: number
+  num_threads?: number
+  /** 非空时在 walk_forward 后再跑 multi-seed reproduce */
+  reproduce_seeds?: number[]
+}
+
+export interface WalkForwardRow {
+  trial_id: number
+  seed?: number | null
+  run_name?: string
+  duration_sec?: number | null
+  subprocess_returncode?: number | null
+  error?: string | null
+  // 仅成功行有以下字段
+  n_periods?: number | null
+  valid_sharpe_per_period?: number[] | null
+  test_sharpe_per_period?: number[] | null
+  valid_sharpe_mean?: number | null
+  valid_sharpe_std?: number | null
+  valid_sharpe_min?: number | null
+  valid_sharpe_max?: number | null
+  test_sharpe_mean?: number | null
+  test_sharpe_std?: number | null
+  test_sharpe_min?: number | null
+  valid_rank_icir_mean?: number | null
+  overfit_ratio_max?: number | null
+  valid_max_drawdown_max?: number | null
+  cross_period_pass_count?: number | null
+  cross_period_pass_rate?: number | null
+  all_positive?: boolean | null
+  worst_period_idx?: number | null
+  stability_score?: number | null
+  run_ids?: string | null
+}
+
+export interface ReproduceRow {
+  trial_id: number
+  seed: number
+  run_name?: string
+  duration_sec?: number | null
+  subprocess_returncode?: number | null
+  test_sharpe?: number | null
+  test_long_short_sharpe?: number | null
+  test_max_drawdown?: number | null
+  test_annualized_return?: number | null
+  test_rank_icir?: number | null
+  valid_rank_icir?: number | null
+  train_rank_icir?: number | null
+  overfit_ratio?: number | null
+  hard_constraint_passed?: boolean | null
+  hard_constraint_failed_items?: string | null
+  composite_score?: number | null
+  run_id?: string | null
+  error?: string | null
+}
+
+export interface ReproduceAggregateStat {
+  n: number
+  mean: number | null
+  std: number | null
+  min: number | null
+  max: number | null
+  median: number | null
+}
+
+export interface ReproduceAggregate {
+  trial_id: number
+  n_seeds: number
+  hard_pass_count: number
+  test_sharpe: ReproduceAggregateStat
+  test_max_drawdown: ReproduceAggregateStat
+  test_annualized_return: ReproduceAggregateStat
+  overfit_ratio: ReproduceAggregateStat
+  rows: ReproduceRow[]
+}
+
+export interface WalkForwardResults {
+  job_id: number
+  running: boolean
+  pid?: number | null
+  walk_forward: WalkForwardRow[]
+  reproduce: ReproduceRow[]
+  reproduce_aggregate: ReproduceAggregate[]
+  summary_md?: string | null
+}

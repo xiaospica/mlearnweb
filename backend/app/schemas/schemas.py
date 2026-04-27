@@ -376,6 +376,19 @@ class TuningQueueReorderRequest(BaseModel):
     job_ids: List[int] = Field(..., description="按期望顺序排列的 job_id 数组")
 
 
+class TuningWalkForwardRequest(BaseModel):
+    """跨期验证 + 多 seed 复跑请求体（V3.4）。"""
+    trial_numbers: List[int] = Field(
+        ..., min_length=1, description="要验证的 trial number 列表（建议 Top-3~5）"
+    )
+    seed: int = Field(42, ge=0, description="walk_forward 用的单 seed")
+    num_threads: int = Field(20, ge=1, le=64)
+    reproduce_seeds: Optional[List[int]] = Field(
+        default=None,
+        description="如非空则在 walk_forward 后再跑 multi-seed reproduce（每 trial × 每 seed 一次）",
+    )
+
+
 class TuningTrialResponse(BaseModel):
     trial_number: int
     state: str

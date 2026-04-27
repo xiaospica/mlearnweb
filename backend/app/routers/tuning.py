@@ -38,6 +38,7 @@ from app.schemas.schemas import (
     TuningFinalizeRequest,
     TuningDeployRequest,
     TuningQueueReorderRequest,
+    TuningWalkForwardRequest,
 )
 from app.services import tuning_service
 
@@ -370,6 +371,71 @@ async def tuning_job_events(job_id: int, db: Session = Depends(get_db_session)):
             "X-Accel-Buffering": "no",  # nginx 禁用缓冲
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# V3.4 跨期验证 + 多 seed 复跑（post-search 验证）
+# ---------------------------------------------------------------------------
+
+
+@router.post("/jobs/{job_id}/walk-forward", response_model=ApiResponse)
+def start_walk_forward(
+    job_id: int,
+    body: TuningWalkForwardRequest,
+    db: Session = Depends(get_db_session),
+):
+    """对选中的 N 个 trial 启动跨期 walk_forward（+ 可选 multi-seed reproduce）。
+
+    复用既有 finalize_best.walk_forward / reproduce CLI（只在前面套了一层
+    post_search_runner 串行执行器），不重复实现跨期逻辑。
+
+    要求 job 已完成搜索（done/cancelled/failed/zombie）；trial_numbers 内每个
+    trial 必须存在于 tuning_trials 表（CSV 解析时会校验）。
+    """
+    job = _get_job_or_404(db, job_id)
+    if job.status not in ("done", "cancelled", "failed", "zombie"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"job 状态 {job.status} 不允许启动跨期验证；需先完成搜索",
+        )
+    try:
+        result = tuning_service.start_walk_forward_subprocess(
+            db,
+            job,
+            trial_numbers=body.trial_numbers,
+            seed=body.seed,
+            num_threads=body.num_threads,
+            reproduce_seeds=body.reproduce_seeds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    msg = (
+        f"已启动 walk_forward 子进程（{len(body.trial_numbers)} trial × seed={body.seed}）"
+        + (f" + reproduce ({len(body.reproduce_seeds)} seed)" if body.reproduce_seeds else "")
+    )
+    return ApiResponse(success=True, message=msg, data=result)
+
+
+@router.get("/jobs/{job_id}/walk-forward-results", response_model=ApiResponse)
+def get_walk_forward_results(job_id: int, db: Session = Depends(get_db_session)):
+    """读 walk_forward.csv + reproduce.csv（如有）返聚合 JSON。
+
+    前端用此作为轮询入口，配合 GET /walk-forward-log 查看实时日志。
+    """
+    job = _get_job_or_404(db, job_id)
+    return ApiResponse(success=True, data=tuning_service.get_walk_forward_results(job))
+
+
+@router.get("/jobs/{job_id}/walk-forward-log", response_model=ApiResponse)
+def get_walk_forward_log(
+    job_id: int,
+    tail_bytes: int = Query(16384, ge=512, le=1048576),
+    db: Session = Depends(get_db_session),
+):
+    """读 walk_forward.stdout.log 末尾。"""
+    job = _get_job_or_404(db, job_id)
+    text = tuning_service.get_walk_forward_log(job, tail_bytes=tail_bytes)
+    return ApiResponse(success=True, data={"job_id": job.id, "text": text})
 
 
 # ---------------------------------------------------------------------------

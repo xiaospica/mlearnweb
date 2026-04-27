@@ -14,6 +14,8 @@ import type {
   TuningJobCreateRequest,
   TuningFinalizeRequest,
   TuningDeployRequest,
+  TuningWalkForwardRequest,
+  WalkForwardResults,
 } from '@/types/tuning'
 
 export const tuningService = {
@@ -142,6 +144,36 @@ export const tuningService = {
   ): Promise<ApiSuccessResponse<{ items: TuningJob[] }>> {
     return apiClient
       .post('/tuning/queue/reorder', { job_ids: jobIds })
+      .then((r) => r.data)
+  },
+
+  // -------------------------------------------------------------------------
+  // V3.4 跨期验证 + 多 seed 复跑
+  // -------------------------------------------------------------------------
+
+  startWalkForward(
+    id: number,
+    body: TuningWalkForwardRequest,
+  ): Promise<ApiSuccessResponse<{ status: string; pid: number; trial_numbers: number[]; reproduce_seeds: number[] | null }>> {
+    return apiClient
+      .post(`/tuning/jobs/${id}/walk-forward`, body)
+      .then((r) => r.data)
+  },
+
+  getWalkForwardResults(
+    id: number,
+  ): Promise<ApiSuccessResponse<WalkForwardResults>> {
+    return apiClient
+      .get(`/tuning/jobs/${id}/walk-forward-results`)
+      .then((r) => r.data)
+  },
+
+  getWalkForwardLog(
+    id: number,
+    tailBytes = 16384,
+  ): Promise<ApiSuccessResponse<{ job_id: number; text: string }>> {
+    return apiClient
+      .get(`/tuning/jobs/${id}/walk-forward-log`, { params: { tail_bytes: tailBytes } })
       .then((r) => r.data)
   },
 }

@@ -30,7 +30,9 @@ import {
 import {
   ArrowLeftOutlined,
   ClockCircleOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
+  PlayCircleOutlined,
   ReloadOutlined,
   RocketOutlined,
   SaveOutlined,
@@ -47,6 +49,9 @@ import type {
   TuningJobStatus,
   TuningProgress,
   TuningTrial,
+  WalkForwardResults,
+  WalkForwardRow,
+  ReproduceAggregate,
 } from '@/types/tuning'
 
 const { Title, Text, Paragraph } = Typography
@@ -228,7 +233,9 @@ const WorkbenchMonitorPage: React.FC = () => {
   const id = Number(jobId)
   const experimentId = '374089520733232109'  // mlflow rolling_exp（与命令行同实验）
 
-  const [activeTab, setActiveTab] = useState<'trials' | 'logs' | 'config'>('trials')
+  const [activeTab, setActiveTab] = useState<'trials' | 'walk_forward' | 'logs' | 'config'>(
+    'trials',
+  )
   // 默认 stdout：看 train 子进程的实时进度（含 qlib 训练 / 回测 print 输出）；
   // 想看结构化的 trial 元事件（trial 0 done）切到 tuning
   const [logSource, setLogSource] = useState<'tuning' | 'stdout' | 'all'>('stdout')
@@ -237,6 +244,11 @@ const WorkbenchMonitorPage: React.FC = () => {
   const [sseError, setSseError] = useState<string | null>(null)
   const [finalizeModalOpen, setFinalizeModalOpen] = useState(false)
   const [deployModalOpen, setDeployModalOpen] = useState(false)
+  // V3.4 跨期验证：trial 多选 + Modal
+  const [selectedTrials, setSelectedTrials] = useState<number[]>([])
+  const [walkForwardModalOpen, setWalkForwardModalOpen] = useState(false)
+  // 用户在 WF Panel 点 Finalize 时，把 trial_number 通过 state 喂给 FinalizeModal
+  const [finalizeOverrideTrialNum, setFinalizeOverrideTrialNum] = useState<number | null>(null)
 
   const { data: jobData, isLoading: jobLoading } = useQuery({
     queryKey: ['tuning-job', id],
@@ -355,6 +367,40 @@ const WorkbenchMonitorPage: React.FC = () => {
     onSuccess: () => {
       message.success('已转调 vnpy create_strategy')
       setDeployModalOpen(false)
+    },
+    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
+      message.error(err.response?.data?.detail ?? err.message)
+    },
+  })
+
+  // V3.4 跨期验证 + multi-seed reproduce
+  const { data: wfData, refetch: refetchWalkForward } = useQuery({
+    queryKey: ['tuning-walk-forward', id],
+    queryFn: () => tuningService.getWalkForwardResults(id),
+    refetchInterval: 10_000,
+    enabled: !Number.isNaN(id),
+  })
+  const walkForwardResults: WalkForwardResults | undefined = wfData?.data
+
+  const walkForwardMutation = useMutation({
+    mutationFn: (body: {
+      trial_numbers: number[]
+      seed: number
+      reproduce_seeds: number[] | null
+    }) =>
+      tuningService.startWalkForward(id, {
+        trial_numbers: body.trial_numbers,
+        seed: body.seed,
+        reproduce_seeds: body.reproduce_seeds ?? undefined,
+      }),
+    onSuccess: (resp) => {
+      const repCount = resp.data?.reproduce_seeds?.length ?? 0
+      message.success(
+        `跨期验证已启动${repCount > 0 ? ` + multi-seed reproduce (${repCount} seed)` : ''}；切到"跨期验证"Tab 查看进度`,
+      )
+      setWalkForwardModalOpen(false)
+      setActiveTab('walk_forward')
+      refetchWalkForward()
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
       message.error(err.response?.data?.detail ?? err.message)
@@ -566,14 +612,44 @@ const WorkbenchMonitorPage: React.FC = () => {
               ),
               children: (
                 <div>
-                  <div style={{ marginBottom: 8, textAlign: 'right' }}>
+                  <div
+                    style={{
+                      marginBottom: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
                     <Button
-                      icon={<ReloadOutlined />}
-                      size="small"
-                      onClick={() => refetchTrials()}
+                      type="primary"
+                      icon={<ExperimentOutlined />}
+                      disabled={selectedTrials.length === 0 || !isTerminal(status)}
+                      onClick={() => setWalkForwardModalOpen(true)}
+                      title={
+                        !isTerminal(status)
+                          ? '需先完成搜索（done/cancelled/failed）才能跨期验证'
+                          : '对选中 trial 跑跨期 walk-forward + 可选 multi-seed reproduce'
+                      }
                     >
-                      刷新
+                      跨期验证选中 ({selectedTrials.length})
                     </Button>
+                    {selectedTrials.length > 0 && (
+                      <Button
+                        size="small"
+                        onClick={() => setSelectedTrials([])}
+                      >
+                        清空选择
+                      </Button>
+                    )}
+                    <div style={{ marginLeft: 'auto' }}>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        size="small"
+                        onClick={() => refetchTrials()}
+                      >
+                        刷新
+                      </Button>
+                    </div>
                   </div>
                   {trials.length === 0 ? (
                     <Empty description="还没有 trial。等 subprocess 启动后会陆续出现（trial 启动时会先写一行 running 状态，完成后更新最终指标）。" />
@@ -588,9 +664,44 @@ const WorkbenchMonitorPage: React.FC = () => {
                       rowClassName={(record) =>
                         record.trial_number === bestNum ? 'best-trial-row' : ''
                       }
+                      rowSelection={{
+                        selectedRowKeys: selectedTrials,
+                        onChange: (keys) => setSelectedTrials(keys as number[]),
+                        getCheckboxProps: (record) => ({
+                          disabled: record.state !== 'completed',
+                        }),
+                      }}
                     />
                   )}
                 </div>
+              ),
+            },
+            {
+              key: 'walk_forward',
+              label: (
+                <span>
+                  <ExperimentOutlined /> 跨期验证
+                  {walkForwardResults?.running ? (
+                    <Tag color="processing" style={{ marginLeft: 6 }}>
+                      运行中
+                    </Tag>
+                  ) : walkForwardResults?.walk_forward.length ? (
+                    <Tag color="success" style={{ marginLeft: 6 }}>
+                      {walkForwardResults.walk_forward.length} trial
+                    </Tag>
+                  ) : null}
+                </span>
+              ),
+              children: (
+                <WalkForwardPanel
+                  jobId={id}
+                  results={walkForwardResults}
+                  onRefresh={refetchWalkForward}
+                  onFinalize={(trial_number) => {
+                    setFinalizeOverrideTrialNum(trial_number)
+                    setFinalizeModalOpen(true)
+                  }}
+                />
               ),
             },
             {
@@ -631,8 +742,11 @@ const WorkbenchMonitorPage: React.FC = () => {
 
       <FinalizeModal
         open={finalizeModalOpen}
-        onClose={() => setFinalizeModalOpen(false)}
-        defaultTrialNumber={bestNum ?? 0}
+        onClose={() => {
+          setFinalizeModalOpen(false)
+          setFinalizeOverrideTrialNum(null)
+        }}
+        defaultTrialNumber={finalizeOverrideTrialNum ?? bestNum ?? 0}
         bestSharpe={best ?? null}
         loading={finalizeMutation.isPending}
         onSubmit={(values) => finalizeMutation.mutate(values)}
@@ -644,6 +758,14 @@ const WorkbenchMonitorPage: React.FC = () => {
         finalizedRecordId={job.finalized_training_record_id ?? null}
         loading={deployMutation.isPending}
         onSubmit={(values) => deployMutation.mutate(values)}
+      />
+
+      <WalkForwardModal
+        open={walkForwardModalOpen}
+        onClose={() => setWalkForwardModalOpen(false)}
+        selectedTrials={selectedTrials}
+        loading={walkForwardMutation.isPending}
+        onSubmit={(values) => walkForwardMutation.mutate(values)}
       />
     </div>
   )
@@ -1036,6 +1158,407 @@ const LogPanel: React.FC<{
       >
         {text || '（日志为空，等 subprocess 启动）'}
       </pre>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// V3.4 跨期验证 Modal：让用户选 trial / seed / 是否额外跑 multi-seed reproduce
+// ---------------------------------------------------------------------------
+
+const DEFAULT_REPRODUCE_SEEDS = '42,123,2025'
+
+const WalkForwardModal: React.FC<{
+  open: boolean
+  onClose: () => void
+  selectedTrials: number[]
+  loading: boolean
+  onSubmit: (values: {
+    trial_numbers: number[]
+    seed: number
+    reproduce_seeds: number[] | null
+  }) => void
+}> = ({ open, onClose, selectedTrials, loading, onSubmit }) => {
+  const [seed, setSeed] = useState(42)
+  const [withReproduce, setWithReproduce] = useState(false)
+  const [reproduceSeedsStr, setReproduceSeedsStr] = useState(DEFAULT_REPRODUCE_SEEDS)
+
+  // 估算时间：单 trial 跨 5 期约 15 min；reproduce 单 (trial,seed) 约 3 min
+  const wfMin = selectedTrials.length * 15
+  const repSeeds = withReproduce
+    ? reproduceSeedsStr
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => !Number.isNaN(n))
+    : []
+  const repMin = withReproduce ? selectedTrials.length * repSeeds.length * 3 : 0
+
+  return (
+    <Modal
+      title="跨期验证选中 trials"
+      open={open}
+      onCancel={onClose}
+      onOk={() => {
+        if (selectedTrials.length === 0) return
+        onSubmit({
+          trial_numbers: selectedTrials,
+          seed,
+          reproduce_seeds: withReproduce && repSeeds.length > 0 ? repSeeds : null,
+        })
+      }}
+      okText="启动验证"
+      cancelText="取消"
+      confirmLoading={loading}
+      width={620}
+    >
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message={`将对 ${selectedTrials.length} 个 trial 跑跨期 walk-forward${
+          withReproduce ? ' + multi-seed reproduce' : ''
+        }`}
+        description={
+          <div style={{ fontSize: 12 }}>
+            <div>
+              <Text code>walk-forward</Text>：每 trial 跑 5 期（CUSTOM_SEGMENTS）一次完整训练，
+              输出 stability_score 跨期排名表
+            </div>
+            <div>
+              <Text code>multi-seed reproduce</Text>：用同一参数换不同 random seed 重跑，
+              检测调参得到的"最优"是不是 seed 运气
+            </div>
+          </div>
+        }
+      />
+      <Form layout="vertical">
+        <Form.Item
+          label={
+            <span>
+              选中的 trial_numbers（{selectedTrials.length}）
+            </span>
+          }
+        >
+          <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
+            {selectedTrials.length > 0 ? (
+              <Space wrap size={4}>
+                {selectedTrials.map((n) => (
+                  <Tag key={n} color="blue">
+                    #{n}
+                  </Tag>
+                ))}
+              </Space>
+            ) : (
+              <Text type="secondary">未选择 trial（请先在 Trials Tab 勾选）</Text>
+            )}
+          </div>
+        </Form.Item>
+        <Form.Item label="walk-forward seed">
+          <InputNumber
+            value={seed}
+            onChange={(v) => setSeed(v ?? 42)}
+            min={0}
+            style={{ width: 160 }}
+          />
+        </Form.Item>
+        <Form.Item label="同时跑 multi-seed reproduce">
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Switch
+              checked={withReproduce}
+              onChange={setWithReproduce}
+              checkedChildren="是"
+              unCheckedChildren="否"
+            />
+            {withReproduce && (
+              <Input
+                value={reproduceSeedsStr}
+                onChange={(e) => setReproduceSeedsStr(e.target.value)}
+                placeholder="逗号分隔，如 42,123,2025"
+                style={{ width: '100%' }}
+              />
+            )}
+          </Space>
+        </Form.Item>
+        <Alert
+          type="warning"
+          message={`预计耗时：walk-forward ≈ ${wfMin} min${
+            withReproduce ? ` + reproduce ≈ ${repMin} min = 共 ${wfMin + repMin} min` : ''
+          }`}
+          showIcon
+          style={{ fontSize: 12 }}
+        />
+      </Form>
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// V3.4 跨期验证结果面板：stability 表 + 5 期序列 + multi-seed 聚合表
+// ---------------------------------------------------------------------------
+
+const WalkForwardPanel: React.FC<{
+  jobId: number
+  results: WalkForwardResults | undefined
+  onRefresh: () => void
+  onFinalize: (trialNumber: number) => void
+}> = ({ jobId, results, onRefresh, onFinalize }) => {
+  const wfRows = results?.walk_forward ?? []
+  const repAgg = results?.reproduce_aggregate ?? []
+  const running = results?.running ?? false
+
+  // 按 stability_score 降序
+  const wfSorted = [...wfRows].sort(
+    (a, b) => (b.stability_score ?? -999) - (a.stability_score ?? -999),
+  )
+
+  const wfColumns: ColumnsType<WalkForwardRow> = [
+    {
+      title: '排名',
+      key: 'rank',
+      width: 60,
+      render: (_, __, idx) =>
+        idx === 0 ? <Tag color="gold">#1 最稳</Tag> : <Text>#{idx + 1}</Text>,
+    },
+    { title: 'trial_id', dataIndex: 'trial_id', key: 'trial_id', width: 80 },
+    {
+      title: 'stability_score',
+      dataIndex: 'stability_score',
+      key: 'stability_score',
+      width: 130,
+      sorter: (a, b) => (a.stability_score ?? -999) - (b.stability_score ?? -999),
+      render: (v: number | null | undefined) =>
+        v != null ? (
+          <Text
+            strong
+            style={{
+              fontFamily: "'SF Mono', monospace",
+              color: v >= 0.5 ? '#52c41a' : v >= 0.3 ? '#faad14' : '#ff4d4f',
+            }}
+          >
+            {v.toFixed(4)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'valid_sharpe per period',
+      dataIndex: 'valid_sharpe_per_period',
+      key: 'valid_sharpe_per_period',
+      render: (arr: number[] | null | undefined) =>
+        arr ? (
+          <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+            {arr.map((v) => v.toFixed(2)).join(' / ')}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'valid mean / min',
+      key: 'valid_stat',
+      width: 130,
+      render: (_, r) => (
+        <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+          {r.valid_sharpe_mean != null ? r.valid_sharpe_mean.toFixed(3) : '—'} /{' '}
+          <span style={{ color: (r.valid_sharpe_min ?? 0) >= 0.2 ? '#52c41a' : '#ff4d4f' }}>
+            {r.valid_sharpe_min != null ? r.valid_sharpe_min.toFixed(3) : '—'}
+          </span>
+        </Text>
+      ),
+    },
+    {
+      title: 'test mean',
+      dataIndex: 'test_sharpe_mean',
+      key: 'test_sharpe_mean',
+      width: 90,
+      render: (v: number | null | undefined) =>
+        v != null ? (
+          <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+            {v.toFixed(3)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'all_pos',
+      dataIndex: 'all_positive',
+      key: 'all_positive',
+      width: 80,
+      render: (v) =>
+        v ? <Tag color="success">5/5</Tag> : <Tag color="default">否</Tag>,
+    },
+    {
+      title: 'overfit_max',
+      dataIndex: 'overfit_ratio_max',
+      key: 'overfit_ratio_max',
+      width: 100,
+      render: (v: number | null | undefined) =>
+        v != null ? (
+          <Text
+            style={{
+              fontFamily: "'SF Mono', monospace",
+              color: v > 5 ? '#ff4d4f' : '#faad14',
+            }}
+          >
+            {v.toFixed(2)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      fixed: 'right',
+      render: (_, r) => (
+        <Button
+          type="link"
+          size="small"
+          icon={<SaveOutlined />}
+          disabled={r.subprocess_returncode !== 0}
+          onClick={() => onFinalize(r.trial_id)}
+        >
+          Finalize
+        </Button>
+      ),
+    },
+  ]
+
+  // multi-seed reproduce aggregate columns
+  const repColumns: ColumnsType<ReproduceAggregate> = [
+    { title: 'trial_id', dataIndex: 'trial_id', key: 'trial_id', width: 80 },
+    {
+      title: 'n_seeds',
+      dataIndex: 'n_seeds',
+      key: 'n_seeds',
+      width: 80,
+    },
+    {
+      title: 'test_sharpe mean',
+      key: 'ts_mean',
+      width: 130,
+      render: (_, r) =>
+        r.test_sharpe.mean != null ? (
+          <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+            {r.test_sharpe.mean.toFixed(4)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'test_sharpe std',
+      key: 'ts_std',
+      width: 130,
+      render: (_, r) =>
+        r.test_sharpe.std != null ? (
+          <Text
+            style={{
+              fontFamily: "'SF Mono', monospace",
+              fontSize: 11,
+              color: r.test_sharpe.std > 0.4 ? '#ff4d4f' : '#52c41a',
+            }}
+          >
+            {r.test_sharpe.std.toFixed(4)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'test_sharpe min / max',
+      key: 'ts_range',
+      width: 160,
+      render: (_, r) => (
+        <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+          {r.test_sharpe.min != null ? r.test_sharpe.min.toFixed(3) : '—'} /{' '}
+          {r.test_sharpe.max != null ? r.test_sharpe.max.toFixed(3) : '—'}
+        </Text>
+      ),
+    },
+    {
+      title: 'overfit_ratio mean',
+      key: 'or_mean',
+      width: 130,
+      render: (_, r) =>
+        r.overfit_ratio.mean != null ? (
+          <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+            {r.overfit_ratio.mean.toFixed(2)}
+          </Text>
+        ) : (
+          <Text type="secondary">—</Text>
+        ),
+    },
+    {
+      title: 'hard_pass / n',
+      key: 'hard_pass',
+      width: 110,
+      render: (_, r) => `${r.hard_pass_count} / ${r.n_seeds}`,
+    },
+  ]
+
+  return (
+    <div>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {running ? (
+          <Tag color="processing" icon={<PlayCircleOutlined />}>
+            子进程运行中（job {jobId}）— 看 walk_forward.stdout.log
+          </Tag>
+        ) : wfRows.length > 0 ? (
+          <Tag color="success">已完成（{wfRows.length} trial）</Tag>
+        ) : (
+          <Tag color="default">未跑过跨期验证</Tag>
+        )}
+        <Button icon={<ReloadOutlined />} size="small" onClick={onRefresh}>
+          刷新
+        </Button>
+        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+          自动 10s 刷新一次
+        </Text>
+      </div>
+
+      {wfRows.length === 0 && !running && (
+        <Empty description="还没有跨期验证结果。在 Trials Tab 勾选 ≥1 个 trial → [跨期验证选中] 按钮启动" />
+      )}
+
+      {wfRows.length > 0 && (
+        <Card
+          size="small"
+          title="Walk-forward 跨 5 期稳健性排名"
+          style={{ marginBottom: 12 }}
+        >
+          <Table
+            dataSource={wfSorted}
+            columns={wfColumns}
+            rowKey="trial_id"
+            size="small"
+            pagination={false}
+            scroll={{ x: 1100 }}
+          />
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+            stability_score = valid_sharpe_min × (1 - 变异系数/2) × (5 期均正？1.0 : 0.5)
+          </Text>
+        </Card>
+      )}
+
+      {repAgg.length > 0 && (
+        <Card size="small" title="Multi-seed reproduce 稳定性聚合（每 trial × N seed）">
+          <Table
+            dataSource={repAgg}
+            columns={repColumns}
+            rowKey="trial_id"
+            size="small"
+            pagination={false}
+            scroll={{ x: 900 }}
+          />
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+            std 大说明该 trial 的"最优"高度依赖随机 seed（运气成分大）；std 小才是真正稳定的参数
+          </Text>
+        </Card>
+      )}
     </div>
   )
 }
