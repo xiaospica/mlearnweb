@@ -335,19 +335,21 @@ const WorkbenchMonitorPage: React.FC = () => {
   })
 
   const finalizeMutation = useMutation({
-    mutationFn: (body: {
-      trial_number: number
-      seed: number
-      name?: string
-      description?: string
-    }) => tuningService.finalize(id, body),
+    mutationFn: (body: { trial_number: number }) =>
+      tuningService.finalize(id, body),
     onSuccess: (resp) => {
       const recordId = (resp.data as { training_record_id?: number } | undefined)?.training_record_id
-      message.success(
-        recordId
-          ? `Finalize 启动，training_record_id=${recordId}（约 15 分钟后跳转训练记录页面看结果）`
-          : 'Finalize 启动',
-      )
+      if (recordId) {
+        message.success({
+          content: (
+            <span>
+              已关联到训练记录 #{recordId}{' '}
+              <a onClick={() => navigate(`/training/${recordId}`)}>跳转查看</a>
+            </span>
+          ),
+          duration: 6,
+        })
+      }
       setFinalizeModalOpen(false)
       queryClient.invalidateQueries({ queryKey: ['tuning-job', id] })
     },
@@ -781,49 +783,39 @@ const FinalizeModal: React.FC<{
   defaultTrialNumber: number
   bestSharpe: number | null
   loading: boolean
-  onSubmit: (values: {
-    trial_number: number
-    seed: number
-    name?: string
-    description?: string
-  }) => void
+  onSubmit: (values: { trial_number: number }) => void
 }> = ({ open, onClose, defaultTrialNumber, bestSharpe, loading, onSubmit }) => {
   const [form] = Form.useForm()
 
   useEffect(() => {
     if (open) {
-      form.setFieldsValue({
-        trial_number: defaultTrialNumber,
-        seed: 42,
-        name: '',
-        description: '',
-      })
+      form.setFieldsValue({ trial_number: defaultTrialNumber })
     }
   }, [open, defaultTrialNumber, form])
 
   return (
     <Modal
-      title="Finalize 最佳模型 — 用 best trial 跑正式训练"
+      title="Finalize — 关联到该 trial 的训练记录"
       open={open}
       onCancel={onClose}
       onOk={() => {
         form.validateFields().then((values) => onSubmit(values))
       }}
-      okText="启动正式训练"
+      okText="确认关联"
       cancelText="取消"
       confirmLoading={loading}
-      width={620}
+      width={560}
     >
       <Alert
-        type="info"
+        type="success"
         showIcon
-        message="此操作将启动一次完整的正式训练，写入训练记录页面"
+        message="零成本：直接索引到该 trial 已有的训练记录"
         description={
           <>
-            与命令行 <Typography.Text code>--training-record-id</Typography.Text> 同链路：
-            train script 自动追加 run mapping，结果会出现在
-            <Typography.Text code>/</Typography.Text>（训练记录页面）。
-            约耗时 3-15 分钟（取决于单期 / 跨期 5）。
+            搜索时每个 trial 子进程已创建独立 training_record（含 SHAP / 收益曲线 /
+            IC 分析等完整 artifact）。Finalize 仅通过 trial 的 mlflow run_id 反查
+            <Typography.Text code>training_run_mappings</Typography.Text> 表找到对应
+            record，<Typography.Text strong>不重新训练</Typography.Text>，立即返回。
           </>
         }
         style={{ marginBottom: 16 }}
@@ -840,15 +832,6 @@ const FinalizeModal: React.FC<{
           }
         >
           <InputNumber min={0} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item label="seed" name="seed" rules={[{ required: true }]}>
-          <InputNumber min={0} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item label="名称（可选）" name="name">
-          <Input placeholder="留空将自动生成 'Tuning Job #N best (trial M)'" />
-        </Form.Item>
-        <Form.Item label="描述（可选）" name="description">
-          <Input.TextArea rows={2} placeholder="备注：为什么选这个 trial / 实盘上线计划等" />
         </Form.Item>
       </Form>
     </Modal>

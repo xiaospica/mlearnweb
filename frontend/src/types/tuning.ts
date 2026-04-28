@@ -177,11 +177,9 @@ export interface TuningJobCreateRequest {
   config_snapshot: TuningConfigSnapshot
 }
 
+/** V3.5: finalize 仅需 trial_number（零成本索引现有 training_record） */
 export interface TuningFinalizeRequest {
   trial_number: number
-  seed?: number
-  name?: string
-  description?: string
 }
 
 export interface TuningDeployRequest {

@@ -586,22 +586,24 @@ def finalize_job(
     db: Session,
     job: TuningJob,
     trial_number: int,
-    seed: int = 42,
-    num_threads: int = 20,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
 ) -> int:
-    """用指定 trial 的超参跑一次正式训练，结果写入 training_records 表。
+    """把指定 trial 已有的训练记录关联到 job（零成本，不重新训练）。
 
-    与命令行模式 100% 同链路：调用 tushare_hs300_rolling_train.py +
-    --training-record-id <id> 参数，让 RollingPipeline 内部的
-    DashboardRecorder 在 batch 模式下追加 run mapping，与
-    dashboard_batch.py start/finish 流程行为一致。
+    设计变更（V3.5）：搜索过程中每个 trial subprocess 启动 train script 时
+    没传 --training-record-id，走"单次模式" → 已经创建了独立 training_record
+    + 5 期 run mapping。Finalize 不需要再跑一次完整训练（15 min），只需要
+    通过 trial.run_id 在 training_run_mappings 反查回该 record，挂到
+    job.finalized_training_record_id 即可。
 
-    完成后 finalize_training_record 会出现在 / (TrainingRecordsPage)，
-    用户能像看任何普通训练一样看 train/valid/test 三段全部 artifacts。
+    用户体验：
+        点 Finalize → 立即返回 training_record_id → 跳训练记录页看 SHAP /
+        收益曲线 / IC 分析等（与命令行训练同详情页）→ 走部署链路。
+
+    异常路径：
+        若 trial 没 run_id 或 mlearnweb 当时挂了导致没创建 training_record，
+        抛 ValueError；用户可看 stdout 排查或重跑该 trial。
     """
-    from app.services.training_service import TrainingService
+    from app.models.database import TrainingRunMapping
 
     trial = (
         db.query(TuningTrial)
@@ -613,88 +615,36 @@ def finalize_job(
     )
     if not trial:
         raise ValueError(f"trial {trial_number} 不存在于 job {job.id}")
-    if not trial.params:
-        raise ValueError(f"trial {trial_number} 缺少 params")
+    if not trial.run_id:
+        raise ValueError(
+            f"trial {trial_number} 缺 run_id（mlflow run 未关联到 trial 行）；"
+            f"请检查 trials.csv 的 run_id 列是否正确写入"
+        )
 
-    workdir = Path(job.workdir) if job.workdir else get_job_workdir(job.id)
-    workdir.mkdir(parents=True, exist_ok=True)
-
-    # 写 best_params.json（含 num_threads + seed，与 finalize_best.export 同格式）
-    overrides = {**trial.params, "num_threads": num_threads, "seed": seed}
-    overrides_path = workdir / "finalize_best_params.json"
-    overrides_path.write_text(
-        json.dumps(overrides, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    # 反查 training_run_mappings：trial 的 run_id（5 期之一）映射到该 trial
+    # 创建的那条 training_record
+    mapping = (
+        db.query(TrainingRunMapping)
+        .filter(TrainingRunMapping.run_id == trial.run_id)
+        .first()
     )
+    if not mapping:
+        raise ValueError(
+            f"trial {trial_number} run_id={trial.run_id} 在 training_run_mappings "
+            f"中找不到对应记录；可能 mlearnweb 后端在该 trial 跑时不可用导致未写入。"
+            f"建议重跑该 trial 或手动用命令行模式训练。"
+        )
 
-    record_name = name or f"Tuning Job #{job.id} best (trial {trial_number})"
-    record_desc = description or (
-        f"由调参工作台 finalize：用 trial {trial_number} 最佳超参跑正式训练；"
-        f"valid_sharpe={trial.valid_sharpe} test_sharpe={trial.test_sharpe}"
-    )
-    # experiment_id 从既有 mlflow run 复用（保证 train script 创建的 run 落到同 experiment）
-    experiment_id = "374089520733232109"  # qlib_strategy_dev 默认 rolling_exp
-    experiment_name = "rolling_exp"
-    category = "rolling" if job.search_mode == "walk_forward_5p" else "single"
-
-    record = TrainingService.create_record(
-        db=db,
-        name=record_name,
-        experiment_id=experiment_id,
-        experiment_name=experiment_name,
-        description=record_desc,
-        category=category,
-        config_snapshot={
-            "_finalized_from_tuning_job": job.id,
-            "tuning_trial_number": trial_number,
-            "tuning_seed": seed,
-            "params": overrides,
-            "best_valid_sharpe": trial.valid_sharpe,
-            "best_test_sharpe": trial.test_sharpe,
-            "search_mode": job.search_mode,
-        },
-        command_line=(
-            f"finalize: tushare_hs300_rolling_train.py --training-record-id <id> "
-            f"--gbdt-overrides {overrides_path.name} --with-multi-segment"
-        ),
-    )
-
-    # 启动 train subprocess（独立后台，不阻塞 API）
-    cmd = [
-        TUNING_PYTHON_EXE,
-        "-u",
-        str(STRATEGY_DEV_ROOT / "strategy_dev" / "tushare_hs300_rolling_train.py"),
-        "--name", record_name,
-        "--description", record_desc,
-        "--with-multi-segment",
-        "--gbdt-overrides", str(overrides_path),
-        "--training-record-id", str(record.id),  # ← 关键：与命令行模式同链路
-    ]
-    finalize_log = workdir / f"finalize_record_{record.id}.stdout.log"
-    log_fp = open(finalize_log, "ab")
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=log_fp,
-        stderr=subprocess.STDOUT,
-        cwd=str(STRATEGY_DEV_ROOT),
-        env={
-            **os.environ,
-            "PYTHONUNBUFFERED": "1",
-            "PYTHONIOENCODING": "utf-8",
-        },
-    )
-
-    # 更新 job 元数据
-    job.finalized_training_record_id = record.id
-    job.status = "finalizing"
+    record_id = mapping.training_record_id
+    job.finalized_training_record_id = record_id
     db.commit()
+    db.refresh(job)
 
     print(
         f"[TuningService] finalize job={job.id} trial={trial_number} "
-        f"→ training_record={record.id} pid={proc.pid}"
+        f"→ 索引到 training_record={record_id} (run_id={trial.run_id[:12]}...)"
     )
-    return record.id
+    return record_id
 
 
 # ---------------------------------------------------------------------------

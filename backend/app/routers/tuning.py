@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -144,6 +145,23 @@ def get_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
 
 @router.delete("/jobs/{job_id}", response_model=ApiResponse)
 def delete_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
+    """全量删除调参 job：DB 行 + workdir + 关联训练记录 + mlflow 物理文件.
+
+    清理顺序：
+        1. 收集 trials 的 run_id → 反查 training_run_mappings → training_record_ids
+        2. 收集这些 record 的全部 run_ids（5 期）+ experiment_id
+        3. 删 training_records（DB CASCADE 自动删 training_run_mappings）
+        4. 删 tuning_job（DB CASCADE 自动删 tuning_trials）
+        5. 删 workdir（trials.csv / overrides / optuna_study.db 等）
+        6. 删 mlflow run 物理目录（mlruns/<exp>/<run_id>/）
+
+    步骤 1 必须在 step 4 之前执行（CASCADE 删 trials 后就拿不到 run_id 了）。
+    workdir + mlflow 文件清理放在 DB commit 后，文件删除失败不影响 DB 一致性。
+    """
+    import shutil
+    from pathlib import Path
+    from app.models.database import TrainingRecord, TrainingRunMapping
+
     job = _get_job_or_404(db, job_id)
     if job.status in ("running", "searching", "finalizing"):
         if tuning_service.is_pid_alive(job.pid, job.pid_started_at):
@@ -153,8 +171,75 @@ def delete_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
             )
         # 进程死了但 status 没更新，自动 zombie
         job.status = "zombie"
+
+    workdir = Path(job.workdir) if job.workdir else None
+
+    # ---- 1. 通过 trial.run_id 反查关联的 training_records ----
+    trial_run_ids = [t.run_id for t in job.trials if t.run_id]
+    record_ids: set[int] = set()
+    if trial_run_ids:
+        mappings = (
+            db.query(TrainingRunMapping)
+            .filter(TrainingRunMapping.run_id.in_(trial_run_ids))
+            .all()
+        )
+        for m in mappings:
+            record_ids.add(m.training_record_id)
+
+    # ---- 2. 收集这些 records 的所有 run_ids + experiment_id（删 mlflow 物理文件用）----
+    mlflow_runs_to_delete: list[tuple[str, str]] = []  # (experiment_id, run_id)
+    for rid in record_ids:
+        rec = db.query(TrainingRecord).filter(TrainingRecord.id == rid).first()
+        if not rec:
+            continue
+        all_mappings = (
+            db.query(TrainingRunMapping)
+            .filter(TrainingRunMapping.training_record_id == rid)
+            .all()
+        )
+        for m in all_mappings:
+            mlflow_runs_to_delete.append((rec.experiment_id, m.run_id))
+
+    # ---- 3. 删 training_records（CASCADE 删 mappings）----
+    deleted_records = 0
+    for rid in record_ids:
+        rec = db.query(TrainingRecord).filter(TrainingRecord.id == rid).first()
+        if rec:
+            db.delete(rec)
+            deleted_records += 1
+
+    # ---- 4. 删 tuning_job（CASCADE 删 tuning_trials）----
     db.delete(job)
     db.commit()
+
+    # ---- 5. 删 workdir ----
+    if workdir and workdir.is_dir():
+        try:
+            shutil.rmtree(workdir)
+        except OSError as exc:
+            print(f"[Tuning] WARN: 删 workdir 失败: {exc}")
+
+    # ---- 6. 删 mlflow run 物理目录 ----
+    mlruns_root = Path(
+        os.environ.get(
+            "MLRUNS_ROOT",
+            r"F:\Quant\code\qlib_strategy_dev\mlruns",
+        )
+    )
+    deleted_mlflow = 0
+    for exp_id, run_id in mlflow_runs_to_delete:
+        mlrun_dir = mlruns_root / exp_id / run_id
+        if mlrun_dir.is_dir():
+            try:
+                shutil.rmtree(mlrun_dir)
+                deleted_mlflow += 1
+            except OSError as exc:
+                print(f"[Tuning] WARN: 删 mlflow run {run_id} 失败: {exc}")
+
+    print(
+        f"[Tuning] deleted job {job_id}: "
+        f"{deleted_records} training_records, {deleted_mlflow} mlflow runs, workdir cleaned"
+    )
     return ApiResponse(success=True, message=f"job {job_id} 已删除")
 
 
@@ -449,34 +534,26 @@ def finalize_tuning_job(
     body: TuningFinalizeRequest,
     db: Session = Depends(get_db_session),
 ):
-    """用指定 trial 的超参跑一次正式训练，写入 training_records 表。
+    """V3.5 零成本 finalize：把 trial 已有的 training_record 挂到 job 上。
 
-    与命令行训练 100% 同链路：调 tushare_hs300_rolling_train.py +
-    --training-record-id 参数，让 RollingPipeline.DashboardRecorder 在 batch
-    模式下追加 run mapping，结果在 / (TrainingRecordsPage) 自然显示。
+    搜索过程每个 trial subprocess 已经创建了独立 training_record（含 SHAP /
+    收益曲线 / IC 分析等完整 artifact），finalize 不再重新训练，只需要
+    通过 trial.run_id 反查 training_run_mappings 拿到 record_id。
+
+    用户视角：点 Finalize → 立即返回 → 跳训练记录页查看完整训练成果。
     """
     job = _get_job_or_404(db, job_id)
-    if job.status not in ("done", "cancelled"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"job 状态 {job.status} 不允许 finalize；需先完成搜索（status={job.status}）",
-        )
 
     try:
         record_id = tuning_service.finalize_job(
-            db,
-            job,
-            trial_number=body.trial_number,
-            seed=body.seed,
-            name=body.name,
-            description=body.description,
+            db, job, trial_number=body.trial_number,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     return ApiResponse(
         success=True,
-        message=f"已启动 finalize 训练，training_record_id={record_id}",
+        message=f"已索引到现有训练记录 #{record_id}",
         data={
             "tuning_job_id": job.id,
             "training_record_id": record_id,

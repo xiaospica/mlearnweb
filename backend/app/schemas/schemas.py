@@ -423,11 +423,12 @@ class TuningProgressResponse(BaseModel):
 
 
 class TuningFinalizeRequest(BaseModel):
-    """选定 trial 后触发 finalize：用其超参跑一次正式训练（写 training_records）"""
+    """V3.5 finalize：把 trial 的现有 training_record 关联到 job（零成本，不重训）。
+
+    通过 trial.run_id 反查 training_run_mappings 即可，无需 seed/name/description
+    （旧字段 V3.5 已移除，因为 finalize 不再创建新 record）。
+    """
     trial_number: int = Field(..., ge=0)
-    seed: int = Field(42, ge=0)
-    name: Optional[str] = Field(None, description="finalize 产出 training_record 的名称；None 自动生成")
-    description: Optional[str] = None
 
 
 class TuningDeployRequest(BaseModel):
