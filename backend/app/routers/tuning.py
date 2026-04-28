@@ -580,11 +580,9 @@ def deploy_tuning_job(
             detail="job 尚未 finalize；请先调 /finalize 完成正式训练",
         )
 
-    # 从 X-Ops-Password header 透传到 vnpy 后端
-    from fastapi import Header as _Header  # 延迟导入避免顶部依赖
-
     try:
         result = tuning_service.deploy_job_to_vnpy(
+            db,
             job,
             node_id=body.node_id,
             engine=body.engine,
@@ -594,11 +592,15 @@ def deploy_tuning_job(
             setting_overrides=body.setting_overrides,
         )
     except ValueError as exc:
+        # 业务校验错误（job 没 finalize / record 不存在等）
         raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        # vnpy 节点不可达（V3.6 retry 3 次后仍失败）
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
-            detail=f"调 vnpy 后端失败: {exc}",
+            detail=f"调 vnpy 后端失败（未预期的错误）: {exc}",
         )
 
     return ApiResponse(

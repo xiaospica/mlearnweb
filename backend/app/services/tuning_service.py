@@ -659,7 +659,63 @@ LIVE_BACKEND_URL = os.environ.get(
 )
 
 
+MLRUNS_ROOT = Path(
+    os.environ.get(
+        "MLRUNS_ROOT",
+        r"F:\Quant\code\qlib_strategy_dev\mlruns",
+    )
+)
+
+
+def _build_deployment_manifest(
+    db: Session, job: TuningJob
+) -> Dict[str, Any]:
+    """V3.6: 从 finalized training_record 实时计算 deployment manifest.
+
+    替代之前依赖 finalize_best.export 预生成 deployment_manifest.json 的链路
+    （V3.5 finalize 不再 subprocess，自然也不会预生成 json）。
+
+    取最后一期（最新 test）run 作 production run；bundle_dir 指向其 artifacts/。
+    """
+    from app.models.database import TrainingRecord, TrainingRunMapping
+
+    if not job.finalized_training_record_id:
+        raise ValueError("job 尚未 finalize；请先 POST /finalize")
+    rec = (
+        db.query(TrainingRecord)
+        .filter(TrainingRecord.id == job.finalized_training_record_id)
+        .first()
+    )
+    if not rec:
+        raise ValueError(
+            f"finalized_training_record_id={job.finalized_training_record_id} 已不存在"
+        )
+
+    # 取该 record 下 rolling_index 最大的 mapping（即最后一期 = 最新 test 期）
+    mapping = (
+        db.query(TrainingRunMapping)
+        .filter(TrainingRunMapping.training_record_id == rec.id)
+        .order_by(TrainingRunMapping.rolling_index.desc().nulls_last())
+        .first()
+    )
+    if not mapping or not mapping.run_id:
+        raise ValueError(
+            f"training_record={rec.id} 没有任何 run mapping；无法定位 mlflow run"
+        )
+
+    bundle_dir = MLRUNS_ROOT / rec.experiment_id / mapping.run_id / "artifacts"
+    return {
+        "schema_version": 1,
+        "mlflow_run_id": mapping.run_id,
+        "mlflow_experiment_id": rec.experiment_id,
+        "bundle_dir": str(bundle_dir),
+        "tuning_job_id": job.id,
+        "training_record_id": rec.id,
+    }
+
+
 def deploy_job_to_vnpy(
+    db: Session,
     job: TuningJob,
     *,
     node_id: str,
@@ -670,37 +726,24 @@ def deploy_job_to_vnpy(
     setting_overrides: Optional[Dict[str, Any]] = None,
     ops_password: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """从 finalize 产物组装 vnpy setting 并转调既有 live_trading API.
+    """V3.6: 从 finalized training_record 实时算 manifest，转调 vnpy live_trading API.
 
-    前提：job 必须已 finalize（finalized_training_record_id 不为空），
-    可从 deployment_manifest.json 读 mlflow_run_id + bundle_dir。
+    重构要点：
+        - 不依赖 deployment_manifest.json（V3.5 后 finalize 不再生成它）
+        - 实时反查 training_run_mappings 拿最新一期 mlflow run + bundle_dir
+        - HTTP 调 8100 加 retry（vnpy 节点重启 / 网络抖动场景）
     """
+    import time as _time
     import httpx
 
-    if not job.finalized_training_record_id:
-        raise ValueError("job 尚未 finalize；请先 POST /finalize 完成正式训练")
-
-    workdir = Path(job.workdir) if job.workdir else get_job_workdir(job.id)
-    manifest_path = workdir / "deployment_manifest.json"
-
-    # 如果 manifest 还没生成（finalize subprocess 还没跑完），用 trial.run_id 兜底
-    if not manifest_path.is_file():
-        # 从 finalized training_record 反查最新 run_id（主 run）
-        from app.models.database import TrainingRunMapping
-        # 这里需要 db 但当前函数不接 db，暂时让调用方传入
-        raise ValueError(
-            f"deployment_manifest.json 不存在于 {workdir}；"
-            "请等 finalize subprocess 完成（看 finalize_record_*.stdout.log）"
-        )
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest = _build_deployment_manifest(db, job)
 
     # 拼 vnpy setting
     setting: Dict[str, Any] = {
-        "mlflow_run_id": manifest.get("mlflow_run_id"),
-        "bundle_dir": manifest.get("bundle_dir"),
+        "mlflow_run_id": manifest["mlflow_run_id"],
+        "bundle_dir": manifest["bundle_dir"],
         "tuning_job_id": job.id,
-        "tuning_trial_number": manifest.get("trial_id"),
+        "training_record_id": manifest["training_record_id"],
     }
     if setting_overrides:
         setting.update(setting_overrides)
@@ -709,7 +752,6 @@ def deploy_job_to_vnpy(
     headers = {}
     if ops_password:
         headers["X-Ops-Password"] = ops_password
-
     body = {
         "class_name": class_name,
         "strategy_name": strategy_name,
@@ -717,18 +759,34 @@ def deploy_job_to_vnpy(
         "setting": setting,
     }
     url = f"{LIVE_BACKEND_URL}/api/live-trading/strategies/{node_id}/{engine}"
-    with httpx.Client(timeout=30.0) as client:
-        resp = client.post(url, json=body, headers=headers)
-        resp.raise_for_status()
-        result = resp.json()
 
-    return {
-        "training_record_id": job.finalized_training_record_id,
-        "node_id": node_id,
-        "engine": engine,
-        "strategy_name": strategy_name,
-        "vnpy_response": result,
-    }
+    # V3.6: retry 3 次（指数退避），覆盖 vnpy 节点重启 / 短暂网络抖动场景
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.post(url, json=body, headers=headers)
+                resp.raise_for_status()
+                result = resp.json()
+            return {
+                "training_record_id": job.finalized_training_record_id,
+                "node_id": node_id,
+                "engine": engine,
+                "strategy_name": strategy_name,
+                "vnpy_response": result,
+                "manifest": manifest,
+            }
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.HTTPStatusError) as exc:
+            last_exc = exc
+            print(
+                f"[Deploy] attempt {attempt + 1}/3 failed: {type(exc).__name__}: {exc}"
+            )
+            if attempt < 2:
+                _time.sleep(1.0 * (attempt + 1))  # 1s, 2s
+    # 3 次都失败
+    raise RuntimeError(
+        f"vnpy 节点 {node_id} 不可达（重试 3 次后仍失败）: {last_exc}"
+    ) from last_exc
 
 
 def get_log_tail(job: TuningJob, tail_bytes: int = 16384, source: str = "tuning") -> str:

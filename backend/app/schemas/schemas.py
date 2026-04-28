@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -341,6 +341,34 @@ class TuningJobCreate(BaseModel):
         description="{csi300_record_lgb_task_config, custom_segments, gbdt_model, bt_strategy, record_config}"
     )
 
+    @model_validator(mode="after")
+    def _validate_search_space_consistency(self) -> "TuningJobCreate":
+        """V3.6: 校验 search_space 的所有 key 都存在于 gbdt_model.kwargs.
+
+        Optuna trial 采样后会用 search_space 里的 key 覆盖 gbdt_model.kwargs；
+        若 search_space 含某 key 但 gbdt_model.kwargs 没有，覆盖结果是有意为之，
+        但用户更常见的是手滑写错 key（如 lr vs learning_rate），导致 baseline
+        没有该字段、Optuna 也搜不到 → silent fail。
+        """
+        cfg = self.config_snapshot or {}
+        gbdt = cfg.get("gbdt_model") or {}
+        ss = cfg.get("search_space") or {}
+        if not ss:
+            return self  # 没设搜索空间不校验
+        if not isinstance(ss, dict):
+            return self  # 类型由 dataset_class 字段单独校验
+        gbdt_kwargs_keys = set((gbdt.get("kwargs") or {}).keys())
+        ss_keys = set(ss.keys())
+        unknown = ss_keys - gbdt_kwargs_keys
+        if unknown:
+            raise ValueError(
+                f"search_space 含 {sorted(unknown)} 等参数，但 gbdt_model.kwargs "
+                f"中没有对应基线值（baseline keys: {sorted(gbdt_kwargs_keys)}）。"
+                f"请在 gbdt_model.kwargs 里加上这些参数的基线值，或从 search_space "
+                f"里删掉拼写错误的 key。"
+            )
+        return self
+
 
 class TuningJobResponse(BaseModel):
     id: int
@@ -364,6 +392,8 @@ class TuningJobResponse(BaseModel):
     start_n_jobs: Optional[int] = None
     start_num_threads: Optional[int] = None
     start_seed: Optional[int] = None
+    # V3.6 mlflow experiment_id（前端跳报告页用，不再硬编码）
+    experiment_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

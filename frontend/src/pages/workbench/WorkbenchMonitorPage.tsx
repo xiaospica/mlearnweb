@@ -231,7 +231,6 @@ const WorkbenchMonitorPage: React.FC = () => {
   const queryClient = useQueryClient()
 
   const id = Number(jobId)
-  const experimentId = '374089520733232109'  // mlflow rolling_exp（与命令行同实验）
 
   const [activeTab, setActiveTab] = useState<'trials' | 'walk_forward' | 'logs' | 'config'>(
     'trials',
@@ -299,8 +298,13 @@ const WorkbenchMonitorPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['tuning-job', id] })
     })
 
+    // V3.6: 浏览器 EventSource 自带指数退避自动重连。onerror 只显示提示，
+    // 重连成功（onopen 触发）时清除错误，给用户即时反馈。
     es.onerror = () => {
-      setSseError('SSE 连接已断开（5s 自动重连或刷新页面）')
+      setSseError('SSE 连接断开，浏览器自动重连中…')
+    }
+    es.onopen = () => {
+      setSseError(null)
     }
 
     return () => {
@@ -658,7 +662,7 @@ const WorkbenchMonitorPage: React.FC = () => {
                   ) : (
                     <Table
                       dataSource={trials}
-                      columns={buildTrialColumns(navigate, experimentId)}
+                      columns={buildTrialColumns(navigate, job.experiment_id ?? '')}
                       rowKey="trial_number"
                       size="small"
                       pagination={{ pageSize: 30 }}

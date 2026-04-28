@@ -172,6 +172,9 @@ class TuningJob(Base):
     start_n_jobs = Column(Integer, default=1)
     start_num_threads = Column(Integer, default=20)
     start_seed = Column(Integer, default=42)
+    # V3.6: 该 job 的 mlflow experiment_id（前端跳报告页用）
+    # 默认 '374089520733232109' 即 rolling_exp，与命令行训练同实验
+    experiment_id = Column(String(64), default="374089520733232109", nullable=True)
 
     trials = relationship("TuningTrial", back_populates="job", cascade="all, delete-orphan")
 
@@ -375,7 +378,7 @@ def _migrate_add_deployments():
 
 
 def _migrate_add_tuning_queue_columns():
-    """V3.3 迁移：在 tuning_jobs 加 queue_position + start_* 列（搜索任务队列调度）。"""
+    """V3.3 + V3.6 迁移：tuning_jobs 加 queue_position + start_* + experiment_id 列。"""
     import sqlite3
     db_path = settings.database_url.replace("sqlite:///", "")
     if not db_path or not db_path.endswith(".db"):
@@ -390,6 +393,7 @@ def _migrate_add_tuning_queue_columns():
             ("start_n_jobs", "INTEGER DEFAULT 1"),
             ("start_num_threads", "INTEGER DEFAULT 20"),
             ("start_seed", "INTEGER DEFAULT 42"),
+            ("experiment_id", "VARCHAR(64) DEFAULT '374089520733232109'"),
         ]
         for col_name, col_def in adds:
             if col_name not in columns:

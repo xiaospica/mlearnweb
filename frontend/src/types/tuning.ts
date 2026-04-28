@@ -116,6 +116,8 @@ export interface TuningJob {
   start_n_jobs?: number | null
   start_num_threads?: number | null
   start_seed?: number | null
+  /** V3.6: mlflow experiment_id（前端跳报告页用） */
+  experiment_id?: string | null
   created_at: string
   updated_at: string
 }
