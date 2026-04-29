@@ -3,6 +3,8 @@ import { Layout, Dropdown } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { QuestionCircleOutlined, BookOutlined, DownOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
+import { BRAND_NAME } from '@/config/brand'
+import Logo from '@/components/brand/Logo'
 
 const { Header: AntHeader } = Layout
 
@@ -27,14 +29,18 @@ const Header: React.FC = () => {
   ]
 
   const navItemStyle = (active: boolean): React.CSSProperties => ({
-    padding: '6px 14px',
-    borderRadius: 6,
+    position: 'relative',
+    padding: '0 14px',
+    height: 56, // 与 Header 同高，让下划线贴 Header 底缘
+    display: 'flex',
+    alignItems: 'center',
     cursor: 'pointer',
     fontSize: 13,
     fontWeight: active ? 600 : 400,
-    color: active ? 'var(--ap-brand-primary)' : 'var(--ap-text-muted)',
-    background: active ? 'var(--ap-brand-soft)' : 'transparent',
-    transition: 'all 0.2s',
+    color: active ? 'var(--ap-text)' : 'var(--ap-text-muted)',
+    background: 'transparent',
+    boxShadow: active ? 'inset 0 -2px 0 0 var(--ap-brand-primary)' : 'none',
+    transition: 'color 0.2s, box-shadow 0.2s',
     userSelect: 'none',
   })
 
@@ -56,44 +62,23 @@ const Header: React.FC = () => {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div
-          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}
+          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           onClick={() => navigate('/')}
+          aria-label={`${BRAND_NAME} home`}
         >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 6,
-              background: 'var(--ap-brand-primary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 15,
-              fontWeight: 700,
-              color: '#fff',
-            }}
-          >
-            Q
-          </div>
-          <span
-            style={{
-              color: 'var(--ap-text)',
-              fontFamily: "'Inter', sans-serif",
-              fontSize: 16,
-              fontWeight: 600,
-            }}
-          >
-            QMLearn
-          </span>
+          {/* currentColor 同时染 brand mark 与字标。
+              在暗色下 brand-primary (#3B82F6) + 字标取 ap-text 显得割裂，
+              这里整体用 brand-primary 让 logo 一体感更强（字标也是蓝） */}
+          <Logo variant="full" height={28} style={{ color: 'var(--ap-brand-primary)' }} />
         </div>
 
         <div
           style={{
             display: 'flex',
-            marginLeft: 20,
-            borderLeft: '1px solid var(--ap-border)',
-            paddingLeft: 16,
+            marginLeft: 24,
             gap: 4,
+            height: 56,
+            alignItems: 'center',
           }}
         >
           <div onClick={() => navigate('/')} style={navItemStyle(isTrainingRecords)}>

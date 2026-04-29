@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 32" fill="none">
+  <rect width="32" height="32" rx="7" fill="currentColor"/>
+  <text x="16" y="22" font-family="'Inter', system-ui, -apple-system, sans-serif" font-size="20" font-weight="700" fill="#fff" text-anchor="middle">α</text>
+  <polygon points="22,3.5 28.5,8 22,12.5" fill="#fff"/>
+  <text x="42" y="22" font-family="'Inter', system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="currentColor">AlphaPilot</text>
+</svg>
