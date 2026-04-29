@@ -28,11 +28,23 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * 全局 message / notification 配置：
+ * - top 偏移避开 TopBar（56px Header + 8px 余量）
+ * - maxCount 防止短时间堆叠
+ */
+const ANTAPP_GLOBALS = {
+  message: { top: 64, maxCount: 3, duration: 3 },
+  notification: { placement: 'topRight' as const, top: 64 },
+}
+
 const ThemedAntdShell = ({ children }: { children: React.ReactNode }) => {
   const { mode } = useThemeStore()
   return (
     <ConfigProvider theme={themeConfigOf(mode)}>
-      <AntApp>{children}</AntApp>
+      <AntApp message={ANTAPP_GLOBALS.message} notification={ANTAPP_GLOBALS.notification}>
+        {children}
+      </AntApp>
     </ConfigProvider>
   )
 }
