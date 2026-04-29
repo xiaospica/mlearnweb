@@ -555,6 +555,13 @@ def get_walk_forward_log(
     return ApiResponse(success=True, data={"job_id": job.id, "text": text})
 
 
+@router.get("/jobs/{job_id}/param-importance", response_model=ApiResponse)
+def get_param_importance(job_id: int, db: Session = Depends(get_db_session)):
+    """V3.8: 用 Optuna fANOVA 算各 search_space 参数对 valid_sharpe 的贡献度。"""
+    job = _get_job_or_404(db, job_id)
+    return ApiResponse(success=True, data=tuning_service.get_param_importance(job))
+
+
 # ---------------------------------------------------------------------------
 # Finalize / 部署
 # ---------------------------------------------------------------------------

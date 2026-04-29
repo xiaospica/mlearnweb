@@ -29,6 +29,7 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined,
+  BarChartOutlined,
   ClockCircleOutlined,
   ExperimentOutlined,
   FileTextOutlined,
@@ -44,6 +45,11 @@ import type { ColumnsType } from 'antd/es/table'
 
 import { tuningService } from '@/services/tuningService'
 import JsonCodeEditor from '@/components/workbench/JsonCodeEditor'
+import {
+  ParetoScatterChart,
+  ParallelCoordinatesChart,
+  ParamImportanceChart,
+} from '@/components/workbench/TrialVisualizationCharts'
 import type {
   TuningJob,
   TuningJobStatus,
@@ -232,7 +238,7 @@ const WorkbenchMonitorPage: React.FC = () => {
 
   const id = Number(jobId)
 
-  const [activeTab, setActiveTab] = useState<'trials' | 'walk_forward' | 'logs' | 'config'>(
+  const [activeTab, setActiveTab] = useState<'trials' | 'visualize' | 'walk_forward' | 'logs' | 'config'>(
     'trials',
   )
   // 默认 stdout：看 train 子进程的实时进度（含 qlib 训练 / 回测 print 输出）；
@@ -397,6 +403,14 @@ const WorkbenchMonitorPage: React.FC = () => {
     enabled: !Number.isNaN(id) && !isVerificationJob,
   })
   const derivedJobs: TuningJob[] = derivedData?.data?.items ?? []
+
+  // V3.8: 参数重要性（fANOVA），切到可视化 Tab 时按需拉
+  const { data: importanceData, isFetching: importanceLoading } = useQuery({
+    queryKey: ['tuning-param-importance', id],
+    queryFn: () => tuningService.getParamImportance(id),
+    enabled: !Number.isNaN(id) && activeTab === 'visualize' && !isVerificationJob,
+    staleTime: 60_000,
+  })
 
   const walkForwardMutation = useMutation({
     mutationFn: (body: {
@@ -804,6 +818,43 @@ const WorkbenchMonitorPage: React.FC = () => {
                 />
               ),
             },
+            // V3.8: 可视化 Tab（仅源 job 显示，衍生 job 没必要 — 它只有少数 trial）
+            ...(isVerificationJob
+              ? []
+              : [
+                  {
+                    key: 'visualize',
+                    label: (
+                      <span>
+                        <BarChartOutlined /> 可视化
+                      </span>
+                    ),
+                    children: (
+                      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                        <Card size="small" title="🥇 Pareto 前沿（识别既高 sharpe 又稳的 trial）">
+                          <ParetoScatterChart
+                            trials={trials}
+                            onTrialClick={(trialNum) => {
+                              setSelectedTrials((prev) =>
+                                prev.includes(trialNum) ? prev : [...prev, trialNum],
+                              )
+                              message.info(`已选中 trial #${trialNum}`)
+                            }}
+                          />
+                        </Card>
+                        <Card size="small" title="🌈 平行坐标（看高 sharpe 集中在哪些超参区间）">
+                          <ParallelCoordinatesChart trials={trials} />
+                        </Card>
+                        <Card size="small" title="📊 参数重要性（Optuna fANOVA — 哪些超参对 sharpe 影响最大）">
+                          <ParamImportanceChart
+                            result={importanceData?.data}
+                            loading={importanceLoading}
+                          />
+                        </Card>
+                      </Space>
+                    ),
+                  },
+                ]),
             {
               key: 'logs',
               label: (

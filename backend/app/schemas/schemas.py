@@ -450,6 +450,9 @@ class TuningTrialResponse(BaseModel):
     trial_number: int
     state: str
     params: Dict[str, Any] = {}
+    # V3.8: 全量指标 JSON（含 test_max_drawdown / IC 系列等）—— Pareto 散点图
+    # 第二根 X 轴 (test_max_drawdown) 等可视化场景需要
+    metrics: Optional[Dict[str, Any]] = None
     valid_sharpe: Optional[float] = None
     test_sharpe: Optional[float] = None
     overfit_ratio: Optional[float] = None

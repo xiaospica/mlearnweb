@@ -141,6 +141,8 @@ export interface TuningTrial {
   trial_number: number
   state: TuningTrialState
   params: Record<string, number | string>
+  /** 全量指标 JSON（含 test_max_drawdown / valid_max_drawdown / IC 系列等），可视化用 */
+  metrics?: Record<string, number | null> | null
   valid_sharpe?: number | null
   test_sharpe?: number | null
   overfit_ratio?: number | null
@@ -296,4 +298,20 @@ export interface WalkForwardResults {
   reproduce: ReproduceRow[]
   reproduce_aggregate: ReproduceAggregate[]
   summary_md?: string | null
+}
+
+// ---------------------------------------------------------------------------
+// V3.8 可视化：参数重要性
+// ---------------------------------------------------------------------------
+
+export interface ParamImportanceItem {
+  param: string
+  importance: number
+}
+
+export interface ParamImportanceResult {
+  evaluator: 'fanova' | 'mean_decrease_impurity' | null
+  n_completed_trials: number
+  importances: ParamImportanceItem[]
+  error: string | null
 }

@@ -16,6 +16,7 @@ import type {
   TuningDeployRequest,
   TuningWalkForwardRequest,
   WalkForwardResults,
+  ParamImportanceResult,
 } from '@/types/tuning'
 
 export const tuningService = {
@@ -191,5 +192,12 @@ export const tuningService = {
     return apiClient
       .get(`/tuning/jobs/${id}/walk-forward-log`, { params: { tail_bytes: tailBytes } })
       .then((r) => r.data)
+  },
+
+  /** V3.8: 用 Optuna fANOVA 算各 search_space 参数对 valid_sharpe 的贡献度 */
+  getParamImportance(
+    id: number,
+  ): Promise<ApiSuccessResponse<ParamImportanceResult>> {
+    return apiClient.get(`/tuning/jobs/${id}/param-importance`).then((r) => r.data)
   },
 }

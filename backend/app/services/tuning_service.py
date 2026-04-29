@@ -1375,6 +1375,91 @@ def get_walk_forward_log(job: TuningJob, tail_bytes: int = 16384) -> str:
 
 
 # ---------------------------------------------------------------------------
+# V3.8 可视化：参数重要性（Optuna fANOVA）
+# ---------------------------------------------------------------------------
+
+
+def get_param_importance(job: TuningJob) -> Dict[str, Any]:
+    """V3.8: 调 Optuna fANOVA 算 search_space 各参数对 valid_sharpe 的贡献度.
+
+    要求：
+        - 该 job 是搜索 job（非衍生验证 job）
+        - 已完成 ≥ 2 个 trial（fANOVA 至少需要 2 个完成的 trial）
+
+    返回:
+        {
+            "evaluator": "fanova",
+            "n_completed_trials": int,
+            "importances": [{"param": str, "importance": float}, ...] 按 importance 降序,
+            "error": str | None  (无法计算时填原因)
+        }
+    """
+    if not job.optuna_study_db_path:
+        return {"evaluator": None, "n_completed_trials": 0, "importances": [],
+                "error": "job 没有 optuna_study_db_path（衍生验证 job 不支持）"}
+    db_path = Path(job.optuna_study_db_path)
+    if not db_path.is_file():
+        return {"evaluator": None, "n_completed_trials": 0, "importances": [],
+                "error": f"optuna study db 不存在: {db_path}"}
+    try:
+        import optuna  # 延迟导入
+        storage = f"sqlite:///{db_path.as_posix()}"
+        try:
+            study = optuna.load_study(study_name=job.optuna_study_name, storage=storage)
+        except KeyError:
+            # study_name 不匹配或 db 中只有 1 个 study：取第一个
+            studies = optuna.get_all_study_names(storage=storage)
+            if not studies:
+                return {"evaluator": None, "n_completed_trials": 0, "importances": [],
+                        "error": "study db 内无任何 study"}
+            study = optuna.load_study(study_name=studies[0], storage=storage)
+
+        completed = [t for t in study.trials if t.state.name == "COMPLETE"]
+        if len(completed) < 2:
+            return {
+                "evaluator": "fanova",
+                "n_completed_trials": len(completed),
+                "importances": [],
+                "error": f"fANOVA 至少需要 2 个完成的 trial，目前只有 {len(completed)} 个",
+            }
+
+        # fANOVA 在某些边界情况下会报错（参数空间退化等），用 try/except 兜底
+        try:
+            evaluator = optuna.importance.FanovaImportanceEvaluator()
+            importances = optuna.importance.get_param_importances(study, evaluator=evaluator)
+            evaluator_name = "fanova"
+        except (ValueError, RuntimeError) as exc:
+            # 退化到 MeanDecreaseImpurity（更宽容的算法）
+            try:
+                evaluator = optuna.importance.MeanDecreaseImpurityImportanceEvaluator()
+                importances = optuna.importance.get_param_importances(study, evaluator=evaluator)
+                evaluator_name = "mean_decrease_impurity"
+            except Exception as exc2:  # noqa: BLE001
+                return {
+                    "evaluator": None,
+                    "n_completed_trials": len(completed),
+                    "importances": [],
+                    "error": f"importance 计算失败: fanova={exc}; mdi={exc2}",
+                }
+
+        # 按 importance 降序
+        sorted_items = sorted(importances.items(), key=lambda kv: kv[1], reverse=True)
+        return {
+            "evaluator": evaluator_name,
+            "n_completed_trials": len(completed),
+            "importances": [{"param": k, "importance": float(v)} for k, v in sorted_items],
+            "error": None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "evaluator": None,
+            "n_completed_trials": 0,
+            "importances": [],
+            "error": f"读 study 异常: {exc}",
+        }
+
+
+# ---------------------------------------------------------------------------
 # V3.3 队列 scheduler async loop（接续）
 # ---------------------------------------------------------------------------
 
