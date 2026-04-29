@@ -10,7 +10,8 @@ const Header: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const isExperiments = location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
+  const isExperiments =
+    location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
   const isHelp = location.pathname.startsWith('/help')
   const isLiveTrading = location.pathname.startsWith('/live-trading')
   const isWorkbench = location.pathname.startsWith('/workbench')
@@ -25,11 +26,23 @@ const Header: React.FC = () => {
     },
   ]
 
+  const navItemStyle = (active: boolean): React.CSSProperties => ({
+    padding: '6px 14px',
+    borderRadius: 6,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: active ? 600 : 400,
+    color: active ? 'var(--ap-brand-primary)' : 'var(--ap-text-muted)',
+    background: active ? 'var(--ap-brand-soft)' : 'transparent',
+    transition: 'all 0.2s',
+    userSelect: 'none',
+  })
+
   return (
     <AntHeader
       style={{
-        background: '#ffffff',
-        borderBottom: '1px solid #e8e8e8',
+        background: 'var(--ap-panel)',
+        borderBottom: '1px solid var(--ap-border)',
         padding: '0 32px',
         display: 'flex',
         alignItems: 'center',
@@ -38,7 +51,7 @@ const Header: React.FC = () => {
         position: 'sticky',
         top: 0,
         zIndex: 100,
-        boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+        boxShadow: '0 1px 4px var(--ap-shadow)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -51,7 +64,7 @@ const Header: React.FC = () => {
               width: 32,
               height: 32,
               borderRadius: 6,
-              background: '#1677ff',
+              background: 'var(--ap-brand-primary)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -64,7 +77,7 @@ const Header: React.FC = () => {
           </div>
           <span
             style={{
-              color: '#1f2937',
+              color: 'var(--ap-text)',
               fontFamily: "'Inter', sans-serif",
               fontSize: 16,
               fontWeight: 600,
@@ -74,89 +87,31 @@ const Header: React.FC = () => {
           </span>
         </div>
 
-        <div style={{
-          display: 'flex',
-          marginLeft: 20,
-          borderLeft: '1px solid #e8e8e8',
-          paddingLeft: 16,
-          gap: 4,
-        }}>
-          <div
-            onClick={() => navigate('/')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: isTrainingRecords ? 600 : 400,
-              color: isTrainingRecords ? '#1677ff' : '#6b7280',
-              background: isTrainingRecords ? '#e8f4fd' : 'transparent',
-              transition: 'all 0.2s',
-              userSelect: 'none',
-            }}
-          >
+        <div
+          style={{
+            display: 'flex',
+            marginLeft: 20,
+            borderLeft: '1px solid var(--ap-border)',
+            paddingLeft: 16,
+            gap: 4,
+          }}
+        >
+          <div onClick={() => navigate('/')} style={navItemStyle(isTrainingRecords)}>
             训练记录
           </div>
-          <div
-            onClick={() => navigate('/workbench')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: isWorkbench ? 600 : 400,
-              color: isWorkbench ? '#1677ff' : '#6b7280',
-              background: isWorkbench ? '#e8f4fd' : 'transparent',
-              transition: 'all 0.2s',
-              userSelect: 'none',
-            }}
-          >
+          <div onClick={() => navigate('/workbench')} style={navItemStyle(isWorkbench)}>
             训练工作台
           </div>
-          <div
-            onClick={() => navigate('/experiments')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: isExperiments ? 600 : 400,
-              color: isExperiments ? '#1677ff' : '#6b7280',
-              background: isExperiments ? '#e8f4fd' : 'transparent',
-              transition: 'all 0.2s',
-              userSelect: 'none',
-            }}
-          >
+          <div onClick={() => navigate('/experiments')} style={navItemStyle(isExperiments)}>
             实验浏览
           </div>
-          <div
-            onClick={() => navigate('/live-trading')}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: isLiveTrading ? 600 : 400,
-              color: isLiveTrading ? '#1677ff' : '#6b7280',
-              background: isLiveTrading ? '#e8f4fd' : 'transparent',
-              transition: 'all 0.2s',
-              userSelect: 'none',
-            }}
-          >
+          <div onClick={() => navigate('/live-trading')} style={navItemStyle(isLiveTrading)}>
             实盘交易
           </div>
           <Dropdown menu={{ items: helpMenuItems }} trigger={['click']}>
             <div
               style={{
-                padding: '6px 14px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: isHelp ? 600 : 400,
-                color: isHelp ? '#1677ff' : '#6b7280',
-                background: isHelp ? '#e8f4fd' : 'transparent',
-                transition: 'all 0.2s',
-                userSelect: 'none',
+                ...navItemStyle(isHelp),
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
@@ -171,12 +126,15 @@ const Header: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: '#9ca3af' }}>
-          MLFlow Visualizer
-        </span>
-        <div style={{
-          width: 8, height: 8, borderRadius: '50%', background: '#52c41a',
-        }} />
+        <span style={{ fontSize: 11, color: 'var(--ap-text-dim)' }}>MLFlow Visualizer</span>
+        <div
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: 'var(--ap-success)',
+          }}
+        />
       </div>
     </AntHeader>
   )

@@ -7,9 +7,16 @@ const { Content } = Layout
 
 const AppLayout: React.FC = () => {
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
+    <Layout style={{ minHeight: '100vh', background: 'var(--ap-bg)' }}>
       <Header />
-      <Content style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+      <Content
+        style={{
+          padding: 'var(--ap-content-py) var(--ap-content-px)',
+          maxWidth: 'var(--ap-content-max-w)',
+          margin: '0 auto',
+          width: '100%',
+        }}
+      >
         <Outlet />
       </Content>
     </Layout>

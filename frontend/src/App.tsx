@@ -1,8 +1,10 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ConfigProvider, App as AntApp, theme as antTheme } from 'antd'
+import { ConfigProvider, App as AntApp } from 'antd'
 import AppLayout from '@/components/layout/AppLayout'
+import { ThemeProvider, useThemeStore } from '@/stores/themeStore'
+import { themeConfigOf } from '@/theme/antdTheme'
 import HomePage from '@/pages/HomePage'
 import ExperimentDetailPage from '@/pages/ExperimentDetailPage'
 import ReportPage from '@/pages/ReportPage'
@@ -26,38 +28,20 @@ const queryClient = new QueryClient({
   },
 })
 
-const lightTheme = {
-  algorithm: antTheme.defaultAlgorithm,
-  token: {
-    colorPrimary: '#1677ff',
-    colorBgBase: '#f5f7fa',
-    colorBgContainer: '#ffffff',
-    colorBgElevated: '#ffffff',
-    colorBorder: '#e5e7eb',
-    colorText: '#1f2937',
-    colorTextSecondary: '#6b7280',
-    borderRadius: 8,
-    fontFamily: "'Inter', -apple-system, 'Segoe UI', sans-serif",
-    fontSize: 14,
-  },
-  components: {
-    Table: {
-      headerBg: '#fafbfc',
-      rowHoverBg: '#f0f5ff',
-      borderColor: '#f0f0f0',
-    },
-    Card: {
-      colorBgContainer: '#ffffff',
-      colorBorderSecondary: '#e8e8e8',
-    },
-  },
+const ThemedAntdShell = ({ children }: { children: React.ReactNode }) => {
+  const { mode } = useThemeStore()
+  return (
+    <ConfigProvider theme={themeConfigOf(mode)}>
+      <AntApp>{children}</AntApp>
+    </ConfigProvider>
+  )
 }
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider theme={lightTheme}>
-        <AntApp>
+      <ThemeProvider>
+        <ThemedAntdShell>
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<AppLayout />}>
@@ -86,8 +70,8 @@ function App() {
               </Route>
             </Routes>
           </BrowserRouter>
-        </AntApp>
-      </ConfigProvider>
+        </ThemedAntdShell>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }

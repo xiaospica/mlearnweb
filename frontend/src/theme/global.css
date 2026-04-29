@@ -1,0 +1,187 @@
+/**
+ * AlphaPilot 全局 CSS 变量 + 响应式 padding 阶梯
+ *
+ * 注意：CSS 变量数值必须与 src/theme/tokens.ts 保持一致。
+ * 修改时两边同步；后续可加 vitest snapshot 检查。
+ */
+
+/* ============================================================
+ * 断点变量（仅供文档参照，CSS @media 中无法直接使用 var() 替换断点数）
+ * ============================================================ */
+:root {
+  --bp-xs: 0px;
+  --bp-sm: 576px;
+  --bp-md: 768px;
+  --bp-lg: 992px;
+  --bp-xl: 1200px;
+  --bp-xxl: 1600px;
+
+  /* 间距阶梯 */
+  --ap-space-0: 0px;
+  --ap-space-1: 4px;
+  --ap-space-2: 8px;
+  --ap-space-3: 12px;
+  --ap-space-4: 16px;
+  --ap-space-5: 24px;
+  --ap-space-6: 32px;
+  --ap-space-7: 48px;
+  --ap-space-8: 64px;
+
+  /* 布局区域 */
+  --ap-header-h: 56px;
+  --ap-sidebar-w: 224px;
+  --ap-sidebar-collapsed-w: 56px;
+  --ap-drawer-w: 280px;
+
+  /* 圆角 */
+  --ap-radius-sm: 6px;
+  --ap-radius-base: 8px;
+  --ap-radius-lg: 12px;
+  --ap-radius-xl: 16px;
+
+  /* z-index */
+  --ap-z-sidebar: 900;
+  --ap-z-header: 1000;
+  --ap-z-drawer: 1100;
+  --ap-z-modal: 1200;
+  --ap-z-message: 1300;
+  --ap-z-popover: 1400;
+  --ap-z-tooltip: 1500;
+
+  /* 字体栈 */
+  --ap-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ap-font-mono: 'JetBrains Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+
+  /* 内容容器响应式（默认 = xs） */
+  --ap-content-px: 12px;
+  --ap-content-py: 12px;
+  --ap-content-max-w: 100%;
+}
+
+/* ============================================================
+ * 深色主题（默认）— 中性纯黑色板，对位 QuantDinger 截图
+ * ============================================================ */
+:root,
+:root[data-theme='dark'] {
+  --ap-bg: #0f0f0f;
+  --ap-panel: #161616;
+  --ap-panel-elevated: #1f1f1f;
+  --ap-panel-muted: #1a1a1a;
+  --ap-border: #262626;
+  --ap-border-muted: #1f1f1f;
+  --ap-text: #f5f5f5;
+  --ap-text-muted: #999999;
+  --ap-text-dim: #666666;
+  --ap-brand-primary: #3b82f6;
+  --ap-brand-primary-hover: #60a5fa;
+  --ap-brand-gradient-start: #6366f1;
+  --ap-brand-gradient-end: #8b5cf6;
+  --ap-success: #22c55e;
+  --ap-warning: #f59e0b;
+  --ap-danger: #ef4444;
+  --ap-info: #3b82f6;
+  --ap-market-up: #ef4444;
+  --ap-market-down: #22c55e;
+  --ap-accent: #a855f7;
+  --ap-shadow: rgba(0, 0, 0, 0.5);
+  --ap-shadow-lg: rgba(0, 0, 0, 0.65);
+  /** 品牌色软底（选中态 / 标签底色），半透明蓝 */
+  --ap-brand-soft: rgba(59, 130, 246, 0.16);
+  color-scheme: dark;
+}
+
+/* ============================================================
+ * 浅色主题
+ * ============================================================ */
+:root[data-theme='light'] {
+  --ap-bg: #f5f7fa;
+  --ap-panel: #ffffff;
+  --ap-panel-elevated: #ffffff;
+  --ap-panel-muted: #f0f2f7;
+  --ap-border: #e5e7eb;
+  --ap-border-muted: #eef0f4;
+  --ap-text: #1f2937;
+  --ap-text-muted: #6b7280;
+  --ap-text-dim: #9ca3af;
+  --ap-brand-primary: #1677ff;
+  --ap-brand-primary-hover: #3f8efe;
+  --ap-brand-gradient-start: #1677ff;
+  --ap-brand-gradient-end: #7c3aed;
+  --ap-success: #16a34a;
+  --ap-warning: #d97706;
+  --ap-danger: #dc2626;
+  --ap-info: #2563eb;
+  --ap-market-up: #dc2626;
+  --ap-market-down: #16a34a;
+  --ap-accent: #7c3aed;
+  --ap-shadow: rgba(15, 23, 42, 0.08);
+  --ap-shadow-lg: rgba(15, 23, 42, 0.16);
+  --ap-brand-soft: #e8f4fd;
+  color-scheme: light;
+}
+
+/* ============================================================
+ * 内容容器响应式 padding/maxWidth 阶梯
+ * 由 PageContainer / AppLayout 通过 var() 读取
+ * ============================================================ */
+@media (min-width: 576px) {
+  :root {
+    --ap-content-px: 16px;
+    --ap-content-py: 16px;
+  }
+}
+@media (min-width: 992px) {
+  :root {
+    --ap-content-px: 24px;
+    --ap-content-py: 20px;
+  }
+}
+@media (min-width: 1200px) {
+  :root {
+    --ap-content-px: 32px;
+    --ap-content-py: 24px;
+    --ap-content-max-w: 1400px;
+  }
+}
+@media (min-width: 1600px) {
+  :root {
+    --ap-content-px: 40px;
+    --ap-content-py: 24px;
+    --ap-content-max-w: 1600px;
+  }
+}
+
+/* ============================================================
+ * 基础重置
+ * ============================================================ */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ap-bg);
+  color: var(--ap-text);
+  font-family: var(--ap-font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 滚动条（暗色友好） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ap-border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ap-text-dim);
+}
