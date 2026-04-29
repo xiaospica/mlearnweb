@@ -29,6 +29,7 @@ import {
 
 import { tuningService } from '@/services/tuningService'
 import JsonCodeEditor from '@/components/workbench/JsonCodeEditor'
+import SearchSpaceForm from '@/components/workbench/SearchSpaceForm'
 import type {
   TuningJobCreateRequest,
   TuningConfigSnapshot,
@@ -230,44 +231,72 @@ const WorkbenchCreatePage: React.FC = () => {
   const [seed, setSeed] = useState(42)
 
   // 5 类配置（config_snapshot 内容）
+  // V3.9: btStrategy 不再独立 state — 是 recordConfig 内 PortAnaRecord 的派生视图
+  // (Step 3 表单读 → getBtStrategy(recordConfig)，写 → setRecordConfigBtStrategy)
+  // 这样 Step 3 与 Step 4 record_config Tab 共享 single source of truth，不会脱
+  // 同步导致 silent bug
   const [taskConfig, setTaskConfig] = useState<Record<string, unknown>>(DEFAULT_TASK_CONFIG)
   const [customSegments, setCustomSegments] =
     useState<CustomSegment[]>(DEFAULT_SEGMENTS_5P)
   const [gbdtModel, setGbdtModel] = useState<GbdtModelConfig>(DEFAULT_GBDT)
-  const [btStrategy, setBtStrategy] = useState<BtStrategy>(DEFAULT_BT_STRATEGY)
   const [recordConfig, setRecordConfig] = useState<Array<Record<string, unknown>>>(
     DEFAULT_RECORD_CONFIG,
   )
   const [searchSpace, setSearchSpace] = useState<SearchSpace>(DEFAULT_SEARCH_SPACE)
 
-  // bt_strategy 不再独立发送：提交时把 4 字段 merge 到 record_config 内
-  // PortAnaRecord/MultiSegmentPortAnaRecord 的 strategy.kwargs（避免与
-  // record_config 重复 + 老的 --bt-strategy-json 链路冗余）
-  const mergedRecordConfig = useMemo(() => {
-    const cloned = JSON.parse(JSON.stringify(recordConfig)) as Array<Record<string, unknown>>
-    for (const rec of cloned) {
+  /** 从 recordConfig 提取 PortAnaRecord/MultiSegmentPortAnaRecord 的 strategy.kwargs 4 字段 */
+  const btStrategy = useMemo<BtStrategy>(() => {
+    const fallback: BtStrategy = { ...DEFAULT_BT_STRATEGY }
+    for (const rec of recordConfig) {
       const klass = rec?.class
       if (klass !== 'PortAnaRecord' && klass !== 'MultiSegmentPortAnaRecord') continue
       const kwargs = rec.kwargs as Record<string, unknown> | undefined
       const cfg = kwargs?.config as Record<string, unknown> | undefined
       const strat = cfg?.strategy as Record<string, unknown> | undefined
-      const stratKwargs = strat?.kwargs as Record<string, unknown> | undefined
+      const stratKwargs = strat?.kwargs as Partial<BtStrategy> | undefined
       if (stratKwargs) {
-        Object.assign(stratKwargs, btStrategy)
+        return {
+          topk: typeof stratKwargs.topk === 'number' ? stratKwargs.topk : fallback.topk,
+          n_drop: typeof stratKwargs.n_drop === 'number' ? stratKwargs.n_drop : fallback.n_drop,
+          only_tradable:
+            typeof stratKwargs.only_tradable === 'boolean'
+              ? stratKwargs.only_tradable
+              : fallback.only_tradable,
+          signal: typeof stratKwargs.signal === 'string' ? stratKwargs.signal : fallback.signal,
+        }
       }
     }
-    return cloned
-  }, [recordConfig, btStrategy])
+    return fallback
+  }, [recordConfig])
+
+  /** Step 3 表单字段写入：把 partial 字段 merge 到所有 PortAnaRecord 的 strategy.kwargs */
+  const updateBtStrategyField = (partial: Partial<BtStrategy>) => {
+    setRecordConfig((prev) => {
+      const cloned = JSON.parse(JSON.stringify(prev)) as Array<Record<string, unknown>>
+      for (const rec of cloned) {
+        const klass = rec?.class
+        if (klass !== 'PortAnaRecord' && klass !== 'MultiSegmentPortAnaRecord') continue
+        const kwargs = rec.kwargs as Record<string, unknown> | undefined
+        const cfg = kwargs?.config as Record<string, unknown> | undefined
+        const strat = cfg?.strategy as Record<string, unknown> | undefined
+        const stratKwargs = strat?.kwargs as Record<string, unknown> | undefined
+        if (stratKwargs) {
+          Object.assign(stratKwargs, partial)
+        }
+      }
+      return cloned
+    })
+  }
 
   const configSnapshot: TuningConfigSnapshot = useMemo(
     () => ({
       task_config: taskConfig,
       custom_segments: searchMode === 'walk_forward_5p' ? customSegments : undefined,
       gbdt_model: gbdtModel,
-      record_config: mergedRecordConfig,
+      record_config: recordConfig,
       search_space: searchSpace,
     }),
-    [taskConfig, customSegments, gbdtModel, mergedRecordConfig, searchSpace, searchMode],
+    [taskConfig, customSegments, gbdtModel, recordConfig, searchSpace, searchMode],
   )
 
   // ---------------- 提交 ----------------
@@ -638,26 +667,48 @@ const WorkbenchCreatePage: React.FC = () => {
                     key: 'search_space',
                     label: 'search_space（Optuna 搜索范围）',
                     children: (
-                      <div>
-                        <Alert
-                          type="info"
-                          showIcon
-                          style={{ marginBottom: 8 }}
-                          message="搜索空间格式"
-                          description={
-                            <span style={{ fontSize: 12 }}>
-                              每个参数对象支持 3 种类型：
-                              <Text code>{'{"type":"float","low":0.005,"high":0.1,"log":true}'}</Text> /
-                              <Text code>{'{"type":"int","low":31,"high":255}'}</Text> /
-                              <Text code>{'{"type":"categorical","choices":["mse","huber"]}'}</Text>
-                            </span>
-                          }
-                        />
-                        <JsonCodeEditor
-                          value={searchSpace}
-                          onChange={(v) => setSearchSpace(v as SearchSpace)}
-                        />
-                      </div>
+                      <Tabs
+                        size="small"
+                        items={[
+                          {
+                            key: 'form',
+                            label: '表单模式',
+                            children: (
+                              <SearchSpaceForm
+                                value={searchSpace}
+                                onChange={setSearchSpace}
+                                knownGbdtParams={Object.keys(gbdtModel.kwargs ?? {})}
+                              />
+                            ),
+                          },
+                          {
+                            key: 'json',
+                            label: 'JSON 模式',
+                            children: (
+                              <div>
+                                <Alert
+                                  type="info"
+                                  showIcon
+                                  style={{ marginBottom: 8 }}
+                                  message="搜索空间格式"
+                                  description={
+                                    <span style={{ fontSize: 12 }}>
+                                      每个参数对象支持 3 种类型：
+                                      <Text code>{'{"type":"float","low":0.005,"high":0.1,"log":true}'}</Text> /
+                                      <Text code>{'{"type":"int","low":31,"high":255}'}</Text> /
+                                      <Text code>{'{"type":"categorical","choices":["mse","huber"]}'}</Text>
+                                    </span>
+                                  }
+                                />
+                                <JsonCodeEditor
+                                  value={searchSpace}
+                                  onChange={(v) => setSearchSpace(v as SearchSpace)}
+                                />
+                              </div>
+                            ),
+                          },
+                        ]}
+                      />
                     ),
                   },
                 ]}
@@ -673,7 +724,7 @@ const WorkbenchCreatePage: React.FC = () => {
                   <Form.Item label="topk（持仓股数）" tooltip="每日持仓 TopK 个预测最高的">
                     <InputNumber
                       value={btStrategy.topk}
-                      onChange={(v) => setBtStrategy({ ...btStrategy, topk: v ?? 7 })}
+                      onChange={(v) => updateBtStrategyField({ topk: v ?? 7 })}
                       min={1}
                       max={100}
                       style={{ width: '100%' }}
@@ -684,7 +735,7 @@ const WorkbenchCreatePage: React.FC = () => {
                   <Form.Item label="n_drop（每日换手）" tooltip="每日换出 N 只">
                     <InputNumber
                       value={btStrategy.n_drop}
-                      onChange={(v) => setBtStrategy({ ...btStrategy, n_drop: v ?? 1 })}
+                      onChange={(v) => updateBtStrategyField({ n_drop: v ?? 1 })}
                       min={0}
                       max={50}
                       style={{ width: '100%' }}
@@ -695,9 +746,7 @@ const WorkbenchCreatePage: React.FC = () => {
                   <Form.Item label="only_tradable（仅可交易）">
                     <Switch
                       checked={btStrategy.only_tradable}
-                      onChange={(v) =>
-                        setBtStrategy({ ...btStrategy, only_tradable: v })
-                      }
+                      onChange={(v) => updateBtStrategyField({ only_tradable: v })}
                     />
                   </Form.Item>
                 </Col>
@@ -705,9 +754,7 @@ const WorkbenchCreatePage: React.FC = () => {
                   <Form.Item label="signal（信号字段）">
                     <Input
                       value={btStrategy.signal}
-                      onChange={(e) =>
-                        setBtStrategy({ ...btStrategy, signal: e.target.value })
-                      }
+                      onChange={(e) => updateBtStrategyField({ signal: e.target.value })}
                     />
                   </Form.Item>
                 </Col>

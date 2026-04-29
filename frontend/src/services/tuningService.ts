@@ -200,4 +200,18 @@ export const tuningService = {
   ): Promise<ApiSuccessResponse<ParamImportanceResult>> {
     return apiClient.get(`/tuning/jobs/${id}/param-importance`).then((r) => r.data)
   },
+
+  /** V3.9: 只读获取部署 manifest（跳转部署页时预填字段用） */
+  getDeploymentManifest(
+    id: number,
+  ): Promise<ApiSuccessResponse<{
+    schema_version: number
+    mlflow_run_id: string
+    mlflow_experiment_id: string
+    bundle_dir: string
+    tuning_job_id: number
+    training_record_id: number
+  }>> {
+    return apiClient.get(`/tuning/jobs/${id}/deployment-manifest`).then((r) => r.data)
+  },
 }

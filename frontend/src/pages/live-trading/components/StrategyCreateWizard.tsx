@@ -25,6 +25,16 @@ interface Props {
   open: boolean
   onClose: () => void
   nodes: NodeStatus[]
+  /** V3.9: 跨页跳转预填（如从工作台 DeployModal 跳转过来） */
+  initialValues?: {
+    nodeId?: string
+    engine?: string
+    className?: string
+    strategy_name?: string
+    vt_symbol?: string
+    /** 额外字段直接合并到 form 默认参数（如 mlflow_run_id / bundle_dir） */
+    settingOverrides?: Record<string, unknown>
+  }
 }
 
 /**
@@ -55,7 +65,7 @@ function paramFormItem(key: string, defaultValue: unknown): React.ReactNode {
   )
 }
 
-const StrategyCreateWizard: React.FC<Props> = ({ open, onClose, nodes }) => {
+const StrategyCreateWizard: React.FC<Props> = ({ open, onClose, nodes, initialValues }) => {
   const { message } = App.useApp()
   const { guardWrite } = useOpsPassword()
   const queryClient = useQueryClient()
@@ -85,6 +95,52 @@ const StrategyCreateWizard: React.FC<Props> = ({ open, onClose, nodes }) => {
       form.resetFields()
     }
   }, [open, form])
+
+  // V3.9: initialValues 预填 + 自动推进步骤（链式异步加载 engines/classes/params）
+  useEffect(() => {
+    if (!open || !initialValues) return
+    let cancelled = false
+
+    const autoAdvance = async () => {
+      try {
+        if (initialValues.nodeId) {
+          if (cancelled) return
+          setNodeId(initialValues.nodeId)
+          await loadEngines(initialValues.nodeId)
+          if (cancelled) return
+
+          if (initialValues.engine) {
+            setEngine(initialValues.engine)
+            await loadClasses(initialValues.nodeId, initialValues.engine)
+            if (cancelled) return
+
+            if (initialValues.className) {
+              setClassName(initialValues.className)
+              await loadParams(initialValues.nodeId, initialValues.engine, initialValues.className)
+              if (cancelled) return
+              // 预填 strategy_name / vt_symbol + setting 覆盖
+              form.setFieldsValue({
+                strategy_name: initialValues.strategy_name ?? '',
+                vt_symbol: initialValues.vt_symbol ?? '',
+                ...(initialValues.settingOverrides ?? {}),
+              })
+              setStep(3)
+              return
+            }
+            setStep(2)
+            return
+          }
+          setStep(1)
+          return
+        }
+      } catch {
+        // 加载失败用户从 step 0 手动操作即可
+      }
+    }
+    autoAdvance()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialValues])
 
   const loadEngines = async (nid: string) => {
     setLoading(true)

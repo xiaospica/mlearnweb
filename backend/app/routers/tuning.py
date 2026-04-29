@@ -562,6 +562,20 @@ def get_param_importance(job_id: int, db: Session = Depends(get_db_session)):
     return ApiResponse(success=True, data=tuning_service.get_param_importance(job))
 
 
+@router.get("/jobs/{job_id}/deployment-manifest", response_model=ApiResponse)
+def get_deployment_manifest(job_id: int, db: Session = Depends(get_db_session)):
+    """V3.9: 只读返回部署 manifest（mlflow_run_id / bundle_dir / experiment_id 等）.
+
+    供前端"跳转部署页"流程预填字段（不调用 vnpy，不创建实例）。
+    """
+    job = _get_job_or_404(db, job_id)
+    try:
+        manifest = tuning_service._build_deployment_manifest(db, job)
+        return ApiResponse(success=True, data=manifest)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Finalize / 部署
 # ---------------------------------------------------------------------------

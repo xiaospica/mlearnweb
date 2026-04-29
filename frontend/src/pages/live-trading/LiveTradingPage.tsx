@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Alert,
@@ -16,7 +16,8 @@ import {
   Typography,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { tuningService } from '@/services/tuningService'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -199,8 +200,55 @@ type ModeFilter = 'all' | 'live' | 'sim'
 
 const LiveTradingPage: React.FC = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardInitialValues, setWizardInitialValues] = useState<{
+    nodeId?: string
+    engine?: string
+    className?: string
+    strategy_name?: string
+    vt_symbol?: string
+    settingOverrides?: Record<string, unknown>
+  } | undefined>(undefined)
   const [modeFilter, setModeFilter] = useState<ModeFilter>('all')
+
+  // V3.9: 工作台 DeployModal 跳转过来时 location.state 携带 prefillFromTuningJob
+  // 拉 manifest → 预填 wizard → 自动打开
+  useEffect(() => {
+    const state = location.state as
+      | { prefillFromTuningJob?: number; prefillNodeId?: string; prefillEngine?: string; prefillStrategyName?: string; prefillVtSymbol?: string }
+      | null
+    if (!state?.prefillFromTuningJob) return
+    const jobId = state.prefillFromTuningJob
+    tuningService
+      .getDeploymentManifest(jobId)
+      .then((resp) => {
+        const m = resp.data
+        setWizardInitialValues({
+          nodeId: state.prefillNodeId,
+          engine: state.prefillEngine,
+          className: undefined,  // 让用户自己选（class 跟 engine 强相关）
+          strategy_name: state.prefillStrategyName,
+          vt_symbol: state.prefillVtSymbol,
+          settingOverrides: {
+            mlflow_run_id: m.mlflow_run_id,
+            bundle_dir: m.bundle_dir,
+            tuning_job_id: m.tuning_job_id,
+            training_record_id: m.training_record_id,
+          },
+        })
+        setWizardOpen(true)
+      })
+      .catch(() => {
+        // 失败让用户手动新建
+        setWizardOpen(true)
+      })
+      .finally(() => {
+        // 清掉 state 防 reload 重复触发
+        navigate(location.pathname, { replace: true, state: null })
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const nodesQuery = useQuery({
     queryKey: ['live-nodes'],
@@ -328,8 +376,12 @@ const LiveTradingPage: React.FC = () => {
 
       <StrategyCreateWizard
         open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
+        onClose={() => {
+          setWizardOpen(false)
+          setWizardInitialValues(undefined)
+        }}
         nodes={nodes}
+        initialValues={wizardInitialValues}
       />
     </div>
   )

@@ -368,22 +368,25 @@ const WorkbenchMonitorPage: React.FC = () => {
     },
   })
 
-  const deployMutation = useMutation({
-    mutationFn: (body: {
-      node_id: string
-      engine: string
-      class_name: string
-      strategy_name: string
-      vt_symbol?: string
-    }) => tuningService.deploy(id, body),
-    onSuccess: () => {
-      message.success('已转调 vnpy create_strategy')
-      setDeployModalOpen(false)
-    },
-    onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
-      message.error(err.response?.data?.detail ?? err.message)
-    },
-  })
+  // V3.9: 部署改为跳转 LiveTradingStrategyCreate 流程（不直接调 vnpy API），
+  // 让用户在部署页 wizard 里看完整 manifest + 走现有部署页的安全检查 / 日志记录
+  const handleNavigateToDeploy = (values: {
+    node_id: string
+    engine: string
+    strategy_name: string
+    vt_symbol?: string
+  }) => {
+    navigate('/live-trading', {
+      state: {
+        prefillFromTuningJob: id,
+        prefillNodeId: values.node_id,
+        prefillEngine: values.engine,
+        prefillStrategyName: values.strategy_name,
+        prefillVtSymbol: values.vt_symbol,
+      },
+    })
+    setDeployModalOpen(false)
+  }
 
   // V3.7: walk-forward 结果（仅当本 job 是衍生验证 job 时才显示）
   const isVerificationJob = job?.parent_job_id != null
@@ -907,8 +910,8 @@ const WorkbenchMonitorPage: React.FC = () => {
         open={deployModalOpen}
         onClose={() => setDeployModalOpen(false)}
         finalizedRecordId={job.finalized_training_record_id ?? null}
-        loading={deployMutation.isPending}
-        onSubmit={(values) => deployMutation.mutate(values)}
+        loading={false}
+        onSubmit={handleNavigateToDeploy}
       />
 
       <WalkForwardModal
@@ -1006,7 +1009,6 @@ const DeployModal: React.FC<{
   onSubmit: (values: {
     node_id: string
     engine: string
-    class_name: string
     strategy_name: string
     vt_symbol?: string
   }) => void
@@ -1015,54 +1017,72 @@ const DeployModal: React.FC<{
 
   return (
     <Modal
-      title="部署到 vnpy 实盘"
+      title="前往部署页 — 实盘部署"
       open={open}
       onCancel={onClose}
       onOk={() => {
         form.validateFields().then((values) => onSubmit(values))
       }}
-      okText="部署"
+      okText="跳转部署页"
       cancelText="取消"
       confirmLoading={loading}
       width={620}
     >
       <Alert
-        type="warning"
+        type="info"
         showIcon
-        message="实盘部署不可逆，请谨慎"
+        message="V3.9: 跳转现有部署页流程（不再直接调 vnpy API）"
         description={
-          finalizedRecordId
-            ? `将基于 finalize 产物 (training_record #${finalizedRecordId}) 的 mlflow run + bundle_dir 在 vnpy 节点创建策略实例。`
-            : 'job 尚未 finalize；请先点 Finalize 按钮跑正式训练'
+          finalizedRecordId ? (
+            <>
+              将基于 finalize 产物（training_record #{finalizedRecordId}）跳转到{' '}
+              <Text code>/live-trading</Text> 部署页面，自动预填{' '}
+              <Text code>mlflow_run_id</Text> 与 <Text code>bundle_dir</Text>。在部署页
+              wizard 里选择策略类、确认参数、走运维口令校验后提交。
+            </>
+          ) : (
+            'job 尚未 finalize；请先点 Finalize 按钮关联训练记录'
+          )
         }
         style={{ marginBottom: 16 }}
       />
       <Form form={form} layout="vertical">
         <Row gutter={12}>
           <Col span={12}>
-            <Form.Item label="node_id" name="node_id" rules={[{ required: true }]}
-                       tooltip="vnpy 节点 ID（如 'local'，配置在 vnpy_nodes.yaml）">
+            <Form.Item
+              label="node_id"
+              name="node_id"
+              rules={[{ required: true }]}
+              tooltip="vnpy 节点 ID（如 'local'，配置在 vnpy_nodes.yaml）"
+            >
               <Input placeholder="local" />
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item label="engine" name="engine" rules={[{ required: true }]}
-                       tooltip="vnpy engine 名（如 'cta'）">
+            <Form.Item
+              label="engine"
+              name="engine"
+              rules={[{ required: true }]}
+              tooltip="vnpy engine 名（如 'cta'）"
+            >
               <Input placeholder="cta" />
             </Form.Item>
           </Col>
         </Row>
-        <Form.Item label="class_name" name="class_name" rules={[{ required: true }]}
-                   tooltip="vnpy 策略类名（与 vnpy_ml_strategy 中定义一致）">
-          <Input placeholder="MLPredictStrategy" />
-        </Form.Item>
-        <Form.Item label="strategy_name" name="strategy_name" rules={[{ required: true }]}
-                   tooltip="vnpy 策略实例名（唯一标识）">
+        <Form.Item
+          label="strategy_name"
+          name="strategy_name"
+          rules={[{ required: true }]}
+          tooltip="vnpy 策略实例名（唯一标识）"
+        >
           <Input placeholder="ml_csi300_v1" />
         </Form.Item>
         <Form.Item label="vt_symbol（可选）" name="vt_symbol">
           <Input placeholder="例如 000001.SZSE" />
         </Form.Item>
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          ⓘ class_name（策略类）在部署页 wizard 里选择 — 不同 engine 暴露不同策略类
+        </Text>
       </Form>
     </Modal>
   )
