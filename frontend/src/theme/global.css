@@ -170,6 +170,35 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ============================================================
+ * Sidebar 选中态左缘 accent bar（QuantDinger 风格）
+ * 仅作用于 .ap-sidebar 内的 AntD Menu，避免影响其它 Menu 实例
+ * ============================================================ */
+.ap-sidebar .ant-menu-item,
+.ap-sidebar .ant-menu-submenu-title {
+  position: relative;
+}
+.ap-sidebar .ant-menu-item-selected::before,
+.ap-sidebar .ant-menu-submenu-selected > .ant-menu-submenu-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--ap-brand-primary);
+  border-radius: 0 3px 3px 0;
+}
+
+/* Sidebar logo 区域 hover 反馈 */
+.ap-sidebar-logo {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.ap-sidebar-logo:hover {
+  opacity: 0.85;
+}
+
 /* 滚动条（暗色友好） */
 ::-webkit-scrollbar {
   width: 10px;

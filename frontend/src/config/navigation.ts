@@ -19,6 +19,9 @@ import {
   DatabaseOutlined,
   ThunderboltOutlined,
   BookOutlined,
+  AppstoreOutlined,
+  FileTextOutlined,
+  ProfileOutlined,
 } from '@ant-design/icons'
 
 export type NavBadgeKey = 'liveAlerts' | 'runningJobs'
@@ -85,14 +88,30 @@ export const PRIMARY_NAV: NavItem[] = [
     path: '/help',
     icon: BookOutlined,
     match: (p) => p.startsWith('/help'),
-    // F4a: 仅保留 legacy「因子文档 → /help」单项（HelpLayout 自带 4 项子导航）
-    // F4b: Sidebar 接入后再展开为 4 项（categories/alpha158/alpha101/alpha191）
     children: [
       {
-        key: 'help-factor-docs',
-        label: '因子文档',
-        path: '/help',
-        icon: BookOutlined,
+        key: 'help-categories',
+        label: '因子分类',
+        path: '/help/categories',
+        icon: AppstoreOutlined,
+      },
+      {
+        key: 'help-alpha158',
+        label: 'Alpha158',
+        path: '/help/alpha158',
+        icon: DatabaseOutlined,
+      },
+      {
+        key: 'help-alpha101',
+        label: 'Alpha101',
+        path: '/help/alpha101',
+        icon: FileTextOutlined,
+      },
+      {
+        key: 'help-alpha191',
+        label: 'Alpha191',
+        path: '/help/alpha191',
+        icon: ProfileOutlined,
       },
     ],
   },
@@ -109,3 +128,39 @@ export const findActiveNavKey = (pathname: string): string | null => {
   }
   return null
 }
+
+/**
+ * 计算当前 pathname 激活的叶子节点 key（优先匹配二级，兜底返回一级）。
+ * 用于 Sidebar/Drawer 的 Menu 高亮。
+ */
+export const findActiveLeafKey = (pathname: string): string | null => {
+  // 先匹配二级（更具体）
+  for (const item of PRIMARY_NAV) {
+    if (!item.children) continue
+    for (const c of item.children) {
+      const matched = c.match ? c.match(pathname) : defaultPathMatch(c, pathname)
+      if (matched) return c.key
+    }
+  }
+  // 再匹配一级
+  return findActiveNavKey(pathname)
+}
+
+/** 给定一个 leaf key，找它所属的一级菜单 key（用于决定 Menu 默认展开哪一组） */
+export const findParentKeyOf = (leafKey: string): string | null => {
+  for (const item of PRIMARY_NAV) {
+    if (item.key === leafKey) return null // 自己就是一级
+    if (item.children?.some((c) => c.key === leafKey)) return item.key
+  }
+  return null
+}
+
+/** key → path 的扁平映射，给 Menu onClick 查表 */
+export const NAV_PATH_BY_KEY: Record<string, string> = (() => {
+  const map: Record<string, string> = {}
+  for (const item of PRIMARY_NAV) {
+    map[item.key] = item.path
+    for (const c of item.children ?? []) map[c.key] = c.path
+  }
+  return map
+})()
