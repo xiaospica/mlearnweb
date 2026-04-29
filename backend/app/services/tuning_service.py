@@ -1079,6 +1079,9 @@ def create_verification_job(
     (derived_workdir / "overrides").mkdir(exist_ok=True)
     (derived_workdir / "run_index").mkdir(exist_ok=True)
 
+    # 同时预填 tuning_trials 表（V3.10）：让前端 Trials Tab 立即显示选中的
+    # trial 信息（params 可见对比），cmd_walk_forward 跑完后 sync_trials_from_csv
+    # 会按 trial_number 找到这些行 UPDATE 进 valid/test_sharpe。
     for tnum in trial_numbers:
         src = source_overrides / f"trial_{tnum:04d}.json"
         if not src.is_file():
@@ -1087,8 +1090,47 @@ def create_verification_job(
                 f"无法获取 trial {tnum} 的 GBDT 超参"
             )
         shutil.copy(src, derived_workdir / "overrides" / src.name)
+        # 读 params 预填 tuning_trials
+        try:
+            params_full = json.loads(src.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            params_full = {}
+        # 仅保留 SEARCH_PARAM_KEYS 的字段（避免 num_threads / seed 噪声进入展示）
+        SEARCH_PARAM_KEYS = (
+            "learning_rate", "num_leaves", "max_depth", "min_child_samples",
+            "lambda_l1", "lambda_l2", "colsample_bytree", "subsample",
+            "subsample_freq", "early_stopping_rounds",
+        )
+        clean_params = {k: params_full.get(k) for k in SEARCH_PARAM_KEYS if k in params_full}
+        # 取源 trial 的指标做"参考值"（验证时还会重算覆盖）
+        src_trial = (
+            db.query(TuningTrial)
+            .filter(
+                TuningTrial.tuning_job_id == source_job.id,
+                TuningTrial.trial_number == tnum,
+            )
+            .first()
+        )
+        derived_trial = TuningTrial(
+            tuning_job_id=derived_job.id,
+            trial_number=tnum,
+            state="running",
+            params=clean_params,
+            metrics={},
+            valid_sharpe=src_trial.valid_sharpe if src_trial else None,
+            test_sharpe=src_trial.test_sharpe if src_trial else None,
+            overfit_ratio=src_trial.overfit_ratio if src_trial else None,
+            composite_scores={},
+            hard_constraint_passed=False,
+            hard_constraint_failed_items=[],
+            run_id=None,
+            run_name=f"{verification_name} trial #{tnum}",
+            duration_sec=None,
+            error=None,
+        )
+        db.add(derived_trial)
 
-    # ---- 启动 subprocess（reproduce_seeds 通过环境编码传入 start_job_subprocess）----
+    # ---- 启动 subprocess ----
     derived_job.workdir = str(derived_workdir)
     db.commit()
 

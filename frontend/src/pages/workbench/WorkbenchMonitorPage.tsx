@@ -806,6 +806,7 @@ const WorkbenchMonitorPage: React.FC = () => {
               children: isVerificationJob ? (
                 <WalkForwardPanel
                   jobId={id}
+                  experimentId={job.experiment_id ?? ''}
                   results={walkForwardResults}
                   onRefresh={refetchWalkForward}
                   onFinalize={(trial_number) => {
@@ -1641,10 +1642,13 @@ const DerivedJobsPanel: React.FC<{
 
 const WalkForwardPanel: React.FC<{
   jobId: number
+  /** V3.10: mlflow experiment_id（用于 per-segment run_id 的报告页跳转链接） */
+  experimentId: string
   results: WalkForwardResults | undefined
   onRefresh: () => void
   onFinalize: (trialNumber: number) => void
-}> = ({ jobId, results, onRefresh, onFinalize }) => {
+}> = ({ jobId, experimentId, results, onRefresh, onFinalize }) => {
+  const navigate = useNavigate()
   const wfRows = results?.walk_forward ?? []
   const repAgg = results?.reproduce_aggregate ?? []
   const running = results?.running ?? false
@@ -1880,9 +1884,92 @@ const WalkForwardPanel: React.FC<{
             size="small"
             pagination={false}
             scroll={{ x: 1100 }}
+            expandable={{
+              expandedRowRender: (r: WalkForwardRow) => {
+                const runIds = (r.run_ids ?? '').split(';').filter((x) => x)
+                const validPer = r.valid_sharpe_per_period ?? []
+                const testPer = r.test_sharpe_per_period ?? []
+                const segData = runIds.map((rid, i) => ({
+                  period: i + 1,
+                  run_id: rid,
+                  valid_sharpe: validPer[i] ?? null,
+                  test_sharpe: testPer[i] ?? null,
+                }))
+                if (segData.length === 0) {
+                  return <Empty description="无 per-segment 数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                }
+                return (
+                  <Table
+                    size="small"
+                    pagination={false}
+                    rowKey="period"
+                    dataSource={segData}
+                    columns={[
+                      { title: '期', dataIndex: 'period', width: 50, render: (v) => <Tag color="blue">#{v}</Tag> },
+                      {
+                        title: 'mlflow run_id',
+                        dataIndex: 'run_id',
+                        render: (rid: string) => (
+                          <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+                            {rid.slice(0, 16)}...
+                          </Text>
+                        ),
+                      },
+                      {
+                        title: 'valid_sharpe',
+                        dataIndex: 'valid_sharpe',
+                        width: 110,
+                        render: (v: number | null) =>
+                          v != null ? (
+                            <Text
+                              style={{
+                                fontFamily: "'SF Mono', monospace",
+                                color: v >= 0.2 ? '#52c41a' : v >= 0 ? '#faad14' : '#ff4d4f',
+                              }}
+                            >
+                              {v.toFixed(3)}
+                            </Text>
+                          ) : (
+                            <Text type="secondary">—</Text>
+                          ),
+                      },
+                      {
+                        title: 'test_sharpe',
+                        dataIndex: 'test_sharpe',
+                        width: 110,
+                        render: (v: number | null) =>
+                          v != null ? (
+                            <Text style={{ fontFamily: "'SF Mono', monospace" }}>
+                              {v.toFixed(3)}
+                            </Text>
+                          ) : (
+                            <Text type="secondary">—</Text>
+                          ),
+                      },
+                      {
+                        title: '报告',
+                        key: 'report',
+                        width: 100,
+                        render: (_, row) => (
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => navigate(`/report/${experimentId}/${row.run_id}`)}
+                          >
+                            查看
+                          </Button>
+                        ),
+                      },
+                    ]}
+                  />
+                )
+              },
+              rowExpandable: (r) => (r.run_ids ?? '').split(';').filter((x) => x).length > 0,
+            }}
           />
           <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
-            stability_score = valid_sharpe_min × (1 - 变异系数/2) × (5 期均正？1.0 : 0.5)
+            stability_score = valid_sharpe_min × (1 - 变异系数/2) × (5 期均正？1.0 : 0.5) ·
+            点行左侧 ▶ 展开看 per-segment run_id 报告链接
           </Text>
         </Card>
       )}
