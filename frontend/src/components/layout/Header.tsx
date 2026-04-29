@@ -1,9 +1,10 @@
 import React from 'react'
 import { Layout, Dropdown } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { QuestionCircleOutlined, BookOutlined, DownOutlined } from '@ant-design/icons'
+import { DownOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { BRAND_NAME } from '@/config/brand'
+import { PRIMARY_NAV, findActiveNavKey, type NavItem } from '@/config/navigation'
 import Logo from '@/components/brand/Logo'
 
 const { Header: AntHeader } = Layout
@@ -11,22 +12,7 @@ const { Header: AntHeader } = Layout
 const Header: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
-
-  const isExperiments =
-    location.pathname.startsWith('/experiments') || location.pathname.startsWith('/report')
-  const isHelp = location.pathname.startsWith('/help')
-  const isLiveTrading = location.pathname.startsWith('/live-trading')
-  const isWorkbench = location.pathname.startsWith('/workbench')
-  const isTrainingRecords = !isExperiments && !isHelp && !isLiveTrading && !isWorkbench
-
-  const helpMenuItems: MenuProps['items'] = [
-    {
-      key: 'factor-docs',
-      label: '因子文档',
-      icon: <BookOutlined />,
-      onClick: () => navigate('/help'),
-    },
-  ]
+  const activeKey = findActiveNavKey(location.pathname)
 
   const navItemStyle = (active: boolean): React.CSSProperties => ({
     position: 'relative',
@@ -42,7 +28,38 @@ const Header: React.FC = () => {
     boxShadow: active ? 'inset 0 -2px 0 0 var(--ap-brand-primary)' : 'none',
     transition: 'color 0.2s, box-shadow 0.2s',
     userSelect: 'none',
+    gap: 4,
   })
+
+  const buildDropdownItems = (children: NavItem[]): MenuProps['items'] =>
+    children.map((c) => ({
+      key: c.key,
+      label: c.label,
+      icon: c.icon ? <c.icon /> : undefined,
+      onClick: () => navigate(c.path),
+    }))
+
+  const renderNavItem = (item: NavItem) => {
+    const active = activeKey === item.key
+
+    if (item.children && item.children.length > 0) {
+      return (
+        <Dropdown key={item.key} menu={{ items: buildDropdownItems(item.children) }} trigger={['click']}>
+          <div style={navItemStyle(active)}>
+            {item.icon && <item.icon style={{ fontSize: 12 }} />}
+            {item.label}
+            <DownOutlined style={{ fontSize: 10 }} />
+          </div>
+        </Dropdown>
+      )
+    }
+
+    return (
+      <div key={item.key} onClick={() => navigate(item.path)} style={navItemStyle(active)}>
+        {item.label}
+      </div>
+    )
+  }
 
   return (
     <AntHeader
@@ -66,9 +83,6 @@ const Header: React.FC = () => {
           onClick={() => navigate('/')}
           aria-label={`${BRAND_NAME} home`}
         >
-          {/* currentColor 同时染 brand mark 与字标。
-              在暗色下 brand-primary (#3B82F6) + 字标取 ap-text 显得割裂，
-              这里整体用 brand-primary 让 logo 一体感更强（字标也是蓝） */}
           <Logo variant="full" height={28} style={{ color: 'var(--ap-brand-primary)' }} />
         </div>
 
@@ -81,32 +95,7 @@ const Header: React.FC = () => {
             alignItems: 'center',
           }}
         >
-          <div onClick={() => navigate('/')} style={navItemStyle(isTrainingRecords)}>
-            训练记录
-          </div>
-          <div onClick={() => navigate('/workbench')} style={navItemStyle(isWorkbench)}>
-            训练工作台
-          </div>
-          <div onClick={() => navigate('/experiments')} style={navItemStyle(isExperiments)}>
-            实验浏览
-          </div>
-          <div onClick={() => navigate('/live-trading')} style={navItemStyle(isLiveTrading)}>
-            实盘交易
-          </div>
-          <Dropdown menu={{ items: helpMenuItems }} trigger={['click']}>
-            <div
-              style={{
-                ...navItemStyle(isHelp),
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <QuestionCircleOutlined style={{ fontSize: 12 }} />
-              帮助
-              <DownOutlined style={{ fontSize: 10 }} />
-            </div>
-          </Dropdown>
+          {PRIMARY_NAV.map(renderNavItem)}
         </div>
       </div>
 
