@@ -6,6 +6,19 @@ export interface Experiment {
   lifecycle_stage: string
 }
 
+export type RunLinkType = 'training_record' | 'tuning_trial' | 'deployment' | 'ml_monitoring'
+
+export interface RunLinkSource {
+  type: RunLinkType
+  id?: number
+  name?: string
+  trial_number?: number
+  node_id?: string
+  strategy_name?: string
+  active?: boolean
+  subtype?: string
+}
+
 export interface RunListItem {
   run_id: string
   run_name: string
@@ -14,6 +27,32 @@ export interface RunListItem {
   start_time: number | null
   end_time: number | null
   lifecycle_stage: string
+  is_linked?: boolean
+  linked_sources?: RunLinkSource[]
+}
+
+export interface UnlinkedRunItem {
+  run_id: string
+  run_name: string
+  start_time: number | null
+  end_time: number | null
+  size_bytes: number
+}
+
+export interface UnlinkedRunsListData {
+  experiment_id: string
+  total_count: number
+  total_size_bytes: number
+  items: UnlinkedRunItem[]
+}
+
+export interface RunCleanupResultData {
+  experiment_id: string
+  deleted: Array<{ run_id: string; size_bytes: number; trash_path: string }>
+  skipped: Array<{ run_id: string; reason: string; linked_sources?: RunLinkSource[] }>
+  failed: Array<{ run_id: string; reason: string }>
+  freed_bytes: number
+  trash_root?: string
 }
 
 export interface RunDetail {

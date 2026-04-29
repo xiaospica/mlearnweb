@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.orm import Session
+
 from app.utils.mlflow_reader import mlflow_reader
 
 
@@ -12,8 +14,9 @@ class RunService:
         status_filter: Optional[str] = None,
         sort_by: str = "start_time",
         order: str = "desc",
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
-        return mlflow_reader.list_runs(
+        result = mlflow_reader.list_runs(
             experiment_id=experiment_id,
             status_filter=status_filter,
             sort_by=sort_by,
@@ -21,6 +24,15 @@ class RunService:
             page=page,
             page_size=page_size,
         )
+        # 附加 linked_sources（识别该 run 是否被训练记录/调参/部署/在线监控引用）
+        if db is not None and result.get("items"):
+            from app.services.run_cleanup_service import (
+                build_link_index,
+                annotate_runs_with_link_status,
+            )
+            link_index = build_link_index(db)
+            annotate_runs_with_link_status(result["items"], link_index)
+        return result
 
     @staticmethod
     def get_run_detail(experiment_id: str, run_id: str) -> Optional[Dict[str, Any]]:

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Dict, Any, List
 import traceback
 import logging
 import numpy as np
+from sqlalchemy.orm import Session
 
+from app.models.database import get_db_session
 from app.services.run_service import RunService
 from app.services.report_service import ReportService
 from app.schemas.schemas import RunListResponse, RunDetailResponse, ApiResponse
@@ -44,6 +46,7 @@ def list_runs(
     status: str = Query(None, description="状态过滤: RUNNING/SCHEDULED/FINISHED/FAILED/KILLED"),
     sort_by: str = Query("start_time", description="排序字段"),
     order: str = Query("desc", description="排序方向: asc/desc"),
+    db: Session = Depends(get_db_session),
 ):
     result = RunService.list_runs(
         experiment_id=exp_id,
@@ -52,6 +55,7 @@ def list_runs(
         status_filter=status,
         sort_by=sort_by,
         order=order,
+        db=db,
     )
     return RunListResponse(
         success=True,
