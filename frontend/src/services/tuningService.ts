@@ -43,6 +43,14 @@ export const tuningService = {
     return apiClient.delete(`/tuning/jobs/${id}`).then((r) => r.data)
   },
 
+  /** V3.7: 重命名 / 编辑描述 */
+  update(
+    id: number,
+    body: { name?: string; description?: string },
+  ): Promise<ApiSuccessResponse<TuningJob>> {
+    return apiClient.patch(`/tuning/jobs/${id}`, body).then((r) => r.data)
+  },
+
   start(
     id: number,
     params?: { n_jobs?: number; num_threads?: number; seed?: number },
@@ -151,13 +159,21 @@ export const tuningService = {
   // V3.4 跨期验证 + 多 seed 复跑
   // -------------------------------------------------------------------------
 
+  /** V3.7: 创建衍生验证 job（不再 inplace 跑），返回新 job 信息 */
   startWalkForward(
     id: number,
     body: TuningWalkForwardRequest,
-  ): Promise<ApiSuccessResponse<{ status: string; pid: number; trial_numbers: number[]; reproduce_seeds: number[] | null }>> {
+  ): Promise<ApiSuccessResponse<TuningJob>> {
     return apiClient
       .post(`/tuning/jobs/${id}/walk-forward`, body)
       .then((r) => r.data)
+  },
+
+  /** V3.7: 列出某 source job 的所有衍生验证 job */
+  listDerivedJobs(
+    id: number,
+  ): Promise<ApiSuccessResponse<{ parent_job_id: number; items: TuningJob[] }>> {
+    return apiClient.get(`/tuning/jobs/${id}/derived`).then((r) => r.data)
   },
 
   getWalkForwardResults(

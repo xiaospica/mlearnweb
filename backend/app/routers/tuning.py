@@ -40,6 +40,7 @@ from app.schemas.schemas import (
     TuningDeployRequest,
     TuningQueueReorderRequest,
     TuningWalkForwardRequest,
+    TuningJobUpdateRequest,
 )
 from app.services import tuning_service
 
@@ -141,6 +142,23 @@ def get_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
     # 拉触发一次状态对账（使 status / trial 计数 / best 都最新）
     tuning_service.reconcile_job_status(db, job)
     return ApiResponse(success=True, data=_job_to_response(job))
+
+
+@router.patch("/jobs/{job_id}", response_model=ApiResponse)
+def update_tuning_job(
+    job_id: int,
+    body: TuningJobUpdateRequest,
+    db: Session = Depends(get_db_session),
+):
+    """V3.7: 重命名 + 编辑描述。"""
+    job = _get_job_or_404(db, job_id)
+    if body.name is not None:
+        job.name = body.name.strip()
+    if body.description is not None:
+        job.description = body.description.strip() or None
+    db.commit()
+    db.refresh(job)
+    return ApiResponse(success=True, message="已更新", data=_job_to_response(job))
 
 
 @router.delete("/jobs/{job_id}", response_model=ApiResponse)
@@ -469,25 +487,23 @@ def start_walk_forward(
     body: TuningWalkForwardRequest,
     db: Session = Depends(get_db_session),
 ):
-    """对选中的 N 个 trial 启动跨期 walk_forward（+ 可选 multi-seed reproduce）。
+    """V3.7: 对选中 trial 创建衍生验证 job（不再 inplace 跑子进程）.
 
-    复用既有 finalize_best.walk_forward / reproduce CLI（只在前面套了一层
-    post_search_runner 串行执行器），不重复实现跨期逻辑。
-
-    要求 job 已完成搜索（done/cancelled/failed/zombie）；trial_numbers 内每个
-    trial 必须存在于 tuning_trials 表（CSV 解析时会校验）。
+    返回 new_job_id；前端跳转到 /workbench/jobs/<new_job_id> 查看进度。
+    源 job 的"跨期验证"Tab 改为列出所有衍生 job（GET /derived）。
     """
-    job = _get_job_or_404(db, job_id)
-    if job.status not in ("done", "cancelled", "failed", "zombie"):
+    source_job = _get_job_or_404(db, job_id)
+    if source_job.status not in ("done", "cancelled", "failed", "zombie"):
         raise HTTPException(
             status_code=409,
-            detail=f"job 状态 {job.status} 不允许启动跨期验证；需先完成搜索",
+            detail=f"源 job 状态 {source_job.status} 不允许创建验证 job；需先完成搜索",
         )
     try:
-        result = tuning_service.start_walk_forward_subprocess(
+        derived = tuning_service.create_verification_job(
             db,
-            job,
+            source_job,
             trial_numbers=body.trial_numbers,
+            custom_segments=[s.model_dump() for s in body.custom_segments],
             seed=body.seed,
             num_threads=body.num_threads,
             reproduce_seeds=body.reproduce_seeds,
@@ -495,17 +511,33 @@ def start_walk_forward(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     msg = (
-        f"已启动 walk_forward 子进程（{len(body.trial_numbers)} trial × seed={body.seed}）"
-        + (f" + reproduce ({len(body.reproduce_seeds)} seed)" if body.reproduce_seeds else "")
+        f"已创建衍生验证 job #{derived.id}（{len(body.trial_numbers)} trial × "
+        f"{len(body.custom_segments)} 期"
+        + (f" + reproduce {len(body.reproduce_seeds)} seed" if body.reproduce_seeds else "")
+        + "）；正在跑子进程"
     )
-    return ApiResponse(success=True, message=msg, data=result)
+    return ApiResponse(success=True, message=msg, data=_job_to_response(derived))
+
+
+@router.get("/jobs/{job_id}/derived", response_model=ApiResponse)
+def list_derived_jobs(job_id: int, db: Session = Depends(get_db_session)):
+    """V3.7: 列出某 source job 的全部衍生验证 job（按创建时间倒序）。"""
+    _get_job_or_404(db, job_id)  # 确保 source 存在
+    derived = tuning_service.get_derived_jobs(db, job_id)
+    return ApiResponse(
+        success=True,
+        data={
+            "parent_job_id": job_id,
+            "items": [_job_to_response(d) for d in derived],
+        },
+    )
 
 
 @router.get("/jobs/{job_id}/walk-forward-results", response_model=ApiResponse)
 def get_walk_forward_results(job_id: int, db: Session = Depends(get_db_session)):
-    """读 walk_forward.csv + reproduce.csv（如有）返聚合 JSON。
+    """读 walk_forward.csv + reproduce.csv（如有）返聚合 JSON.
 
-    前端用此作为轮询入口，配合 GET /walk-forward-log 查看实时日志。
+    V3.7: 此 endpoint 应该在【衍生验证 job】上调用（job 是验证 job 自己）。
     """
     job = _get_job_or_404(db, job_id)
     return ApiResponse(success=True, data=tuning_service.get_walk_forward_results(job))
@@ -517,7 +549,7 @@ def get_walk_forward_log(
     tail_bytes: int = Query(16384, ge=512, le=1048576),
     db: Session = Depends(get_db_session),
 ):
-    """读 walk_forward.stdout.log 末尾。"""
+    """读衍生验证 job 的 walk_forward.stdout.log 末尾。"""
     job = _get_job_or_404(db, job_id)
     text = tuning_service.get_walk_forward_log(job, tail_bytes=tail_bytes)
     return ApiResponse(success=True, data={"job_id": job.id, "text": text})

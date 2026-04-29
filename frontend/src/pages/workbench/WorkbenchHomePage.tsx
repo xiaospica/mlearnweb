@@ -145,7 +145,15 @@ const WorkbenchHomePage: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record: TuningJob) => (
-        <a onClick={() => navigate(`/workbench/jobs/${record.id}`)}>{name}</a>
+        <Space size={4}>
+          <a onClick={() => navigate(`/workbench/jobs/${record.id}`)}>{name}</a>
+          {record.parent_job_id != null && (
+            <Tag color="purple" style={{ fontSize: 10, padding: '0 4px', cursor: 'pointer' }}
+                 onClick={(e) => { e.stopPropagation(); navigate(`/workbench/jobs/${record.parent_job_id}`) }}>
+              ← 源 #{record.parent_job_id}
+            </Tag>
+          )}
+        </Space>
       ),
     },
     {

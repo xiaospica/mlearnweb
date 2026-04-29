@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu } from 'antd'
+import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu, Pagination } from 'antd'
 import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined, BarChartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -166,6 +166,12 @@ const TrainingRecordsPage: React.FC = () => {
   const [renameGroupModalVisible, setRenameGroupModalVisible] = useState(false)
   const [renameOldName, setRenameOldName] = useState('')
   const [renameNewName, setRenameNewName] = useState('')
+  // 卡片模式分页：每个分组独立的当前页 + 全局 page size
+  const [cardPageSize, setCardPageSize] = useState(12)
+  const [cardPages, setCardPages] = useState<Record<string, number>>({})
+  const getCardPage = (groupKey: string) => cardPages[groupKey] ?? 1
+  const setCardPage = (groupKey: string, p: number) =>
+    setCardPages((m) => ({ ...m, [groupKey]: p }))
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -839,7 +845,13 @@ const TrainingRecordsPage: React.FC = () => {
                 dataSource={favoriteRecords}
                 columns={listColumns}
                 rowKey="id"
-                pagination={false}
+                pagination={{
+                  defaultPageSize: 20,
+                  showSizeChanger: true,
+                  pageSizeOptions: ['10', '20', '50', '100', '200'],
+                  showTotal: (total) => `共 ${total} 条`,
+                  size: 'small',
+                }}
                 size="middle"
                 onRow={(record) => ({
                   onClick: () => navigate(`/training/${record.id}`),
@@ -899,7 +911,13 @@ const TrainingRecordsPage: React.FC = () => {
                       dataSource={groupRecords}
                       columns={listColumns}
                       rowKey="id"
-                      pagination={false}
+                      pagination={{
+                        defaultPageSize: 20,
+                        showSizeChanger: true,
+                        pageSizeOptions: ['10', '20', '50', '100', '200'],
+                        showTotal: (total) => `共 ${total} 条`,
+                        size: 'small',
+                      }}
                       size="middle"
                       onRow={(record) => ({
                         onClick: () => navigate(`/training/${record.id}`),
@@ -929,7 +947,13 @@ const TrainingRecordsPage: React.FC = () => {
                 dataSource={normalRecords}
                 columns={listColumns}
                 rowKey="id"
-                pagination={false}
+                pagination={{
+                  defaultPageSize: 20,
+                  showSizeChanger: true,
+                  pageSizeOptions: ['10', '20', '50', '100', '200'],
+                  showTotal: (total) => `共 ${total} 条`,
+                  size: 'small',
+                }}
                 size="middle"
                 onRow={(record) => ({
                   onClick: () => navigate(`/training/${record.id}`),
@@ -958,7 +982,9 @@ const TrainingRecordsPage: React.FC = () => {
               style={{ marginBottom: 16, background: '#fffbe6', borderRadius: 8, border: '1px solid #ffe58f' }}
             >
               <Row gutter={[20, 20]}>
-                {favoriteRecords.map((record: TrainingRecord) => {
+                {favoriteRecords
+                  .slice((getCardPage('favorite') - 1) * cardPageSize, getCardPage('favorite') * cardPageSize)
+                  .map((record: TrainingRecord) => {
                   const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
                   const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
                   const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
@@ -1091,6 +1117,23 @@ const TrainingRecordsPage: React.FC = () => {
                   )
                 })}
               </Row>
+              {favoriteRecords.length > cardPageSize && (
+                <div style={{ marginTop: 16, textAlign: 'right' }}>
+                  <Pagination
+                    current={getCardPage('favorite')}
+                    pageSize={cardPageSize}
+                    total={favoriteRecords.length}
+                    showSizeChanger
+                    pageSizeOptions={['12', '24', '48', '96']}
+                    showTotal={(total) => `共 ${total} 条`}
+                    size="small"
+                    onChange={(p, ps) => {
+                      setCardPage('favorite', p)
+                      if (ps !== cardPageSize) setCardPageSize(ps)
+                    }}
+                  />
+                </div>
+              )}
             </Panel>
           )}
 
@@ -1142,7 +1185,9 @@ const TrainingRecordsPage: React.FC = () => {
                     <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                   ) : (
                     <Row gutter={[20, 20]}>
-                      {groupRecords.map((record: TrainingRecord) => {
+                      {groupRecords
+                        .slice((getCardPage(group.name) - 1) * cardPageSize, getCardPage(group.name) * cardPageSize)
+                        .map((record: TrainingRecord) => {
                         const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
                         const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
                         const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
@@ -1273,6 +1318,23 @@ const TrainingRecordsPage: React.FC = () => {
                       })}
                     </Row>
                   )}
+                  {groupRecords.length > cardPageSize && (
+                    <div style={{ marginTop: 16, textAlign: 'right' }}>
+                      <Pagination
+                        current={getCardPage(group.name)}
+                        pageSize={cardPageSize}
+                        total={groupRecords.length}
+                        showSizeChanger
+                        pageSizeOptions={['12', '24', '48', '96']}
+                        showTotal={(total) => `共 ${total} 条`}
+                        size="small"
+                        onChange={(p, ps) => {
+                          setCardPage(group.name, p)
+                          if (ps !== cardPageSize) setCardPageSize(ps)
+                        }}
+                      />
+                    </div>
+                  )}
                 </Panel>
               )
             })}
@@ -1292,7 +1354,9 @@ const TrainingRecordsPage: React.FC = () => {
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
               <Row gutter={[20, 20]}>
-                {normalRecords.map((record: TrainingRecord) => {
+                {normalRecords
+                  .slice((getCardPage('normal') - 1) * cardPageSize, getCardPage('normal') * cardPageSize)
+                  .map((record: TrainingRecord) => {
                   const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
                   const catCfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
                   const stCfg = STATUS_CONFIG[record.status] || STATUS_CONFIG.completed
@@ -1435,6 +1499,23 @@ const TrainingRecordsPage: React.FC = () => {
                   )
                 })}
               </Row>
+            )}
+            {normalRecords.length > cardPageSize && (
+              <div style={{ marginTop: 16, textAlign: 'right' }}>
+                <Pagination
+                  current={getCardPage('normal')}
+                  pageSize={cardPageSize}
+                  total={normalRecords.length}
+                  showSizeChanger
+                  pageSizeOptions={['12', '24', '48', '96']}
+                  showTotal={(total) => `共 ${total} 条`}
+                  size="small"
+                  onChange={(p, ps) => {
+                    setCardPage('normal', p)
+                    if (ps !== cardPageSize) setCardPageSize(ps)
+                  }}
+                />
+              </div>
             )}
           </Panel>
         </Collapse>

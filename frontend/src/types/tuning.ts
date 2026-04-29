@@ -118,6 +118,10 @@ export interface TuningJob {
   start_seed?: number | null
   /** V3.6: mlflow experiment_id（前端跳报告页用） */
   experiment_id?: string | null
+  /** V3.7: 衍生验证 job 指向源 job */
+  parent_job_id?: number | null
+  /** V3.7: 衍生 job 验证的源 trial 编号列表 */
+  derived_trial_numbers?: number[] | null
   created_at: string
   updated_at: string
 }
@@ -197,8 +201,17 @@ export interface TuningDeployRequest {
 // V3.4 跨期验证 + 多 seed 复跑
 // ---------------------------------------------------------------------------
 
+/** V3.7: walk-forward 单期时间分段（与后端 schemas.CustomSegment 对齐） */
+export interface WalkForwardSegment {
+  train: [string, string]
+  valid: [string, string]
+  test: [string, string]
+}
+
 export interface TuningWalkForwardRequest {
   trial_numbers: number[]
+  /** V3.7: 必填 —— ≥2 期 train/valid/test 时间分段（推荐 5 期） */
+  custom_segments: WalkForwardSegment[]
   seed?: number
   num_threads?: number
   /** 非空时在 walk_forward 后再跑 multi-seed reproduce */

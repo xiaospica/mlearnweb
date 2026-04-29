@@ -394,6 +394,9 @@ class TuningJobResponse(BaseModel):
     start_seed: Optional[int] = None
     # V3.6 mlflow experiment_id（前端跳报告页用，不再硬编码）
     experiment_id: Optional[str] = None
+    # V3.7 衍生 job：parent_job_id 是源单期搜索 job；derived_trial_numbers 是验证的 trial 列表
+    parent_job_id: Optional[int] = None
+    derived_trial_numbers: Optional[List[int]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -406,16 +409,40 @@ class TuningQueueReorderRequest(BaseModel):
     job_ids: List[int] = Field(..., description="按期望顺序排列的 job_id 数组")
 
 
+class TuningJobUpdateRequest(BaseModel):
+    """V3.7: PATCH job 元信息（仅支持 name + description 重命名/编辑）。"""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+
+
+class CustomSegment(BaseModel):
+    """V3.7: walk-forward 单期时间分段。"""
+    train: List[str] = Field(..., min_length=2, max_length=2, description="[start, end]")
+    valid: List[str] = Field(..., min_length=2, max_length=2)
+    test: List[str] = Field(..., min_length=2, max_length=2)
+
+
 class TuningWalkForwardRequest(BaseModel):
-    """跨期验证 + 多 seed 复跑请求体（V3.4）。"""
+    """V3.7 跨期验证：创建衍生 TuningJob，强制必填 custom_segments.
+
+    与之前（V3.4）的区别：不再在源 job 内 inplace 跑 subprocess，而是创建一个
+    新的 TuningJob（parent_job_id 指向源 job），用户可在 job 列表里独立
+    管理验证任务（取消 / 删除 / 查看进度）。
+    """
     trial_numbers: List[int] = Field(
         ..., min_length=1, description="要验证的 trial number 列表（建议 Top-3~5）"
+    )
+    custom_segments: List[CustomSegment] = Field(
+        ...,
+        min_length=2,
+        description="walk-forward 时间分段（≥2 期，建议 5 期跨多个 regime）；"
+        "源 job 无 custom_segments 时前端必须先填",
     )
     seed: int = Field(42, ge=0, description="walk_forward 用的单 seed")
     num_threads: int = Field(20, ge=1, le=64)
     reproduce_seeds: Optional[List[int]] = Field(
         default=None,
-        description="如非空则在 walk_forward 后再跑 multi-seed reproduce（每 trial × 每 seed 一次）",
+        description="如非空则在 walk_forward 后再跑 multi-seed reproduce",
     )
 
 

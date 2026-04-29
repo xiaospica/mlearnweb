@@ -175,6 +175,10 @@ class TuningJob(Base):
     # V3.6: 该 job 的 mlflow experiment_id（前端跳报告页用）
     # 默认 '374089520733232109' 即 rolling_exp，与命令行训练同实验
     experiment_id = Column(String(64), default="374089520733232109", nullable=True)
+    # V3.7 衍生 job：跨期验证作为新 TuningJob，parent_job_id 指向源单期搜索 job；
+    # derived_trial_numbers 是用户在源 job trials 表勾选的 trial 编号列表
+    parent_job_id = Column(Integer, ForeignKey("tuning_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
+    derived_trial_numbers = Column(JSON, nullable=True)
 
     trials = relationship("TuningTrial", back_populates="job", cascade="all, delete-orphan")
 
@@ -378,7 +382,7 @@ def _migrate_add_deployments():
 
 
 def _migrate_add_tuning_queue_columns():
-    """V3.3 + V3.6 迁移：tuning_jobs 加 queue_position + start_* + experiment_id 列。"""
+    """V3.3 + V3.6 + V3.7 迁移：tuning_jobs 加多个新列（queue / experiment_id / parent_job）。"""
     import sqlite3
     db_path = settings.database_url.replace("sqlite:///", "")
     if not db_path or not db_path.endswith(".db"):
@@ -394,15 +398,21 @@ def _migrate_add_tuning_queue_columns():
             ("start_num_threads", "INTEGER DEFAULT 20"),
             ("start_seed", "INTEGER DEFAULT 42"),
             ("experiment_id", "VARCHAR(64) DEFAULT '374089520733232109'"),
+            ("parent_job_id", "INTEGER"),
+            ("derived_trial_numbers", "JSON"),
         ]
         for col_name, col_def in adds:
             if col_name not in columns:
                 cursor.execute(f"ALTER TABLE tuning_jobs ADD COLUMN {col_name} {col_def}")
                 print(f"[DB Migration] Added {col_name} column to tuning_jobs table")
-        # 索引（queue_position 用于 scheduler 查队首；ALTER 加列不会自动建索引）
+        # 索引（ALTER 加列不会自动建索引）
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS ix_tuning_jobs_queue_position "
             "ON tuning_jobs(queue_position)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS ix_tuning_jobs_parent_job_id "
+            "ON tuning_jobs(parent_job_id)"
         )
         conn.commit()
         conn.close()

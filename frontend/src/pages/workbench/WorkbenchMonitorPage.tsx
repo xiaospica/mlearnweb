@@ -379,34 +379,48 @@ const WorkbenchMonitorPage: React.FC = () => {
     },
   })
 
-  // V3.4 跨期验证 + multi-seed reproduce
+  // V3.7: walk-forward 结果（仅当本 job 是衍生验证 job 时才显示）
+  const isVerificationJob = job?.parent_job_id != null
   const { data: wfData, refetch: refetchWalkForward } = useQuery({
     queryKey: ['tuning-walk-forward', id],
     queryFn: () => tuningService.getWalkForwardResults(id),
     refetchInterval: 10_000,
-    enabled: !Number.isNaN(id),
+    enabled: !Number.isNaN(id) && isVerificationJob,
   })
   const walkForwardResults: WalkForwardResults | undefined = wfData?.data
+
+  // V3.7: 衍生验证 job 列表（仅当本 job 是源 job 时拉）
+  const { data: derivedData, refetch: refetchDerived } = useQuery({
+    queryKey: ['tuning-derived', id],
+    queryFn: () => tuningService.listDerivedJobs(id),
+    refetchInterval: 15_000,
+    enabled: !Number.isNaN(id) && !isVerificationJob,
+  })
+  const derivedJobs: TuningJob[] = derivedData?.data?.items ?? []
 
   const walkForwardMutation = useMutation({
     mutationFn: (body: {
       trial_numbers: number[]
+      custom_segments: { train: [string, string]; valid: [string, string]; test: [string, string] }[]
       seed: number
       reproduce_seeds: number[] | null
     }) =>
       tuningService.startWalkForward(id, {
         trial_numbers: body.trial_numbers,
+        custom_segments: body.custom_segments,
         seed: body.seed,
         reproduce_seeds: body.reproduce_seeds ?? undefined,
       }),
     onSuccess: (resp) => {
-      const repCount = resp.data?.reproduce_seeds?.length ?? 0
-      message.success(
-        `跨期验证已启动${repCount > 0 ? ` + multi-seed reproduce (${repCount} seed)` : ''}；切到"跨期验证"Tab 查看进度`,
-      )
-      setWalkForwardModalOpen(false)
-      setActiveTab('walk_forward')
-      refetchWalkForward()
+      const newJobId = resp.data?.id
+      if (newJobId) {
+        message.success(
+          `衍生验证 job #${newJobId} 已创建，正在跳转监控页…`,
+        )
+        setWalkForwardModalOpen(false)
+        navigate(`/workbench/jobs/${newJobId}`)
+      }
+      refetchDerived()
     },
     onError: (err: Error & { response?: { data?: { detail?: string } } }) => {
       message.error(err.response?.data?.detail ?? err.message)
@@ -440,13 +454,55 @@ const WorkbenchMonitorPage: React.FC = () => {
 
   return (
     <div>
+      {/* V3.7: 衍生验证 job 显示面包屑跳源 job */}
+      {isVerificationJob && job.parent_job_id != null && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            <span>
+              这是<Text strong>衍生验证 job</Text> — 基于源 job{' '}
+              <a onClick={() => navigate(`/workbench/jobs/${job.parent_job_id}`)}>
+                #{job.parent_job_id}
+              </a>{' '}
+              的{' '}
+              <Text code>
+                {job.derived_trial_numbers && job.derived_trial_numbers.length > 0
+                  ? `trial ${job.derived_trial_numbers.join(', ')}`
+                  : '所选 trials'}
+              </Text>{' '}
+              跨期验证
+            </span>
+          }
+        />
+      )}
+
       {/* 顶部 Header */}
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/workbench')}>
             返回
           </Button>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title
+            level={4}
+            style={{ margin: 0 }}
+            editable={{
+              tooltip: '点击重命名',
+              onChange: (newName) => {
+                const trimmed = newName.trim()
+                if (trimmed && trimmed !== job.name) {
+                  tuningService
+                    .update(id, { name: trimmed })
+                    .then(() => {
+                      message.success('已重命名')
+                      queryClient.invalidateQueries({ queryKey: ['tuning-job', id] })
+                    })
+                    .catch((err) => message.error(err.response?.data?.detail ?? err.message))
+                }
+              },
+            }}
+          >
             {job.name}
           </Title>
           <Badge status={liveCfg.badge} text={liveCfg.label} />
@@ -491,6 +547,32 @@ const WorkbenchMonitorPage: React.FC = () => {
               </Button>
             )}
           </div>
+        </div>
+
+        {/* V3.7: 显示 description（可编辑） */}
+        <div style={{ marginBottom: 16, marginLeft: 4 }}>
+          <Paragraph
+            type="secondary"
+            style={{ margin: 0, fontSize: 13 }}
+            editable={{
+              tooltip: '点击编辑描述',
+              triggerType: ['icon', 'text'],
+              onChange: (newDesc) => {
+                const trimmed = newDesc.trim()
+                if (trimmed !== (job.description ?? '')) {
+                  tuningService
+                    .update(id, { description: trimmed })
+                    .then(() => {
+                      message.success('描述已更新')
+                      queryClient.invalidateQueries({ queryKey: ['tuning-job', id] })
+                    })
+                    .catch((err) => message.error(err.response?.data?.detail ?? err.message))
+                }
+              },
+            }}
+          >
+            {job.description ?? '（无描述，点此添加）'}
+          </Paragraph>
         </div>
 
         {job.error && (
@@ -687,18 +769,24 @@ const WorkbenchMonitorPage: React.FC = () => {
               label: (
                 <span>
                   <ExperimentOutlined /> 跨期验证
-                  {walkForwardResults?.running ? (
-                    <Tag color="processing" style={{ marginLeft: 6 }}>
-                      运行中
-                    </Tag>
-                  ) : walkForwardResults?.walk_forward.length ? (
-                    <Tag color="success" style={{ marginLeft: 6 }}>
-                      {walkForwardResults.walk_forward.length} trial
+                  {isVerificationJob ? (
+                    walkForwardResults?.running ? (
+                      <Tag color="processing" style={{ marginLeft: 6 }}>
+                        运行中
+                      </Tag>
+                    ) : walkForwardResults?.walk_forward.length ? (
+                      <Tag color="success" style={{ marginLeft: 6 }}>
+                        {walkForwardResults.walk_forward.length} trial
+                      </Tag>
+                    ) : null
+                  ) : derivedJobs.length > 0 ? (
+                    <Tag color="purple" style={{ marginLeft: 6 }}>
+                      {derivedJobs.length} 衍生
                     </Tag>
                   ) : null}
                 </span>
               ),
-              children: (
+              children: isVerificationJob ? (
                 <WalkForwardPanel
                   jobId={id}
                   results={walkForwardResults}
@@ -707,6 +795,12 @@ const WorkbenchMonitorPage: React.FC = () => {
                     setFinalizeOverrideTrialNum(trial_number)
                     setFinalizeModalOpen(true)
                   }}
+                />
+              ) : (
+                <DerivedJobsPanel
+                  derivedJobs={derivedJobs}
+                  onRefresh={refetchDerived}
+                  onCreateNew={() => setWalkForwardModalOpen(true)}
                 />
               ),
             },
@@ -770,6 +864,13 @@ const WorkbenchMonitorPage: React.FC = () => {
         open={walkForwardModalOpen}
         onClose={() => setWalkForwardModalOpen(false)}
         selectedTrials={selectedTrials}
+        sourceCustomSegments={
+          (job.config_snapshot?.custom_segments as Array<{
+            train: [string, string]
+            valid: [string, string]
+            test: [string, string]
+          }> | undefined) ?? null
+        }
         loading={walkForwardMutation.isPending}
         onSubmit={(values) => walkForwardMutation.mutate(values)}
       />
@@ -1150,28 +1251,60 @@ const LogPanel: React.FC<{
 }
 
 // ---------------------------------------------------------------------------
-// V3.4 跨期验证 Modal：让用户选 trial / seed / 是否额外跑 multi-seed reproduce
+// V3.7 跨期验证 Modal：必填 custom_segments + 提交后创建衍生 job
 // ---------------------------------------------------------------------------
 
 const DEFAULT_REPRODUCE_SEEDS = '42,123,2025'
+
+const DEFAULT_5P_SEGMENTS: { train: [string, string]; valid: [string, string]; test: [string, string] }[] = [
+  { train: ['2007-01-01', '2013-12-31'], valid: ['2014-01-01', '2015-12-31'], test: ['2016-01-01', '2017-12-31'] },
+  { train: ['2009-01-01', '2015-12-31'], valid: ['2016-01-01', '2017-12-31'], test: ['2018-01-01', '2019-12-31'] },
+  { train: ['2011-01-01', '2017-12-31'], valid: ['2018-01-01', '2019-12-31'], test: ['2020-01-01', '2021-12-31'] },
+  { train: ['2013-01-01', '2019-12-31'], valid: ['2020-01-01', '2021-12-31'], test: ['2022-01-01', '2023-12-31'] },
+  { train: ['2015-01-01', '2021-12-31'], valid: ['2022-01-01', '2023-12-31'], test: ['2024-01-01', '2025-12-31'] },
+]
 
 const WalkForwardModal: React.FC<{
   open: boolean
   onClose: () => void
   selectedTrials: number[]
+  /** V3.7: 源 job 已配的 custom_segments（如有则预填） */
+  sourceCustomSegments?: { train: [string, string]; valid: [string, string]; test: [string, string] }[] | null
   loading: boolean
   onSubmit: (values: {
     trial_numbers: number[]
+    custom_segments: { train: [string, string]; valid: [string, string]; test: [string, string] }[]
     seed: number
     reproduce_seeds: number[] | null
   }) => void
-}> = ({ open, onClose, selectedTrials, loading, onSubmit }) => {
+}> = ({ open, onClose, selectedTrials, sourceCustomSegments, loading, onSubmit }) => {
   const [seed, setSeed] = useState(42)
   const [withReproduce, setWithReproduce] = useState(false)
   const [reproduceSeedsStr, setReproduceSeedsStr] = useState(DEFAULT_REPRODUCE_SEEDS)
+  const initialSegments =
+    sourceCustomSegments && sourceCustomSegments.length >= 2
+      ? sourceCustomSegments
+      : DEFAULT_5P_SEGMENTS
+  const [segmentsJson, setSegmentsJson] = useState<string>(JSON.stringify(initialSegments, null, 2))
+  const [segmentsError, setSegmentsError] = useState<string | null>(null)
 
-  // 估算时间：单 trial 跨 5 期约 15 min；reproduce 单 (trial,seed) 约 3 min
-  const wfMin = selectedTrials.length * 15
+  useEffect(() => {
+    if (open) {
+      setSegmentsJson(JSON.stringify(initialSegments, null, 2))
+      setSegmentsError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  let parsedSegments: typeof DEFAULT_5P_SEGMENTS = []
+  try {
+    parsedSegments = JSON.parse(segmentsJson)
+  } catch {
+    parsedSegments = []
+  }
+  const segmentsValid = Array.isArray(parsedSegments) && parsedSegments.length >= 2
+
+  const wfMin = selectedTrials.length * 3 * (parsedSegments.length || 5)
   const repSeeds = withReproduce
     ? reproduceSeedsStr
         .split(',')
@@ -1182,50 +1315,60 @@ const WalkForwardModal: React.FC<{
 
   return (
     <Modal
-      title="跨期验证选中 trials"
+      title="跨期验证选中 trials（创建衍生 job）"
       open={open}
       onCancel={onClose}
       onOk={() => {
         if (selectedTrials.length === 0) return
-        onSubmit({
-          trial_numbers: selectedTrials,
-          seed,
-          reproduce_seeds: withReproduce && repSeeds.length > 0 ? repSeeds : null,
-        })
+        try {
+          const segments = JSON.parse(segmentsJson)
+          if (!Array.isArray(segments) || segments.length < 2) {
+            setSegmentsError('custom_segments 至少 2 期（建议 5 期跨多个 regime）')
+            return
+          }
+          for (const seg of segments) {
+            if (
+              !seg ||
+              !Array.isArray(seg.train) ||
+              !Array.isArray(seg.valid) ||
+              !Array.isArray(seg.test) ||
+              seg.train.length !== 2 ||
+              seg.valid.length !== 2 ||
+              seg.test.length !== 2
+            ) {
+              setSegmentsError('每期必须有 train/valid/test 三个 [start, end] 数组')
+              return
+            }
+          }
+          setSegmentsError(null)
+          onSubmit({
+            trial_numbers: selectedTrials,
+            custom_segments: segments,
+            seed,
+            reproduce_seeds: withReproduce && repSeeds.length > 0 ? repSeeds : null,
+          })
+        } catch (e) {
+          setSegmentsError(`JSON 解析失败：${(e as Error).message}`)
+        }
       }}
-      okText="启动验证"
+      okText="创建衍生验证 job"
       cancelText="取消"
       confirmLoading={loading}
-      width={620}
+      okButtonProps={{ disabled: selectedTrials.length === 0 || !segmentsValid }}
+      width={680}
     >
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message={`将对 ${selectedTrials.length} 个 trial 跑跨期 walk-forward${
-          withReproduce ? ' + multi-seed reproduce' : ''
-        }`}
-        description={
-          <div style={{ fontSize: 12 }}>
-            <div>
-              <Text code>walk-forward</Text>：每 trial 跑 5 期（CUSTOM_SEGMENTS）一次完整训练，
-              输出 stability_score 跨期排名表
-            </div>
-            <div>
-              <Text code>multi-seed reproduce</Text>：用同一参数换不同 random seed 重跑，
-              检测调参得到的"最优"是不是 seed 运气
-            </div>
-          </div>
+        message={
+          <span>
+            将创建<Text strong>新的衍生 TuningJob</Text>，独立运行 / 取消 / 删除；提交后跳转监控页。
+          </span>
         }
       />
       <Form layout="vertical">
-        <Form.Item
-          label={
-            <span>
-              选中的 trial_numbers（{selectedTrials.length}）
-            </span>
-          }
-        >
+        <Form.Item label={<span>选中的 trial_numbers ({selectedTrials.length})</span>}>
           <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
             {selectedTrials.length > 0 ? (
               <Space wrap size={4}>
@@ -1240,32 +1383,62 @@ const WalkForwardModal: React.FC<{
             )}
           </div>
         </Form.Item>
-        <Form.Item label="walk-forward seed">
-          <InputNumber
-            value={seed}
-            onChange={(v) => setSeed(v ?? 42)}
-            min={0}
-            style={{ width: 160 }}
+        <Form.Item
+          label={
+            <span>
+              <Text strong>walk-forward 时间分段（必填）</Text>
+              <Text type="secondary" style={{ marginLeft: 6, fontSize: 11 }}>
+                {sourceCustomSegments && sourceCustomSegments.length >= 2
+                  ? '已从源 job 预填'
+                  : '源 job 未配置，已用 2007-2025 默认 5 期模板'}
+              </Text>
+            </span>
+          }
+          validateStatus={segmentsError ? 'error' : ''}
+          help={segmentsError}
+        >
+          <Input.TextArea
+            value={segmentsJson}
+            onChange={(e) => {
+              setSegmentsJson(e.target.value)
+              setSegmentsError(null)
+            }}
+            rows={10}
+            style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}
           />
         </Form.Item>
-        <Form.Item label="同时跑 multi-seed reproduce">
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Switch
-              checked={withReproduce}
-              onChange={setWithReproduce}
-              checkedChildren="是"
-              unCheckedChildren="否"
-            />
-            {withReproduce && (
-              <Input
-                value={reproduceSeedsStr}
-                onChange={(e) => setReproduceSeedsStr(e.target.value)}
-                placeholder="逗号分隔，如 42,123,2025"
+        <Row gutter={12}>
+          <Col span={8}>
+            <Form.Item label="walk-forward seed">
+              <InputNumber
+                value={seed}
+                onChange={(v) => setSeed(v ?? 42)}
+                min={0}
                 style={{ width: '100%' }}
               />
-            )}
-          </Space>
-        </Form.Item>
+            </Form.Item>
+          </Col>
+          <Col span={16}>
+            <Form.Item label="同时跑 multi-seed reproduce">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Switch
+                  checked={withReproduce}
+                  onChange={setWithReproduce}
+                  checkedChildren="是"
+                  unCheckedChildren="否"
+                />
+                {withReproduce && (
+                  <Input
+                    value={reproduceSeedsStr}
+                    onChange={(e) => setReproduceSeedsStr(e.target.value)}
+                    placeholder="逗号分隔，如 42,123,2025"
+                    style={{ width: '100%' }}
+                  />
+                )}
+              </Space>
+            </Form.Item>
+          </Col>
+        </Row>
         <Alert
           type="warning"
           message={`预计耗时：walk-forward ≈ ${wfMin} min${
@@ -1276,6 +1449,118 @@ const WalkForwardModal: React.FC<{
         />
       </Form>
     </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// V3.7 衍生验证 job 列表面板（源 job 的"跨期验证"Tab 内容）
+// ---------------------------------------------------------------------------
+
+const DerivedJobsPanel: React.FC<{
+  derivedJobs: TuningJob[]
+  onRefresh: () => void
+  onCreateNew: () => void
+}> = ({ derivedJobs, onRefresh, onCreateNew }) => {
+  const navigate = useNavigate()
+  return (
+    <div>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          本 job 的所有跨期验证衍生 job（每个验证作为新 TuningJob，独立运行 / 取消 / 删除）
+        </Text>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <Button size="small" icon={<ReloadOutlined />} onClick={onRefresh}>
+            刷新
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<ExperimentOutlined />}
+            onClick={onCreateNew}
+          >
+            新建跨期验证
+          </Button>
+        </div>
+      </div>
+      {derivedJobs.length === 0 ? (
+        <Empty description="还没创建过跨期验证 job。在 Trials Tab 勾选 ≥1 trial → 点 [跨期验证选中 (N)]" />
+      ) : (
+        <Table
+          dataSource={derivedJobs}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          columns={[
+            {
+              title: 'ID',
+              dataIndex: 'id',
+              width: 70,
+              render: (v: number) => (
+                <a onClick={() => navigate(`/workbench/jobs/${v}`)}>#{v}</a>
+              ),
+            },
+            {
+              title: '名称',
+              dataIndex: 'name',
+              render: (name: string, r: TuningJob) => (
+                <a onClick={() => navigate(`/workbench/jobs/${r.id}`)}>{name}</a>
+              ),
+            },
+            {
+              title: '源 trials',
+              dataIndex: 'derived_trial_numbers',
+              width: 200,
+              render: (arr: number[] | null) =>
+                arr && arr.length > 0 ? (
+                  <Space wrap size={2}>
+                    {arr.slice(0, 6).map((n) => (
+                      <Tag key={n} color="blue" style={{ fontSize: 10, padding: '0 4px' }}>
+                        #{n}
+                      </Tag>
+                    ))}
+                    {arr.length > 6 && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        +{arr.length - 6}
+                      </Text>
+                    )}
+                  </Space>
+                ) : (
+                  <Text type="secondary">—</Text>
+                ),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 100,
+              render: (s: TuningJobStatus) => {
+                const cfg = STATUS_CONFIG[s] ?? {
+                  color: 'default',
+                  label: s,
+                  badge: 'default' as const,
+                }
+                return <Tag color={cfg.color}>{cfg.label}</Tag>
+              },
+            },
+            {
+              title: '进度',
+              key: 'progress',
+              width: 100,
+              render: (_: unknown, r: TuningJob) => (
+                <Text style={{ fontFamily: "'SF Mono', monospace", fontSize: 11 }}>
+                  {r.n_trials_done}/{r.n_trials_target}
+                </Text>
+              ),
+            },
+            {
+              title: '创建时间',
+              dataIndex: 'created_at',
+              width: 140,
+              render: (ts: string) => dayjs(ts).format('MM-DD HH:mm:ss'),
+            },
+          ]}
+        />
+      )}
+    </div>
   )
 }
 

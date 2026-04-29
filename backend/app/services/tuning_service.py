@@ -27,6 +27,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -967,17 +968,141 @@ def try_start_next_queued_job(db: Session) -> Optional[TuningJob]:
 
 
 # ---------------------------------------------------------------------------
-# V3.4 跨期验证 + 多 seed 复跑（post-search 验证流程）
+# V3.7 跨期验证 + 多 seed 复跑（post-search 验证作为衍生 job）
 # ---------------------------------------------------------------------------
 
 
-# 内存级 walk-forward 子进程注册（per-job 单实例）。
-# 进程信息（pid + create_time）用于查询是否还在跑；FastAPI 重启后
-# 此 dict 丢失但子进程在 Windows 默认连带退出，无遗留风险。
-_walk_forward_procs: Dict[int, Tuple[int, float]] = {}
+def create_verification_job(
+    db: Session,
+    source_job: TuningJob,
+    trial_numbers: List[int],
+    custom_segments: List[Dict[str, Any]],
+    seed: int = 42,
+    num_threads: int = 20,
+    reproduce_seeds: Optional[List[int]] = None,
+) -> TuningJob:
+    """V3.7: 创建跨期验证衍生 job（单期搜索 → walk-forward 验证作为新 job）。
+
+    设计：验证不再是源 job 内 inplace 子进程，而是新 TuningJob：
+        - parent_job_id 指向源 job
+        - derived_trial_numbers 记录用户选的源 trial 编号
+        - config_snapshot 继承源 + 必填 custom_segments
+        - search_mode='walk_forward_5p' 但走 post_search_runner（不走 optuna）
+        - subprocess 立即启动；前端跳到新 job 的 MonitorPage
+
+    需要 source job 有 trials.csv + overrides/trial_NNNN.json 文件（验证子进程
+    通过 finalize_best.cmd_walk_forward 读这两个反查每个 trial 的 GBDT 超参）。
+    """
+    import shutil
+
+    # ---- 校验 ----
+    if not trial_numbers:
+        raise ValueError("trial_numbers 不能为空")
+    if not custom_segments or len(custom_segments) < 2:
+        raise ValueError("custom_segments 必须至少 2 期（建议 5 期跨多个 regime）")
+    if not source_job.workdir:
+        raise ValueError(f"源 job {source_job.id} 缺 workdir（搜索未启动过？）")
+
+    source_workdir = Path(source_job.workdir)
+    source_trials_csv = source_workdir / "trials.csv"
+    source_overrides = source_workdir / "overrides"
+    if not source_trials_csv.is_file():
+        raise ValueError(
+            f"源 job {source_job.id} 缺 trials.csv（路径 {source_trials_csv}）；"
+            f"无法反查 trial 超参"
+        )
+    if not source_overrides.is_dir():
+        raise ValueError(f"源 job {source_job.id} 缺 overrides/ 目录")
+
+    # 校验所选 trial_numbers 在源中存在
+    existing_trials = {
+        t.trial_number
+        for t in db.query(TuningTrial)
+        .filter(TuningTrial.tuning_job_id == source_job.id)
+        .all()
+    }
+    missing = set(trial_numbers) - existing_trials
+    if missing:
+        raise ValueError(f"源 job 中以下 trial 不存在: {sorted(missing)}")
+
+    # ---- 创建衍生 job DB 行 ----
+    n_total = len(trial_numbers)
+    if reproduce_seeds:
+        # 复跑会再做 trial × seed 次额外训练，但 trials.csv 仍是 N 行（每 trial 聚合）
+        verification_name = (
+            f"{source_job.name} - 跨期验证+复跑 ({n_total} trial × {len(reproduce_seeds)} seed)"
+        )
+    else:
+        verification_name = f"{source_job.name} - 跨期验证 ({n_total} trial × 5 期)"
+
+    # config_snapshot 继承源 + 用户指定的 custom_segments
+    base_cfg = source_job.config_snapshot or {}
+    new_cfg = dict(base_cfg)  # shallow copy（含 task_config / record_config 等）
+    new_cfg["custom_segments"] = custom_segments
+
+    description = (
+        f"由源 job #{source_job.id} 衍生：对 trial {trial_numbers} 跑 walk-forward 验证；"
+        f"用源 job 的 task_config / record_config + 用户指定的 {len(custom_segments)} 期"
+    )
+    if reproduce_seeds:
+        description += f"；同时跑 multi-seed reproduce (seeds={reproduce_seeds})"
+
+    study_name = f"verification_job_{int(time.time() * 1000)}"
+    derived_job = TuningJob(
+        name=verification_name,
+        description=description,
+        status="created",
+        search_mode="walk_forward_5p",
+        config_snapshot=new_cfg,
+        optuna_study_name=study_name,
+        optuna_study_db_path="",  # 验证模式不用 optuna
+        workdir="",  # start_job_subprocess 会填
+        n_trials_target=n_total,
+        start_n_jobs=1,
+        start_num_threads=num_threads,
+        start_seed=seed,
+        experiment_id=source_job.experiment_id,
+        parent_job_id=source_job.id,
+        derived_trial_numbers=list(trial_numbers),
+    )
+    db.add(derived_job)
+    db.commit()
+    db.refresh(derived_job)
+
+    # ---- 准备衍生 job 的 workdir ----
+    # V3.7 修：仅复制 overrides/ 文件（每 trial 一个 JSON 含完整 SEARCH_PARAM_KEYS），
+    # 不复制源 trials.csv —— 否则 sync_trials_from_csv 会把源 70 行旧数据当成
+    # 验证 job 的 progress（n_trials_done=70）。验证 job 自己的 trials.csv 由
+    # cmd_walk_forward 跑完后写入（5 行）。
+    derived_workdir = get_job_workdir(derived_job.id)
+    derived_workdir.mkdir(parents=True, exist_ok=True)
+    (derived_workdir / "overrides").mkdir(exist_ok=True)
+    (derived_workdir / "run_index").mkdir(exist_ok=True)
+
+    for tnum in trial_numbers:
+        src = source_overrides / f"trial_{tnum:04d}.json"
+        if not src.is_file():
+            raise ValueError(
+                f"源 job {source_job.id} 缺 overrides/trial_{tnum:04d}.json；"
+                f"无法获取 trial {tnum} 的 GBDT 超参"
+            )
+        shutil.copy(src, derived_workdir / "overrides" / src.name)
+
+    # ---- 启动 subprocess（reproduce_seeds 通过环境编码传入 start_job_subprocess）----
+    derived_job.workdir = str(derived_workdir)
+    db.commit()
+
+    start_verification_subprocess(
+        db, derived_job,
+        trial_numbers=trial_numbers,
+        seed=seed,
+        num_threads=num_threads,
+        reproduce_seeds=reproduce_seeds,
+    )
+    return derived_job
 
 
-def start_walk_forward_subprocess(
+def start_verification_subprocess(
     db: Session,
     job: TuningJob,
     trial_numbers: List[int],
@@ -985,30 +1110,45 @@ def start_walk_forward_subprocess(
     num_threads: int = 20,
     reproduce_seeds: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
-    """启动 post_search_runner 子进程：先跑 walk_forward，再可选跑 reproduce。
+    """V3.7: 启动验证 job 的 post_search_runner 子进程.
 
-    要求：
-        - job 必须已完成搜索（status in done/cancelled/failed/zombie）
-        - trial_numbers 内每个 trial 必须存在于 tuning_trials 表（否则 walk_forward
-          子命令读 trials.csv 时会抛 ValueError）
+    与旧 start_walk_forward_subprocess 区别：
+        - 这是衍生 job 自己的 subprocess（写自己 workdir 的 walk_forward.csv 和
+          trials.csv），不是源 job 内 inplace 跑
+        - 把验证 job 的 task_config / custom_segments / record_config 写成 JSON
+          文件，透传给 train script
+        - 用 job.pid 而不是内存 registry（与正常搜索 job 一致，复用 reconcile_orphans）
     """
-    if not trial_numbers:
-        raise ValueError("trial_numbers 不能为空")
     if not job.workdir:
-        raise ValueError(f"job {job.id} 缺少 workdir（搜索未启动过？）")
-
-    # 重复启动防护：已有 walk-forward 在跑则直接返回当前 pid
-    existing = _walk_forward_procs.get(job.id)
-    if existing and is_pid_alive(existing[0], existing[1]):
-        return {
-            "job_id": job.id,
-            "status": "already_running",
-            "pid": existing[0],
-            "started_at": existing[1],
-        }
-
+        raise ValueError(f"verification job {job.id} 缺 workdir")
     workdir = Path(job.workdir)
-    workdir.mkdir(parents=True, exist_ok=True)
+
+    # 写出 task_config / custom_segments / record_config JSON（透传给 train script）
+    cfg = job.config_snapshot or {}
+    overrides_dir = workdir / "config_overrides"
+    overrides_dir.mkdir(parents=True, exist_ok=True)
+    config_args: List[str] = []
+
+    def _write(key: str, fname: str) -> Optional[Path]:
+        v = cfg.get(key)
+        if v is None or (isinstance(v, (list, dict)) and len(v) == 0):
+            return None
+        p = overrides_dir / fname
+        p.write_text(json.dumps(v, ensure_ascii=False, indent=2), encoding="utf-8")
+        return p
+
+    if (p := _write("task_config", "task_config.json")) is not None:
+        config_args += ["--task-config-json", str(p)]
+    if (p := _write("custom_segments", "custom_segments.json")) is not None:
+        config_args += ["--custom-segments-json", str(p)]
+    if (p := _write("record_config", "record_config.json")) is not None:
+        config_args += ["--record-config-json", str(p)]
+    # V3.7: 把验证 job 自身的 name / description 透传，让每个子训练的 run_name
+    # / description 跟搜索 job 风格一致（"<job-name> #<trial> walkforward s<seed>"）
+    if job.name:
+        config_args += ["--job-name", job.name]
+    if job.description:
+        config_args += ["--job-description", job.description]
 
     cmd = [
         TUNING_PYTHON_EXE,
@@ -1019,11 +1159,14 @@ def start_walk_forward_subprocess(
         "--trial-ids", ",".join(str(t) for t in trial_numbers),
         "--seed", str(seed),
         "--num-threads", str(num_threads),
-    ]
+    ] + config_args
     if reproduce_seeds:
         cmd += ["--reproduce-seeds", ",".join(str(s) for s in reproduce_seeds)]
 
-    log_path = workdir / "walk_forward.stdout.log"
+    # V3.7 修：日志写到 subprocess.stdout.log（与搜索 job 一致）
+    # 让 MonitorPage 的实时日志面板能直接读到（不必为验证 job 区分 log 文件名）
+    log_path = workdir / "subprocess.stdout.log"
+    job.log_path = str(log_path)
     log_fp = open(log_path, "ab")
     proc = subprocess.Popen(
         cmd,
@@ -1037,41 +1180,48 @@ def start_walk_forward_subprocess(
             "PYTHONIOENCODING": "utf-8",
         },
     )
-
-    # 持久化 pid + create_time 到内存 registry
     try:
         psutil_proc = psutil.Process(proc.pid)
-        started_at = psutil_proc.create_time()
+        job.pid_started_at = psutil_proc.create_time()
     except (psutil.NoSuchProcess, psutil.AccessDenied):
-        started_at = 0.0
-    _walk_forward_procs[job.id] = (proc.pid, started_at)
+        job.pid_started_at = None
+    job.pid = proc.pid
+    job.status = "running"
+    job.started_at = datetime.now()
+    job.error = None
+    db.commit()
+    db.refresh(job)
 
     print(
-        f"[TuningService] walk_forward subprocess 已启动 job={job.id} pid={proc.pid} "
-        f"trial_numbers={trial_numbers} seed={seed} reproduce_seeds={reproduce_seeds}"
+        f"[TuningService] verification job {job.id} 已启动 pid={proc.pid} "
+        f"trial_numbers={trial_numbers} reproduce_seeds={reproduce_seeds} log={log_path}"
     )
     return {
         "job_id": job.id,
         "status": "started",
         "pid": proc.pid,
-        "started_at": started_at,
         "log_path": str(log_path),
         "trial_numbers": trial_numbers,
         "reproduce_seeds": reproduce_seeds,
     }
 
 
-def get_walk_forward_subprocess_status(job_id: int) -> Dict[str, Any]:
-    """查 walk-forward 子进程是否还在跑。"""
-    info = _walk_forward_procs.get(job_id)
-    if not info:
+def get_derived_jobs(db: Session, parent_job_id: int) -> List[TuningJob]:
+    """V3.7: 返回某 source job 的所有衍生验证 job（按创建时间倒序）。"""
+    return (
+        db.query(TuningJob)
+        .filter(TuningJob.parent_job_id == parent_job_id)
+        .order_by(TuningJob.created_at.desc())
+        .all()
+    )
+
+
+def get_walk_forward_subprocess_status(job: TuningJob) -> Dict[str, Any]:
+    """V3.7: 查衍生 job 的 verification 子进程是否还活着（用 job.pid 而非内存 registry）。"""
+    if not job.pid:
         return {"running": False, "pid": None}
-    pid, started_at = info
-    alive = is_pid_alive(pid, started_at)
-    if not alive:
-        # 进程已退出，从 registry 清理（下次再启动时不会被重复防护卡住）
-        _walk_forward_procs.pop(job_id, None)
-    return {"running": alive, "pid": pid}
+    alive = is_pid_alive(job.pid, job.pid_started_at)
+    return {"running": alive, "pid": job.pid}
 
 
 def _parse_walk_forward_csv(workdir: Path) -> List[Dict[str, Any]]:
@@ -1205,7 +1355,7 @@ def get_walk_forward_results(job: TuningJob) -> Dict[str, Any]:
         summary_md_path.read_text(encoding="utf-8") if summary_md_path.is_file() else None
     )
 
-    status = get_walk_forward_subprocess_status(job.id)
+    status = get_walk_forward_subprocess_status(job)
     return {
         "job_id": job.id,
         "running": status["running"],
