@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Card,
-  Descriptions,
   Empty,
   Space,
   Spin,
@@ -14,6 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -179,14 +179,14 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                     days={30}
                   />
                   <Card title="参数 / 运行时变量" style={{ marginTop: 16 }}>
-                    <Descriptions
+                    <ResponsiveDescriptions
                       size="small"
-                      column={2}
                       bordered
+                      columns={{ xxl: 3, xl: 2, lg: 2, md: 2, sm: 1, xs: 1 }}
                       items={Object.entries(detail.parameters || {}).map(([k, v]) => ({
                         key: `p-${k}`,
                         label: k,
-                        children: (
+                        value: (
                           <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace" }}>
                             {String(v)}
                           </span>
@@ -199,11 +199,15 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                       </Text>
                       <pre
                         style={{
-                          background: '#f6f8fa',
+                          background: 'var(--ap-panel-muted)',
+                          color: 'var(--ap-text)',
+                          border: '1px solid var(--ap-border-muted)',
                           padding: 12,
                           borderRadius: 6,
                           fontSize: 12,
                           margin: '4px 0 0 0',
+                          overflowX: 'auto',
+                          fontFamily: 'var(--ap-font-mono)',
                         }}
                       >
                         {JSON.stringify(detail.variables || {}, null, 2)}
