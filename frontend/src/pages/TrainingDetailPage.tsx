@@ -8,6 +8,9 @@ import { trainingService } from '@/services/trainingService'
 import ReactECharts from 'echarts-for-react'
 import DeploymentBadges from '@/components/DeploymentBadges'
 import PageContainer from '@/components/layout/PageContainer'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
+import { useResponsiveModalProps } from '@/hooks/useResponsiveModalProps'
 
 const MemoEditor = React.lazy(() => import('@/components/MemoEditor/MemoEditor'))
 
@@ -119,25 +122,28 @@ const TrainingDetailPage: React.FC = () => {
   const statusInfo = STATUS_MAP[record.status] || STATUS_MAP.completed
   const configSnapshot = record.config_snapshot as Record<string, unknown> | undefined
 
-  const columns = [
+  const columns: ResponsiveColumn<any>[] = [
     {
       title: '#',
       dataIndex: 'segment_label',
       key: 'segment_label',
       width: 90,
-      render: (label: string) => <Text code style={{ color: '#1677ff', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>{label}</Text>,
+      mobileRole: 'title',
+      render: (label: string) => <Text code style={{ color: 'var(--ap-brand-primary)', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>{label}</Text>,
     },
     {
       title: 'Roll Index',
       dataIndex: 'rolling_index',
       key: 'rolling_index',
       width: 100,
-      render: (idx: number | null) => idx != null ? `#${idx + 1}` : <Text type="secondary">-</Text>,
+      mobileRole: 'badge',
+      render: (idx: number | null) => idx != null ? <Tag>#{idx + 1}</Tag> : <Text type="secondary">-</Text>,
     },
     {
       title: 'Train 时间段',
       key: 'train_range',
       width: 180,
+      mobileRole: 'metric',
       render: (_: unknown, rec: any) => {
         if (!rec.train_start) return <Text type="secondary">-</Text>
         const start = dayjs(rec.train_start).format('YYYY-MM-DD')
@@ -149,6 +155,7 @@ const TrainingDetailPage: React.FC = () => {
       title: 'Test 时间段',
       key: 'test_range',
       width: 160,
+      mobileRole: 'metric',
       render: (_: unknown, rec: any) => {
         if (!rec.test_start) return <Text type="secondary">-</Text>
         const start = dayjs(rec.test_start).format('YYYY-MM-DD')
@@ -162,9 +169,10 @@ const TrainingDetailPage: React.FC = () => {
       key: 'run_id',
       width: 140,
       ellipsis: true,
+      mobileRole: 'subtitle',
       render: (rid: string) => (
         <Tooltip title={rid}>
-          <Text code style={{ color: '#6b7280', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+          <Text code style={{ color: 'var(--ap-text-muted)', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
             {rid.slice(0, 12)}...
           </Text>
         </Tooltip>
@@ -174,11 +182,12 @@ const TrainingDetailPage: React.FC = () => {
       title: '操作',
       key: 'action',
       width: 90,
+      mobileRole: 'hidden',
       render: (_: unknown, rec: any) => (
         <Button
           type="link"
           size="small"
-          style={{ color: '#1677ff', paddingLeft: 0 }}
+          style={{ color: 'var(--ap-brand-primary)', paddingLeft: 0 }}
           onClick={(e) => {
             e.stopPropagation()
             navigate(`/report/${record.experiment_id}/${rec.run_id}`)
@@ -195,12 +204,22 @@ const TrainingDetailPage: React.FC = () => {
       key: 'runs',
       label: <span><UnorderedListOutlined /> 子运行列表 ({runMappings.length})</span>,
       children: runMappings.length > 0 ? (
-        <Table
+        <ResponsiveTable<any>
           dataSource={runMappings}
           columns={columns}
           rowKey="run_id"
           pagination={false}
           size="middle"
+          scrollX={760}
+          cardActions={(rec: any) => (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => navigate(`/report/${record.experiment_id}/${rec.run_id}`)}
+            >
+              查看报告
+            </Button>
+          )}
         />
       ) : (
         <Empty description="暂无关联的运行记录" style={{ padding: 32 }}>
@@ -352,33 +371,81 @@ const TrainingDetailPage: React.FC = () => {
             }
             size="small"
           >
-            <Descriptions column={{ xxl: 2, xl: 2, lg: 1, md: 1 }} bordered size="small">
-              <Descriptions.Item label="名称">{record.name}</Descriptions.Item>
-              <Descriptions.Item label="类型">{(record.run_mappings?.length || record.run_count || 0) > 1 ? '滚动训练' : '单次训练'}</Descriptions.Item>
-              <Descriptions.Item label="状态">
-                <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="描述">{record.description || '-'}</Descriptions.Item>
-              <Descriptions.Item label="关联运行数">
-                <Badge count={runMappings.length} style={{ backgroundColor: '#1677ff' }} /> 个 Run
-              </Descriptions.Item>
-              <Descriptions.Item label="实验">
-                <Text code style={{ cursor: 'pointer' }} onClick={() => navigate(`/experiments/${record.experiment_id}`)}>
-                  {record.experiment_name || record.experiment_id}
-                </Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="创建时间">
-                {record.created_at ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="完成时间">
-                {record.completed_at ? dayjs(record.completed_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="命令行" span={2}>
-                <Text copyable style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace" }}>
-                  {record.command_line || '-'}
-                </Text>
-              </Descriptions.Item>
-            </Descriptions>
+            <ResponsiveDescriptions
+              bordered
+              size="small"
+              columns={{ xxl: 2, xl: 2, lg: 1, md: 1, sm: 1, xs: 1 }}
+              items={[
+                { key: 'name', label: '名称', value: record.name },
+                {
+                  key: 'type',
+                  label: '类型',
+                  value:
+                    (record.run_mappings?.length || record.run_count || 0) > 1
+                      ? '滚动训练'
+                      : '单次训练',
+                },
+                {
+                  key: 'status',
+                  label: '状态',
+                  value: <Tag color={statusInfo.color}>{statusInfo.label}</Tag>,
+                },
+                { key: 'desc', label: '描述', value: record.description || '-' },
+                {
+                  key: 'run-count',
+                  label: '关联运行数',
+                  value: (
+                    <>
+                      <Badge
+                        count={runMappings.length}
+                        style={{ backgroundColor: 'var(--ap-brand-primary)' }}
+                      />{' '}
+                      个 Run
+                    </>
+                  ),
+                },
+                {
+                  key: 'experiment',
+                  label: '实验',
+                  value: (
+                    <Text
+                      code
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/experiments/${record.experiment_id}`)}
+                    >
+                      {record.experiment_name || record.experiment_id}
+                    </Text>
+                  ),
+                },
+                {
+                  key: 'created',
+                  label: '创建时间',
+                  value: record.created_at
+                    ? dayjs(record.created_at).format('YYYY-MM-DD HH:mm:ss')
+                    : '-',
+                },
+                {
+                  key: 'completed',
+                  label: '完成时间',
+                  value: record.completed_at
+                    ? dayjs(record.completed_at).format('YYYY-MM-DD HH:mm:ss')
+                    : '-',
+                },
+                {
+                  key: 'cmd',
+                  label: '命令行',
+                  span: 2,
+                  value: (
+                    <Text
+                      copyable
+                      style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace" }}
+                    >
+                      {record.command_line || '-'}
+                    </Text>
+                  ),
+                },
+              ]}
+            />
           </Card>
 
           <Card
@@ -1166,16 +1233,19 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
 
         <Col span={24}>
           <Card title={`各子运行详情 (${individual_runs.length})`} size="small">
-            <Table
+            <ResponsiveTable<any>
               dataSource={individual_runs}
               pagination={false}
               size="small"
+              scrollX={600}
+              rowKey="run_id"
               columns={[
                 {
                   title: '#',
                   dataIndex: 'rolling_index',
                   key: 'rolling_index',
                   width: 80,
+                  mobileRole: 'title',
                   render: (idx: number | null) => idx != null ? `#${idx + 1}` : '-',
                 },
                 {
@@ -1183,12 +1253,14 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   dataIndex: 'run_id',
                   key: 'run_id',
                   ellipsis: true,
+                  mobileRole: 'subtitle',
                   render: (rid: string) => <Text code>{rid}</Text>,
                 },
                 {
                   title: '时间段',
                   dataIndex: 'test_range',
                   key: 'test_range',
+                  mobileRole: 'metric',
                   render: (range: string) => <Text style={{ fontSize: 12 }}>{range}</Text>,
                 },
                 {
@@ -1196,10 +1268,10 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   dataIndex: 'data_points',
                   key: 'data_points',
                   align: 'right',
+                  mobileRole: 'metric',
                   render: (points: number) => <Text strong>{points}</Text>,
                 },
               ]}
-              rowKey="run_id"
             />
           </Card>
         </Col>

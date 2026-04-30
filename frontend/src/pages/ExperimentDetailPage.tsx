@@ -1,9 +1,12 @@
 import React, { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Table, Tag, Button, Space, Typography, Card, Tabs, Timeline, Tooltip, Spin,
-  Modal, Input, Alert, message, Descriptions,
+  Tag, Button, Space, Typography, Card, Tabs, Timeline, Tooltip, Spin,
+  Modal, Input, Alert, message,
 } from 'antd'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
+import { useResponsiveModalProps } from '@/hooks/useResponsiveModalProps'
 import {
   ArrowLeftOutlined, UnorderedListOutlined, FieldTimeOutlined,
   DeleteOutlined, ExclamationCircleOutlined,
@@ -145,13 +148,14 @@ const ExperimentDetailPage: React.FC = () => {
   const unlinkedSize = unlinkedData?.data?.total_size_bytes ?? 0
   const canConfirm = confirmText.trim() === 'DELETE'
 
-  const columns = useMemo(() => [
+  const columns = useMemo<ResponsiveColumn<RunListItem>[]>(() => [
     {
       title: 'Run ID',
       dataIndex: 'run_id',
       key: 'run_id',
+      mobileRole: 'subtitle',
       render: (id: string) => (
-        <Text code style={{ color: '#1677ff', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
+        <Text code style={{ color: 'var(--ap-brand-primary)', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
           {id.slice(0, 12)}...
         </Text>
       ),
@@ -162,6 +166,7 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'run_name',
       key: 'run_name',
       ellipsis: true,
+      mobileRole: 'title',
       render: (name: string) => name || <Text type="secondary">-</Text>,
     },
     {
@@ -169,6 +174,7 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'linked_sources',
       key: 'linked_sources',
       width: 200,
+      mobileRole: 'badge',
       render: (_: unknown, record: RunListItem) => renderLinkedSources(record.linked_sources),
     },
     {
@@ -176,6 +182,7 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 100,
+      mobileRole: 'badge',
       render: (status: string) => {
         const cfg = STATUS_MAP[status] || { color: '#d9d9d9', label: status }
         return <Tag color={cfg.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>{cfg.label}</Tag>
@@ -186,6 +193,7 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'start_time',
       key: 'start_time',
       width: 170,
+      mobileRole: 'metric',
       render: (t: number | null) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
@@ -193,17 +201,19 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'end_time',
       key: 'end_time',
       width: 170,
+      mobileRole: 'metric',
       render: (t: number | null) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
       title: '操作',
       key: 'action',
       width: 90,
+      mobileRole: 'hidden',
       render: (_: unknown, record: RunListItem) => (
         <Button
           type="link"
           size="small"
-          style={{ color: '#1677ff', paddingLeft: 0 }}
+          style={{ color: 'var(--ap-brand-primary)', paddingLeft: 0 }}
           onClick={(e) => { e.stopPropagation(); navigate(`/report/${expId}/${record.run_id}`) }}
         >
           查看报告
@@ -211,6 +221,8 @@ const ExperimentDetailPage: React.FC = () => {
       ),
     },
   ], [expId, navigate])
+
+  const responsiveModalProps = useResponsiveModalProps()
 
   if (!experiment) {
     return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
@@ -255,11 +267,12 @@ const ExperimentDetailPage: React.FC = () => {
               <span><UnorderedListOutlined /> 全部运行 ({totalRuns})</span>
             ),
             children: (
-              <Table
+              <ResponsiveTable<RunListItem>
                 columns={columns}
                 dataSource={runs}
                 rowKey="run_id"
                 loading={runsLoading}
+                scrollX={870}
                 pagination={{
                   current: page,
                   pageSize,
@@ -268,10 +281,7 @@ const ExperimentDetailPage: React.FC = () => {
                   showSizeChanger: false,
                   showTotal: (t) => `共 ${t} 条`,
                 }}
-                onRow={(record) => ({
-                  onClick: () => navigate(`/report/${expId}/${record.run_id}`),
-                  style: { cursor: 'pointer' },
-                })}
+                onRowClick={(record) => navigate(`/report/${expId}/${record.run_id}`)}
                 size="middle"
               />
             ),
@@ -318,6 +328,7 @@ const ExperimentDetailPage: React.FC = () => {
       />
 
       <Modal
+        {...responsiveModalProps}
         title={
           <span>
             <ExclamationCircleOutlined style={{ color: '#fa8c16', marginRight: 8 }} />
@@ -326,7 +337,7 @@ const ExperimentDetailPage: React.FC = () => {
         }
         open={cleanupOpen}
         onCancel={() => { setCleanupOpen(false); setConfirmText('') }}
-        width={780}
+        width={responsiveModalProps.width ?? 780}
         footer={[
           <Button key="refresh" onClick={() => refetchUnlinked()} loading={unlinkedLoading}>
             刷新列表
@@ -376,26 +387,36 @@ const ExperimentDetailPage: React.FC = () => {
           <Spin />
         ) : (
           <>
-            <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
-              <Descriptions.Item label="待删 run 数">
-                <Text strong>{unlinkedCount}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="预计释放">
-                <Text strong>{formatBytes(unlinkedSize)}</Text>
-              </Descriptions.Item>
-            </Descriptions>
+            <ResponsiveDescriptions
+              size="small"
+              style={{ marginBottom: 12 }}
+              columns={{ xxl: 2, xl: 2, lg: 2, md: 2, sm: 2, xs: 1 }}
+              items={[
+                {
+                  key: 'count',
+                  label: '待删 run 数',
+                  value: <Text strong>{unlinkedCount}</Text>,
+                },
+                {
+                  key: 'size',
+                  label: '预计释放',
+                  value: <Text strong>{formatBytes(unlinkedSize)}</Text>,
+                },
+              ]}
+            />
 
-            <Table
+            <ResponsiveTable<any>
               size="small"
               dataSource={unlinkedItems}
               rowKey="run_id"
               pagination={{ pageSize: 10, showSizeChanger: false }}
-              scroll={{ y: 240 }}
+              scrollX={530}
               columns={[
                 {
                   title: 'Run ID',
                   dataIndex: 'run_id',
                   width: 130,
+                  mobileRole: 'title',
                   render: (id: string) => (
                     <Text code style={{ fontSize: 11 }}>{id.slice(0, 12)}...</Text>
                   ),
@@ -404,12 +425,14 @@ const ExperimentDetailPage: React.FC = () => {
                   title: '名称',
                   dataIndex: 'run_name',
                   ellipsis: true,
+                  mobileRole: 'subtitle',
                   render: (n: string) => n || <Text type="secondary">-</Text>,
                 },
                 {
                   title: '开始时间',
                   dataIndex: 'start_time',
                   width: 160,
+                  mobileRole: 'metric',
                   render: (t: number | null) => t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-',
                 },
                 {
@@ -417,6 +440,7 @@ const ExperimentDetailPage: React.FC = () => {
                   dataIndex: 'size_bytes',
                   width: 90,
                   align: 'right' as const,
+                  mobileRole: 'metric',
                   render: (b: number) => formatBytes(b),
                 },
               ]}
