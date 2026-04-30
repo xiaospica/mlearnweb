@@ -16,6 +16,8 @@ import PageContainer from '@/components/layout/PageContainer'
 import { useIsMobile } from '@/hooks/useBreakpoint'
 import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import ChartContainer from '@/components/responsive/ChartContainer'
+import LazyMount from '@/components/responsive/LazyMount'
 
 const { Title, Text } = Typography
 
@@ -4733,8 +4735,17 @@ const ReportPage: React.FC = () => {
                 { key: 'annual', title: '年度收益直方图', span: 'half', node: <AnnualReturnHistogram data={report.annual_returns} /> },
               ]
 
+              // 用 LazyMount 包装：IntersectionObserver 接近视口 300px 才挂载，
+              // 减少首屏 echarts/plotly 实例化开销；占位高度 300 防 CLS
+              const lazyNode = (n: React.ReactNode) => (
+                <LazyMount placeholderHeight={300} rootMargin="300px">
+                  {n}
+                </LazyMount>
+              )
+
               if (isMobile) {
                 // 移动端：Collapse 折叠展示，仅累计收益曲线 + 回撤分析默认展开
+                // Collapse 内部本身有展开懒挂载效果，叠加 LazyMount 使展开后接近视口才挂载
                 return (
                   <Collapse
                     defaultActiveKey={['cumulative', 'drawdown']}
@@ -4742,24 +4753,24 @@ const ReportPage: React.FC = () => {
                     items={charts.map((c) => ({
                       key: c.key,
                       label: c.title,
-                      children: c.node,
+                      children: lazyNode(c.node),
                       style: { background: 'var(--ap-panel)', marginBottom: 8, borderRadius: 8 },
                     }))}
                   />
                 )
               }
 
-              // 桌面：保持 Row/Col 网格
+              // 桌面：保持 Row/Col 网格，每个 chart 用 LazyMount 包裹
               return (
                 <Row gutter={[16, 16]}>
                   {charts.map((c) =>
                     c.span === 'full' ? (
                       <Col span={24} key={c.key}>
-                        <Card title={c.title} size="small">{c.node}</Card>
+                        <Card title={c.title} size="small">{lazyNode(c.node)}</Card>
                       </Col>
                     ) : (
                       <Col xs={24} lg={12} key={c.key}>
-                        <Card title={c.title} size="small">{c.node}</Card>
+                        <Card title={c.title} size="small">{lazyNode(c.node)}</Card>
                       </Col>
                     ),
                   )}

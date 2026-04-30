@@ -42,7 +42,13 @@ import type { EChartsReactProps } from 'echarts-for-react'
 import Plot from 'react-plotly.js'
 import type Plotly from 'plotly.js'
 import { useActiveBp } from '@/hooks/useBreakpoint'
-import { observeResize, resolveChartHeight, type ChartHeightSpec } from './chart-utils'
+import { useTheme } from '@/hooks/useTheme'
+import {
+  applyEChartsThemeChrome,
+  observeResize,
+  resolveChartHeight,
+  type ChartHeightSpec,
+} from './chart-utils'
 
 interface BaseProps {
   /** 高度（数字或按断点）。默认 xs:220 / sm:240 / md:280 / lg:320 */
@@ -85,6 +91,7 @@ const ChartContainer = forwardRef<ChartContainerHandle, ChartContainerProps>((pr
   const echartsRef = useRef<ReactECharts | null>(null)
   const plotlyGdRef = useRef<Plotly.PlotlyHTMLElement | null>(null)
   const bp = useActiveBp()
+  const { mode } = useTheme()
   const resolvedHeight = useMemo(() => resolveChartHeight(height, bp), [height, bp])
 
   const triggerResize = () => {
@@ -170,7 +177,7 @@ const ChartContainer = forwardRef<ChartContainerHandle, ChartContainerProps>((pr
             ref={(r) => {
               echartsRef.current = r
             }}
-            option={(props as EChartsProps).option}
+            option={applyEChartsThemeChrome((props as EChartsProps).option, mode)}
             notMerge
             lazyUpdate
             style={{ width: '100%', height: '100%' }}
