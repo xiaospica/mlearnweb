@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Row, Col, Card, Typography, Tabs, Tag, Button, Space, Spin, Table, Descriptions, Empty, Tooltip, message, notification, Select, Alert, Statistic } from 'antd'
+import { Row, Col, Card, Typography, Tabs, Tag, Button, Space, Spin, Table, Descriptions, Empty, Tooltip, message, notification, Select, Alert, Statistic, Collapse } from 'antd'
 import { ArrowLeftOutlined, BarChartOutlined, SettingOutlined, TableOutlined, InfoCircleOutlined, ExperimentOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, BulbOutlined, DotChartOutlined, LineChartOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactECharts from 'echarts-for-react'
@@ -13,6 +13,9 @@ import { FactorInfoModal } from '@/components/FactorInfoModal'
 import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData, LagICAnalysis, HoldingsAnalysis, SHAPHeatmapData } from '@/types'
 import { computeEqualScaleTicks, fixPlotlyFigureXAxis } from '@/utils/chartHelpers'
 import PageContainer from '@/components/layout/PageContainer'
+import { useIsMobile } from '@/hooks/useBreakpoint'
+import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 
 const { Title, Text } = Typography
 
@@ -853,42 +856,59 @@ const ModelPerformanceTable: React.FC<{ data?: { available: boolean; sample_coun
     <Row gutter={[16, 16]}>
       <Col span={24}>
         <Card title={`模型性能概览 (样本数: ${sample_count || 0})`} size="small">
-          <Descriptions column={3} size="small" bordered>
-            <Descriptions.Item label="样本总数">{sample_count || 0}</Descriptions.Item>
-            <Descriptions.Item label="方向准确率">
-              <Text style={{ color: direction_accuracy && direction_accuracy > 0.5 ? '#52c41a' : '#ff4d4f' }}>
-                {direction_accuracy ? (direction_accuracy * 100).toFixed(2) + '%' : '-'}
-              </Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="Rank IC">
-              <Text style={{ color: rank_ic && rank_ic > 0 ? '#52c41a' : '#ff4d4f' }}>
-                {rank_ic?.toFixed(4) || '-'}
-              </Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="MSE">{mse?.toExponential(4) || '-'}</Descriptions.Item>
-            <Descriptions.Item label="MAE">{mae?.toExponential(4) || '-'}</Descriptions.Item>
-            <Descriptions.Item label="多空收益差">
-              <Text style={{ color: quantile_analysis?.long_short_return && quantile_analysis.long_short_return > 0 ? '#52c41a' : '#ff4d4f' }}>
-                {quantile_analysis?.long_short_return ? ((quantile_analysis.long_short_return) * 100).toFixed(3) + '%' : '-'}
-              </Text>
-            </Descriptions.Item>
-          </Descriptions>
+          <ResponsiveDescriptions
+            size="small"
+            bordered
+            columns={{ xxl: 3, xl: 3, lg: 3, md: 3, sm: 2, xs: 1 }}
+            items={[
+              { key: 'samples', label: '样本总数', value: sample_count || 0 },
+              {
+                key: 'dir-acc',
+                label: '方向准确率',
+                value: (
+                  <Text style={{ color: direction_accuracy && direction_accuracy > 0.5 ? 'var(--ap-success)' : 'var(--ap-danger)' }}>
+                    {direction_accuracy ? (direction_accuracy * 100).toFixed(2) + '%' : '-'}
+                  </Text>
+                ),
+              },
+              {
+                key: 'rank-ic',
+                label: 'Rank IC',
+                value: (
+                  <Text style={{ color: rank_ic && rank_ic > 0 ? 'var(--ap-success)' : 'var(--ap-danger)' }}>
+                    {rank_ic?.toFixed(4) || '-'}
+                  </Text>
+                ),
+              },
+              { key: 'mse', label: 'MSE', value: mse?.toExponential(4) || '-' },
+              { key: 'mae', label: 'MAE', value: mae?.toExponential(4) || '-' },
+              {
+                key: 'ls',
+                label: '多空收益差',
+                value: (
+                  <Text style={{ color: quantile_analysis?.long_short_return && quantile_analysis.long_short_return > 0 ? 'var(--ap-success)' : 'var(--ap-danger)' }}>
+                    {quantile_analysis?.long_short_return ? ((quantile_analysis.long_short_return) * 100).toFixed(3) + '%' : '-'}
+                  </Text>
+                ),
+              },
+            ]}
+          />
         </Card>
       </Col>
 
       {classificationData.length > 0 && (
         <Col xs={24} lg={12}>
           <Card title="分类指标 (阈值=0)" size="small">
-            <Table
+            <ResponsiveTable<{ key: string; value: string; desc: string }>
               size="small"
               dataSource={classificationData}
               pagination={false}
-              columns={[
-                { title: '指标', dataIndex: 'key', key: 'key', render: (t: string) => <Text code style={{ color: '#1677ff', fontSize: 13 }}>{t}</Text> },
-                { title: '值', dataIndex: 'value', key: 'value', align: 'right', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14 }}>{t}</Text> },
-                { title: '说明', dataIndex: 'desc', key: 'desc', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
-              ]}
               rowKey="key"
+              columns={[
+                { title: '指标', dataIndex: 'key', key: 'key', mobileRole: 'title', render: (t: string) => <Text code style={{ color: 'var(--ap-brand-primary)', fontSize: 13 }}>{t}</Text> },
+                { title: '值', dataIndex: 'value', key: 'value', align: 'right', mobileRole: 'badge', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14 }}>{t}</Text> },
+                { title: '说明', dataIndex: 'desc', key: 'desc', mobileRole: 'subtitle', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
+              ]}
             />
           </Card>
         </Col>
@@ -897,16 +917,16 @@ const ModelPerformanceTable: React.FC<{ data?: { available: boolean; sample_coun
       {confusionMatrixData.length > 0 && (
         <Col xs={24} lg={12}>
           <Card title="混淆矩阵" size="small">
-            <Table
+            <ResponsiveTable<{ key: string; value: string; desc: string }>
               size="small"
               dataSource={confusionMatrixData}
               pagination={false}
-              columns={[
-                { title: '指标', dataIndex: 'key', key: 'key', render: (t: string) => <Text code style={{ color: '#722ed1', fontSize: 13 }}>{t}</Text> },
-                { title: '数量', dataIndex: 'value', key: 'value', align: 'right', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14 }}>{t}</Text> },
-                { title: '说明', dataIndex: 'desc', key: 'desc', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
-              ]}
               rowKey="key"
+              columns={[
+                { title: '指标', dataIndex: 'key', key: 'key', mobileRole: 'title', render: (t: string) => <Text code style={{ color: 'var(--ap-accent)', fontSize: 13 }}>{t}</Text> },
+                { title: '数量', dataIndex: 'value', key: 'value', align: 'right', mobileRole: 'badge', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14 }}>{t}</Text> },
+                { title: '说明', dataIndex: 'desc', key: 'desc', mobileRole: 'subtitle', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
+              ]}
             />
           </Card>
         </Col>
@@ -915,16 +935,16 @@ const ModelPerformanceTable: React.FC<{ data?: { available: boolean; sample_coun
       {quantileData.length > 0 && (
         <Col xs={24} lg={12}>
           <Card title="分位数收益分析 (5组)" size="small">
-            <Table
+            <ResponsiveTable<{ key: string; value: string; desc: string }>
               size="small"
               dataSource={quantileData}
               pagination={false}
-              columns={[
-                { title: '分组', dataIndex: 'key', key: 'key', width: 80, render: (t: string) => <Tag color={['#ff4d4f', '#ff7875', '#faad14', '#95de64', '#52c41a'][['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].indexOf(t)]}>{t}</Tag> },
-                { title: '平均收益', dataIndex: 'value', key: 'value', align: 'right', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14, color: t.includes('-') ? '#ff4d4f' : '#52c41a' }}>{t}</Text> },
-                { title: '说明', dataIndex: 'desc', key: 'desc', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
-              ]}
               rowKey="key"
+              columns={[
+                { title: '分组', dataIndex: 'key', key: 'key', width: 80, mobileRole: 'title', render: (t: string) => <Tag color={['#ff4d4f', '#ff7875', '#faad14', '#95de64', '#52c41a'][['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].indexOf(t)]}>{t}</Tag> },
+                { title: '平均收益', dataIndex: 'value', key: 'value', align: 'right', mobileRole: 'badge', render: (t: string) => <Text strong style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 14, color: t.includes('-') ? 'var(--ap-market-down)' : 'var(--ap-market-up)' }}>{t}</Text> },
+                { title: '说明', dataIndex: 'desc', key: 'desc', mobileRole: 'subtitle', render: (t: string) => <Text type="secondary" style={{ fontSize: 11 }}>{t}</Text> },
+              ]}
             />
           </Card>
         </Col>
@@ -1157,19 +1177,18 @@ const ModelParamsPanel: React.FC<{ params: Record<string, unknown>; config?: Rec
 
   return (
     <div>
-      <Descriptions
+      <ResponsiveDescriptions
         size="small"
-        column={2}
         bordered
+        columns={{ xxl: 2, xl: 2, lg: 2, md: 2, sm: 1, xs: 1 }}
         style={{ marginBottom: 16 }}
-        labelStyle={{ color: '#6b7280', background: '#fafafa', width: 120 }}
-        contentStyle={{ color: '#374151', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}
-      >
-        <Descriptions.Item label="模型类名">{String(modelInfo.class || '-')}</Descriptions.Item>
-        <Descriptions.Item label="模块路径">{String(modelInfo.module_path || '-')}</Descriptions.Item>
-        <Descriptions.Item label="数据集类名">{String(datasetInfo.class || '-')}</Descriptions.Item>
-        <Descriptions.Item label="数据集模块">{String((datasetInfo as Record<string, unknown>).module_path || '-')}</Descriptions.Item>
-      </Descriptions>
+        items={[
+          { key: 'model-class', label: '模型类名', value: <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}>{String(modelInfo.class || '-')}</span> },
+          { key: 'model-module', label: '模块路径', value: <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}>{String(modelInfo.module_path || '-')}</span> },
+          { key: 'dataset-class', label: '数据集类名', value: <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}>{String(datasetInfo.class || '-')}</span> },
+          { key: 'dataset-module', label: '数据集模块', value: <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 13 }}>{String((datasetInfo as Record<string, unknown>).module_path || '-')}</span> },
+        ]}
+      />
 
       {renderParamTable((modelInfo.kwargs as Record<string, unknown>) || {}, '模型超参数')}
       {renderParamTable(handler, 'Handler配置')}
@@ -4554,6 +4573,8 @@ const ReportPage: React.FC = () => {
   const navigate = useNavigate()
   const [inSampleTrigger, setInSampleTrigger] = React.useState(0)
   const [isInSampleLoading, setIsInSampleLoading] = React.useState(false)
+  // 移动端把图表总览的 11 张卡折叠展示，仅前 2 张默认展开（避免一次性挂载所有 echarts/plotly 实例）
+  const isMobile = useIsMobile()
 
   const { data: reportData, isLoading, error } = useQuery({
     queryKey: ['report', expId, runId],
@@ -4690,65 +4711,61 @@ const ReportPage: React.FC = () => {
           {
             key: 'overview',
             label: <span><BarChartOutlined /> 图表总览</span>,
-            children: (
-              <Row gutter={[16, 16]}>
-                <Col span={24}>
-                  <Card title="累计收益曲线" size="small">
-                    <CumulativeReturnChart data={report.portfolio_data} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="回撤分析" size="small">
-                    <DrawdownChart data={report.portfolio_data} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="换手率" size="small">
-                    <TurnoverChart data={report.portfolio_data} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="IC 时序分析" size="small">
-                    <ICChart data={report.ic_analysis} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="IC 分布直方图" size="small">
-                    <ICDistributionChart data={report.ic_analysis} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="预测分数分布" size="small">
-                    <PredictionHistogram data={report.prediction_stats} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="预测 vs 标签散点图" size="small">
-                    <PredLabelScatterChart data={report.pred_label_data} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="滚动统计 (20日)" size="small">
-                    <RollingStatsChart data={report.rolling_stats} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="月度收益直方图" size="small">
-                    <MonthlyReturnHistogram data={report.monthly_returns} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="月度收益热力图" size="small">
-                    <MonthlyReturnHeatmap data={report.monthly_returns} />
-                  </Card>
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Card title="年度收益直方图" size="small">
-                    <AnnualReturnHistogram data={report.annual_returns} />
-                  </Card>
-                </Col>
-              </Row>
-            ),
+            children: (() => {
+              // 11 张图统一为数组，桌面 Row/Col 网格，移动 Collapse 折叠
+              const charts: Array<{
+                key: string
+                title: string
+                /** 桌面占据的栅格宽度：'full' = 24 列；'half' = lg+ 占 12 列、xs 占 24 */
+                span: 'full' | 'half'
+                node: React.ReactNode
+              }> = [
+                { key: 'cumulative', title: '累计收益曲线', span: 'full', node: <CumulativeReturnChart data={report.portfolio_data} /> },
+                { key: 'drawdown', title: '回撤分析', span: 'half', node: <DrawdownChart data={report.portfolio_data} /> },
+                { key: 'turnover', title: '换手率', span: 'half', node: <TurnoverChart data={report.portfolio_data} /> },
+                { key: 'ic', title: 'IC 时序分析', span: 'half', node: <ICChart data={report.ic_analysis} /> },
+                { key: 'ic-dist', title: 'IC 分布直方图', span: 'half', node: <ICDistributionChart data={report.ic_analysis} /> },
+                { key: 'pred-hist', title: '预测分数分布', span: 'half', node: <PredictionHistogram data={report.prediction_stats} /> },
+                { key: 'pred-scatter', title: '预测 vs 标签散点图', span: 'half', node: <PredLabelScatterChart data={report.pred_label_data} /> },
+                { key: 'rolling', title: '滚动统计 (20日)', span: 'half', node: <RollingStatsChart data={report.rolling_stats} /> },
+                { key: 'monthly-hist', title: '月度收益直方图', span: 'half', node: <MonthlyReturnHistogram data={report.monthly_returns} /> },
+                { key: 'monthly-heat', title: '月度收益热力图', span: 'half', node: <MonthlyReturnHeatmap data={report.monthly_returns} /> },
+                { key: 'annual', title: '年度收益直方图', span: 'half', node: <AnnualReturnHistogram data={report.annual_returns} /> },
+              ]
+
+              if (isMobile) {
+                // 移动端：Collapse 折叠展示，仅累计收益曲线 + 回撤分析默认展开
+                return (
+                  <Collapse
+                    defaultActiveKey={['cumulative', 'drawdown']}
+                    bordered={false}
+                    items={charts.map((c) => ({
+                      key: c.key,
+                      label: c.title,
+                      children: c.node,
+                      style: { background: 'var(--ap-panel)', marginBottom: 8, borderRadius: 8 },
+                    }))}
+                  />
+                )
+              }
+
+              // 桌面：保持 Row/Col 网格
+              return (
+                <Row gutter={[16, 16]}>
+                  {charts.map((c) =>
+                    c.span === 'full' ? (
+                      <Col span={24} key={c.key}>
+                        <Card title={c.title} size="small">{c.node}</Card>
+                      </Col>
+                    ) : (
+                      <Col xs={24} lg={12} key={c.key}>
+                        <Card title={c.title} size="small">{c.node}</Card>
+                      </Col>
+                    ),
+                  )}
+                </Row>
+              )
+            })(),
           },
           {
             key: 'model',
