@@ -1,53 +1,14 @@
 import React from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Card, Menu } from 'antd'
-import { BookOutlined, FileTextOutlined, DatabaseOutlined, AppstoreOutlined } from '@ant-design/icons'
+import { Outlet } from 'react-router-dom'
 
+/**
+ * Help 子路由 wrapper：仅作 <Outlet /> 容器。
+ * 子页导航已由 AppLayout 的 Sidebar / MobileNavDrawer 提供（详见
+ * src/config/navigation.ts 中 help.children 的 4 项），不再需要内嵌
+ * 左侧菜单卡片，避免与 Sidebar 重复。
+ */
 const HelpLayout: React.FC = () => {
-  const location = useLocation()
-  const navigate = useNavigate()
-
-  const selectedKey = location.pathname.split('/').pop() || 'categories'
-
-  const menuItems = [
-    {
-      key: 'categories',
-      icon: <AppstoreOutlined />,
-      label: '因子分类说明',
-    },
-    {
-      key: 'alpha158',
-      icon: <DatabaseOutlined />,
-      label: 'Alpha158 因子',
-    },
-    {
-      key: 'alpha101',
-      icon: <FileTextOutlined />,
-      label: 'Alpha101 因子',
-    },
-    {
-      key: 'alpha191',
-      icon: <BookOutlined />,
-      label: 'Alpha191 因子',
-    },
-  ]
-
-  return (
-    <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 56px)', flexWrap: 'wrap' }}>
-      <Card style={{ width: 200, height: 'fit-content' }}>
-        <Menu
-          mode="vertical"
-          selectedKeys={[selectedKey]}
-          onClick={({ key }) => navigate(`/help/${key}`)}
-          items={menuItems}
-          style={{ border: 'none' }}
-        />
-      </Card>
-      <div style={{ flex: 1 }}>
-        <Outlet />
-      </div>
-    </div>
-  )
+  return <Outlet />
 }
 
 export default HelpLayout

@@ -1,9 +1,16 @@
 import React from 'react'
-import { Card, Typography, Table, Tag, Space, Divider } from 'antd'
+import { Card, Typography, Tag } from 'antd'
+import PageContainer from '@/components/layout/PageContainer'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 
-const FACTOR_CATEGORIES = [
+interface FactorCategory {
+  name: string
+  description: string
+}
+
+const FACTOR_CATEGORIES: FactorCategory[] = [
   {
     name: 'K线形态',
     description: '基于K线开盘价、收盘价、最高价、最低价计算的形态因子，反映价格走势特征',
@@ -58,32 +65,36 @@ const FACTOR_CATEGORIES = [
   },
 ]
 
-const columns = [
+const columns: ResponsiveColumn<FactorCategory>[] = [
   {
     title: '分类名称',
     dataIndex: 'name',
     key: 'name',
     width: 120,
+    mobileRole: 'title',
     render: (name: string) => <Tag color="blue">{name}</Tag>,
   },
   {
     title: '说明',
     dataIndex: 'description',
     key: 'description',
+    mobileRole: 'subtitle',
     render: (desc: string) => <Text>{desc}</Text>,
   },
 ]
 
 const FactorCategoriesPage: React.FC = () => {
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={4}>因子分类说明</Title>
+    <PageContainer
+      title="因子分类说明"
+      subtitle="量化因子的常用分类标准，适用于 Alpha158 / Alpha101 / Alpha191 等各类因子库"
+    >
       <Card>
         <Paragraph>
           因子分类是量化投资中组织和理解因子的重要方式。以下是常用的因子分类标准，
           适用于 Alpha158、Alpha101、Alpha191 等各类因子库。
         </Paragraph>
-        <Table
+        <ResponsiveTable<FactorCategory>
           dataSource={FACTOR_CATEGORIES}
           columns={columns}
           rowKey="name"
@@ -91,7 +102,7 @@ const FactorCategoriesPage: React.FC = () => {
           size="small"
         />
       </Card>
-    </div>
+    </PageContainer>
   )
 }
 

@@ -1,10 +1,25 @@
 import React, { useState } from 'react'
-import { Card, Typography, Table, Tag, Input, Space, Spin, Empty, Alert } from 'antd'
+import { Card, Typography, Tag, Input, Space, Empty, Alert } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { factorDocService } from '@/services/factorDocService'
+import PageContainer from '@/components/layout/PageContainer'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 
-const { Title, Text } = Typography
+const { Text } = Typography
+
+interface Alpha101Factor {
+  name: string
+  category: string
+  expression: string
+  description: string
+}
+
+interface BaseFunction {
+  name: string
+  syntax: string
+  description: string
+}
 
 const Alpha101DocsPage: React.FC = () => {
   const [searchText, setSearchText] = useState('')
@@ -30,12 +45,13 @@ const Alpha101DocsPage: React.FC = () => {
     return matchSearch && matchCategory
   })
 
-  const columns = [
+  const columns: ResponsiveColumn<Alpha101Factor>[] = [
     {
       title: '因子名称',
       dataIndex: 'name',
       key: 'name',
       width: 100,
+      mobileRole: 'title',
       render: (name: string) => <Text code strong>{name.toUpperCase()}</Text>,
     },
     {
@@ -43,6 +59,7 @@ const Alpha101DocsPage: React.FC = () => {
       dataIndex: 'category',
       key: 'category',
       width: 80,
+      mobileRole: 'badge',
       render: (category: string) => <Tag color="green">{category}</Tag>,
     },
     {
@@ -50,6 +67,7 @@ const Alpha101DocsPage: React.FC = () => {
       dataIndex: 'expression',
       key: 'expression',
       width: 400,
+      mobileRole: 'subtitle',
       render: (expr: string) => (
         <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>
           {expr}
@@ -60,16 +78,18 @@ const Alpha101DocsPage: React.FC = () => {
       title: '说明',
       dataIndex: 'description',
       key: 'description',
+      mobileRole: 'hidden',
       render: (desc: string) => <Text style={{ fontSize: 12 }}>{desc}</Text>,
     },
   ]
 
-  const baseFunctionColumns = [
+  const baseFunctionColumns: ResponsiveColumn<BaseFunction>[] = [
     {
       title: '函数名',
       dataIndex: 'name',
       key: 'name',
       width: 200,
+      mobileRole: 'title',
       render: (name: string) => <Text code strong>{name}</Text>,
     },
     {
@@ -77,6 +97,7 @@ const Alpha101DocsPage: React.FC = () => {
       dataIndex: 'syntax',
       key: 'syntax',
       width: 250,
+      mobileRole: 'subtitle',
       render: (syntax: string) => (
         <Text code style={{ fontSize: 12 }}>{syntax}</Text>
       ),
@@ -85,15 +106,28 @@ const Alpha101DocsPage: React.FC = () => {
       title: '说明',
       dataIndex: 'description',
       key: 'description',
+      mobileRole: 'hidden',
       render: (desc: string) => <Text style={{ fontSize: 12 }}>{desc}</Text>,
     },
   ]
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={4}>Alpha101 因子文档</Title>
-      <Alert 
-        message="WorldQuant 101因子" 
+    <PageContainer
+      title="Alpha101 因子文档"
+      subtitle={`WorldQuant 公开的 101 个量化因子 · 共 ${factors.length} 个，当前显示 ${filteredFactors.length} 个`}
+      actions={
+        <Input
+          placeholder="搜索因子名称、表达式或说明..."
+          prefix={<SearchOutlined />}
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          style={{ width: 280 }}
+          allowClear
+        />
+      }
+    >
+      <Alert
+        message="WorldQuant 101因子"
         description="Alpha101 是 WorldQuant 公开的101个量化因子，涵盖了动量、反转、量价等多种策略逻辑。这些因子基于高频数据构建，适用于日内交易策略。"
         type="info"
         showIcon
@@ -101,54 +135,39 @@ const Alpha101DocsPage: React.FC = () => {
       />
 
       <Card>
-        <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
-          <Input
-            placeholder="搜索因子名称、表达式或说明..."
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
-            style={{ width: 300 }}
-            allowClear
-          />
-          <Text type="secondary">
-            共 {factors.length} 个因子，当前显示 {filteredFactors.length} 个
-          </Text>
-        </Space>
-
         {categories.length > 0 && (
-          <Space style={{ marginBottom: 16 }}>
-            <Tag 
+          <Space style={{ marginBottom: 16 }} wrap>
+            <Tag
               color={activeCategory === 'all' ? 'green' : 'default'}
               style={{ cursor: 'pointer' }}
               onClick={() => setActiveCategory('all')}
             >
               全部
             </Tag>
-            {categories.map(cat => (
-              <Tag 
+            {categories.map((cat) => (
+              <Tag
                 key={cat}
                 color={activeCategory === cat ? 'green' : 'default'}
                 style={{ cursor: 'pointer' }}
                 onClick={() => setActiveCategory(cat)}
               >
-                {cat} ({factors.filter(f => f.category === cat).length})
+                {cat} ({factors.filter((f) => f.category === cat).length})
               </Tag>
             ))}
           </Space>
         )}
 
-        {isLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
-        ) : error ? (
+        {error ? (
           <Empty description="加载因子文档失败" />
         ) : (
-          <Table
+          <ResponsiveTable<Alpha101Factor>
             dataSource={filteredFactors}
             columns={columns}
             rowKey="name"
+            loading={isLoading}
             pagination={{ pageSize: 20, showSizeChanger: true, showQuickJumper: true }}
             size="small"
-            scroll={{ x: 900 }}
+            scrollX={900}
           />
         )}
       </Card>
@@ -157,20 +176,17 @@ const Alpha101DocsPage: React.FC = () => {
         <Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
           Alpha101 因子使用以下基础函数构建，这些函数用于处理时间序列数据和计算统计指标。
         </Text>
-        {isLoading ? (
-          <div style={{ textAlign: 'center', padding: 20 }}><Spin /></div>
-        ) : (
-          <Table
-            dataSource={baseFunctions}
-            columns={baseFunctionColumns}
-            rowKey="name"
-            pagination={false}
-            size="small"
-            scroll={{ x: 700 }}
-          />
-        )}
+        <ResponsiveTable<BaseFunction>
+          dataSource={baseFunctions}
+          columns={baseFunctionColumns}
+          rowKey="name"
+          loading={isLoading}
+          pagination={false}
+          size="small"
+          scrollX={700}
+        />
       </Card>
-    </div>
+    </PageContainer>
   )
 }
 
