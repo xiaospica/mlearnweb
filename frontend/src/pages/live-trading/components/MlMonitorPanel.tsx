@@ -16,7 +16,6 @@
 
 import React, { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import ReactECharts from 'echarts-for-react'
 import { Alert, Card, Col, Empty, Row, Spin, Statistic, Typography } from 'antd'
 import { mlMonitoringService } from '@/services/mlMonitoringService'
 import type {
@@ -25,6 +24,7 @@ import type {
   PsiByFeature,
   RollingSummary,
 } from '@/services/mlMonitoringService'
+import ChartContainer from '@/components/responsive/ChartContainer'
 import BacktestDiffPanel from './BacktestDiffPanel'
 import PredictionHistoryPanel from './PredictionHistoryPanel'
 
@@ -40,71 +40,131 @@ function fmtNum(v: number | null | undefined, digits = 4): string {
   return v.toFixed(digits)
 }
 
+/** 算非 null 数组的均值；空或全 null 返回 null */
+function _mean(values: Array<number | null>): number | null {
+  const xs = values.filter((v): v is number => Number.isFinite(v as number))
+  if (xs.length === 0) return null
+  return xs.reduce((a, b) => a + b, 0) / xs.length
+}
+
+/**
+ * IC / RankIC / PSI_mean 时序图 —— 样式对齐 ReportPage 的 ICChart：
+ *  - 柱状图按值符号着色（>=0 绿 / <0 红）
+ *  - markLine: 均值（虚线）+ 零线（实线）+ 可选阈值
+ *  - dataZoom inside（与 Report 一致）
+ *  - axis chrome 留空，由 ChartContainer 的 applyEChartsThemeChrome 注入主题色
+ */
 function buildTimeseriesOption(
   history: MetricSnapshot[],
   field: 'ic' | 'rank_ic' | 'psi_mean',
-  title: string,
   threshold?: number,
 ) {
   const dates = history.map((h) => h.trade_date)
-  const values = history.map((h) => h[field] ?? null)
-  const series: Array<Record<string, unknown>> = [
-    {
-      name: title,
-      type: 'line',
-      data: values,
-      smooth: true,
-      showSymbol: values.length <= 60,
-      lineStyle: { width: 2 },
-    },
+  // ReportPage 用 0 替代 null（这样图上有连续柱状），与之一致
+  const values = history.map((h) => (h[field] == null ? 0 : (h[field] as number)))
+  const meanValue = _mean(values)
+
+  const markLineData: Array<Record<string, unknown>> = [
+    { yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } },
   ]
-  if (threshold !== undefined) {
-    series.push({
-      name: `阈值 ${threshold}`,
-      type: 'line',
-      data: dates.map(() => threshold),
-      lineStyle: { width: 1, type: 'dashed', color: '#ff4d4f' },
-      showSymbol: false,
+  if (meanValue != null) {
+    markLineData.push({
+      yAxis: Number(meanValue.toFixed(4)),
+      name: '均值',
+      lineStyle: { color: '#8c8c8c', type: 'dashed' },
     })
   }
+  if (threshold !== undefined) {
+    markLineData.push({
+      yAxis: threshold,
+      name: `阈值 ${threshold}`,
+      lineStyle: { color: '#ff4d4f', type: 'dashed' },
+    })
+  }
+
   return {
-    title: { text: title, left: 'center', textStyle: { fontSize: 13 } },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-    yAxis: { type: 'value', scale: true },
-    grid: { left: 50, right: 20, top: 40, bottom: 60 },
-    series,
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+    },
+    grid: { left: 60, right: 30, top: 20, bottom: 30 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLabel: { color: '#9ca3af', fontSize: 9 },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: '#9ca3af' },
+      splitLine: { lineStyle: { color: '#f0f0f0' } },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: values,
+        itemStyle: (params: { value: number }) => ({
+          color: params.value >= 0 ? '#52c41a' : '#ff4d4f',
+          borderRadius: [1, 1, 0, 0],
+        }),
+        markLine: {
+          symbol: 'none',
+          data: markLineData,
+          label: { formatter: '{c}', color: '#6b7280' },
+        },
+      },
+    ],
+    dataZoom: [{ type: 'inside', start: 0, end: 100 }],
   }
 }
 
-function buildHistogramOption(bins: HistogramBin[], title: string) {
+/**
+ * 预测分数直方图 —— 样式对齐 ReportPage 的 PredictionHistogram：
+ *  - 单色蓝 (#1677ff) 圆角柱
+ *  - tooltip 详细到 bin 边界 + count + prob
+ */
+function buildHistogramOption(bins: HistogramBin[]) {
   return {
-    title: { text: title, left: 'center', textStyle: { fontSize: 13 } },
     tooltip: {
       trigger: 'axis',
-      formatter: (arr: Array<{ dataIndex: number; value: number }>) => {
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+      formatter: (arr: Array<{ dataIndex: number }>) => {
         const idx = arr[0].dataIndex
         const b = bins[idx]
         return `bin ${b.bin_id}<br/>[${fmtNum(b.edge_lo, 3)}, ${fmtNum(b.edge_hi, 3)})<br/>count: ${b.count}<br/>prob: ${fmtNum(b.probability, 4)}`
       },
     },
+    grid: { left: 60, right: 30, top: 20, bottom: 30 },
     xAxis: {
       type: 'category',
       data: bins.map((b) => fmtNum(b.edge_lo, 2)),
-      axisLabel: { fontSize: 10 },
+      axisLabel: { color: '#9ca3af', fontSize: 9 },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
     },
-    yAxis: { type: 'value', name: 'probability' },
-    grid: { left: 50, right: 20, top: 40, bottom: 50 },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: '#9ca3af' },
+      splitLine: { lineStyle: { color: '#f0f0f0' } },
+    },
     series: [
       {
+        name: '频次',
         type: 'bar',
         data: bins.map((b) => b.probability),
-        itemStyle: { color: '#5B8FF9' },
+        itemStyle: { color: '#1677ff', borderRadius: [2, 2, 0, 0] },
       },
     ],
   }
 }
 
+/**
+ * PSI top-10 特征条形图 —— 横向 bar，主题色橙黄（对齐 Report 中的强调色 #fa8c16）
+ */
 function buildTopPsiFeaturesOption(psiByFeature: PsiByFeature | null) {
   if (!psiByFeature) return null
   const entries = Object.entries(psiByFeature)
@@ -113,16 +173,30 @@ function buildTopPsiFeaturesOption(psiByFeature: PsiByFeature | null) {
     .slice(0, 10)
   if (entries.length === 0) return null
   return {
-    title: { text: '当前 PSI top-10 特征', left: 'center', textStyle: { fontSize: 13 } },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'value', scale: true },
-    yAxis: { type: 'category', data: entries.map(([k]) => k).reverse(), axisLabel: { fontSize: 10 } },
-    grid: { left: 120, right: 30, top: 40, bottom: 30 },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#e8e8e8',
+      textStyle: { color: '#374151' },
+    },
+    grid: { left: 130, right: 30, top: 20, bottom: 30 },
+    xAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: '#9ca3af' },
+      splitLine: { lineStyle: { color: '#f0f0f0' } },
+    },
+    yAxis: {
+      type: 'category',
+      data: entries.map(([k]) => k).reverse(),
+      axisLabel: { color: '#9ca3af', fontSize: 10 },
+      axisLine: { lineStyle: { color: '#e5e7eb' } },
+    },
     series: [
       {
         type: 'bar',
         data: entries.map(([, v]) => v).reverse(),
-        itemStyle: { color: '#F6BD16' },
+        itemStyle: { color: '#fa8c16', borderRadius: [0, 2, 2, 0] },
       },
     ],
   }
@@ -161,20 +235,20 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
     historyData.length > 0 ? historyData[historyData.length - 1] : null
 
   const icOption = useMemo(
-    () => buildTimeseriesOption(historyData, 'ic', 'IC 时序'),
+    () => buildTimeseriesOption(historyData, 'ic'),
     [historyData],
   )
   const rankIcOption = useMemo(
-    () => buildTimeseriesOption(historyData, 'rank_ic', 'Rank IC 时序'),
+    () => buildTimeseriesOption(historyData, 'rank_ic'),
     [historyData],
   )
   const psiOption = useMemo(
-    () => buildTimeseriesOption(historyData, 'psi_mean', 'PSI_mean 时序', 0.25),
+    () => buildTimeseriesOption(historyData, 'psi_mean', 0.25),
     [historyData],
   )
   const histOption = useMemo(() => {
     if (!predictionData?.score_histogram?.length) return null
-    return buildHistogramOption(predictionData.score_histogram, '预测分数直方图 (最新)')
+    return buildHistogramOption(predictionData.score_histogram)
   }, [predictionData])
   const topPsiOption = useMemo(
     () => buildTopPsiFeaturesOption(latestMetric?.psi_by_feature || null),
@@ -262,18 +336,18 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
       {/* 时序图 */}
       <Row gutter={12}>
         <Col xs={24} lg={8}>
-          <Card size="small">
-            <ReactECharts option={icOption} style={{ height: 260 }} />
+          <Card size="small" title="IC 时序">
+            <ChartContainer library="echarts" option={icOption} height={260} />
           </Card>
         </Col>
         <Col xs={24} lg={8}>
-          <Card size="small">
-            <ReactECharts option={rankIcOption} style={{ height: 260 }} />
+          <Card size="small" title="Rank IC 时序">
+            <ChartContainer library="echarts" option={rankIcOption} height={260} />
           </Card>
         </Col>
         <Col xs={24} lg={8}>
-          <Card size="small">
-            <ReactECharts option={psiOption} style={{ height: 260 }} />
+          <Card size="small" title="PSI_mean 时序">
+            <ChartContainer library="echarts" option={psiOption} height={260} />
           </Card>
         </Col>
       </Row>
@@ -281,18 +355,18 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName }) => {
       {/* 直方图 + top PSI */}
       <Row gutter={12}>
         <Col xs={24} lg={12}>
-          <Card size="small">
+          <Card size="small" title="预测分数直方图（最新）">
             {histOption ? (
-              <ReactECharts option={histOption} style={{ height: 280 }} />
+              <ChartContainer library="echarts" option={histOption} height={280} />
             ) : (
               <Empty description="暂无最新直方图数据" />
             )}
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card size="small">
+          <Card size="small" title="PSI top-10 特征">
             {topPsiOption ? (
-              <ReactECharts option={topPsiOption} style={{ height: 280 }} />
+              <ChartContainer library="echarts" option={topPsiOption} height={280} />
             ) : (
               <Empty description="暂无 PSI 特征详情" />
             )}
