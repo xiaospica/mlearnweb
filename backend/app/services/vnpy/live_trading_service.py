@@ -493,7 +493,14 @@ async def snapshot_tick() -> None:
                 written += 1
 
         # retention cleanup
-        cutoff = now - timedelta(days=settings.vnpy_snapshot_retention_days)
+        from app.services.app_settings_service import get_runtime_setting
+        retention_days = int(
+            get_runtime_setting(
+                "vnpy_snapshot_retention_days",
+                default=settings.vnpy_snapshot_retention_days,
+            )
+        )
+        cutoff = now - timedelta(days=retention_days)
         session.execute(
             sa_delete(StrategyEquitySnapshot).where(StrategyEquitySnapshot.ts < cutoff)
         )
@@ -508,8 +515,9 @@ async def snapshot_tick() -> None:
 
 
 async def snapshot_loop() -> None:
+    from app.services.app_settings_service import get_runtime_setting
     logger.info(
-        "[live_trading] snapshot_loop started (interval=%ss, retention=%sd)",
+        "[live_trading] snapshot_loop started (interval=%ss, retention=%sd, hot-reloadable)",
         settings.vnpy_poll_interval_seconds,
         settings.vnpy_snapshot_retention_days,
     )
@@ -521,7 +529,13 @@ async def snapshot_loop() -> None:
         except Exception as e:
             logger.exception("[live_trading] snapshot_loop iteration failed: %s", e)
         try:
-            await asyncio.sleep(settings.vnpy_poll_interval_seconds)
+            interval = int(
+                get_runtime_setting(
+                    "vnpy_poll_interval_seconds",
+                    default=settings.vnpy_poll_interval_seconds,
+                )
+            )
+            await asyncio.sleep(max(1, interval))
         except asyncio.CancelledError:
             raise
 

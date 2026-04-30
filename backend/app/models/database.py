@@ -183,6 +183,34 @@ class TuningJob(Base):
     trials = relationship("TuningTrial", back_populates="job", cascade="all, delete-orphan")
 
 
+class AppSetting(Base):
+    """运行时可热改的应用配置（L2 Runtime / Phase 2）。
+
+    与 .env / app/core/config.py 的关系：
+    - .env 仍是「Bootstrap 默认值」，进程启动时读一次
+    - app_settings 是「Runtime 覆盖值」，存在则覆盖 .env
+    - 读取统一走 services/app_settings_service.py:get_runtime_setting(key, default)
+      默认 default 传 settings.xxx，DB 缺失时透明回退到 .env
+
+    设计取舍：
+    - 全部值序列化为 JSON 文本（统一存储，避免每种类型一列）
+    - value_type 仅作显示/校验提示，不影响存储
+    - 写入即生效（DB-WAL 跨进程可见 + 5s TTL 缓存）；要求强一致的调用
+      可显式 invalidate_cache()
+    - 不在此处建立审计表 —— updated_by/updated_at 已在行内
+    """
+
+    __tablename__ = "app_settings"
+
+    key = Column(String(64), primary_key=True)
+    # JSON-encoded value: 数字/字符串/布尔/列表 都先 json.dumps
+    value_json = Column(Text, nullable=False)
+    # 'int' / 'float' / 'str' / 'bool' / 'list_str'，仅作元数据提示
+    value_type = Column(String(16), nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    updated_by = Column(String(64), nullable=True)
+
+
 class TuningTrial(Base):
     """单个 Optuna trial 的持久化（每行一个 trial）。
 

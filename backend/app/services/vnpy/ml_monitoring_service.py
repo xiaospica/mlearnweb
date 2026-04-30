@@ -261,7 +261,14 @@ async def ml_snapshot_tick() -> None:
                     )
 
         # retention cleanup — reuse vnpy_snapshot_retention_days
-        cutoff = now - timedelta(days=settings.vnpy_snapshot_retention_days)
+        from app.services.app_settings_service import get_runtime_setting
+        retention_days = int(
+            get_runtime_setting(
+                "vnpy_snapshot_retention_days",
+                default=settings.vnpy_snapshot_retention_days,
+            )
+        )
+        cutoff = now - timedelta(days=retention_days)
         session.execute(
             sa_delete(MLMetricSnapshot).where(MLMetricSnapshot.trade_date < cutoff)
         )

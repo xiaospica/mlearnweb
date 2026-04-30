@@ -8,6 +8,7 @@ import type { Breakpoint } from 'antd/es/_util/responsiveObserver'
 import type { EChartsOption } from 'echarts'
 import { PALETTE_DARK, PALETTE_LIGHT } from '@/theme/tokens'
 import type { ThemeMode } from '@/theme/tokens'
+import { getPrefsSync } from '@/stores/prefsStore'
 
 /** 图表高度规格：单值或按断点（xs/sm/md/lg）声明 */
 export type ChartHeightSpec = number | Partial<Record<'xs' | 'sm' | 'md' | 'lg', number>>
@@ -23,14 +24,22 @@ export const DEFAULT_CHART_HEIGHTS = {
 /**
  * 将 ChartHeightSpec + 当前断点解析为像素值。
  * - number：直接返回
- * - 对象：合并默认值后按当前断点查表（xl/xxl 归并到 lg）
+ * - 对象：合并 [内置默认 < 用户偏好 < 调用方覆盖] 后按当前断点查表
+ *   - 用户偏好来自 prefsStore（sync 读 localStorage，无订阅；下次组件 re-mount 生效）
+ *   - 调用方覆盖优先级最高，便于个别图表（如 SHAP 热图）显式定高
+ *   - xl/xxl 归并到 lg
  */
 export const resolveChartHeight = (
   h: ChartHeightSpec | undefined,
   bp: Breakpoint,
 ): number => {
   if (typeof h === 'number') return h
-  const merged: Record<string, number> = { ...DEFAULT_CHART_HEIGHTS, ...(h ?? {}) }
+  const userOverride = getPrefsSync().chartHeights ?? {}
+  const merged: Record<string, number> = {
+    ...DEFAULT_CHART_HEIGHTS,
+    ...userOverride,
+    ...(h ?? {}),
+  }
   const lookup = bp === 'xl' || bp === 'xxl' ? 'lg' : bp
   return merged[lookup] ?? DEFAULT_CHART_HEIGHTS.xs
 }

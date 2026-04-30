@@ -36,6 +36,7 @@ class VnpyClientError(Exception):
 class _PerNodeClient:
     def __init__(self, node: NodeConfig) -> None:
         self.node = node
+        # 仅作 AsyncClient 默认超时（也是兜底）；每次请求会按运行时配置覆盖
         self._client = httpx.AsyncClient(
             base_url=node.base_url,
             timeout=settings.vnpy_request_timeout,
@@ -43,6 +44,15 @@ class _PerNodeClient:
         self._token: Optional[str] = None
         self._token_expire_ts: float = 0.0
         self._lock = asyncio.Lock()
+
+    def _current_timeout(self) -> float:
+        """读 runtime override（带 5s 缓存），缺省回退到 .env。"""
+        from app.services.app_settings_service import get_runtime_setting
+        return float(
+            get_runtime_setting(
+                "vnpy_request_timeout", default=settings.vnpy_request_timeout
+            )
+        )
 
     @property
     def node_id(self) -> str:
@@ -61,6 +71,7 @@ class _PerNodeClient:
                         "password": self.node.password,
                     },
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=self._current_timeout(),
                 )
             except httpx.HTTPError as e:
                 raise VnpyClientError(f"login network error: {e}") from e
@@ -93,8 +104,11 @@ class _PerNodeClient:
             await self.login()
 
         headers = self._auth_headers()
+        timeout = self._current_timeout()
         try:
-            resp = await self._client.request(method, path, json=json, params=params, headers=headers)
+            resp = await self._client.request(
+                method, path, json=json, params=params, headers=headers, timeout=timeout,
+            )
         except httpx.HTTPError as e:
             raise VnpyClientError(f"{method} {path} network error: {e}") from e
 
@@ -103,7 +117,9 @@ class _PerNodeClient:
             await self.login()
             headers = self._auth_headers()
             try:
-                resp = await self._client.request(method, path, json=json, params=params, headers=headers)
+                resp = await self._client.request(
+                    method, path, json=json, params=params, headers=headers, timeout=timeout,
+                )
             except httpx.HTTPError as e:
                 raise VnpyClientError(f"{method} {path} retry network error: {e}") from e
 

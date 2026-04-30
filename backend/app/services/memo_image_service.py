@@ -10,6 +10,7 @@ from typing import Dict, Optional, Set
 from fastapi import HTTPException, UploadFile
 
 from app.core.config import settings
+from app.services.app_settings_service import get_runtime_setting
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,21 @@ def _url_prefix(record_id: int) -> str:
 
 
 def save_image(record_id: int, upload_file: UploadFile) -> Dict[str, str]:
+    allowed_exts = set(
+        get_runtime_setting(
+            "allowed_image_exts",
+            default=sorted(list(settings.allowed_image_exts)),
+        )
+    )
+    max_image_size_mb = int(
+        get_runtime_setting("max_image_size_mb", default=settings.max_image_size_mb)
+    )
+
     ext = os.path.splitext(upload_file.filename or "")[1].lower()
-    if ext not in settings.allowed_image_exts:
+    if ext not in allowed_exts:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的图片格式: {ext}，仅允许 {sorted(settings.allowed_image_exts)}",
+            detail=f"不支持的图片格式: {ext}，仅允许 {sorted(allowed_exts)}",
         )
 
     content_type = (upload_file.content_type or "").lower()
@@ -43,7 +54,7 @@ def save_image(record_id: int, upload_file: UploadFile) -> Dict[str, str]:
 
     stored_name = f"{uuid.uuid4().hex}{ext}"
     target_path = target_dir / stored_name
-    max_bytes = settings.max_image_size_mb * 1024 * 1024
+    max_bytes = max_image_size_mb * 1024 * 1024
     total = 0
 
     try:
@@ -61,7 +72,7 @@ def save_image(record_id: int, upload_file: UploadFile) -> Dict[str, str]:
                         pass
                     raise HTTPException(
                         status_code=400,
-                        detail=f"图片超出大小限制 {settings.max_image_size_mb}MB",
+                        detail=f"图片超出大小限制 {max_image_size_mb}MB",
                     )
                 f.write(chunk)
     finally:
@@ -99,7 +110,10 @@ def sync_orphans(record_id: int, new_memo: Optional[str]) -> int:
         return 0
 
     referenced = extract_referenced_filenames(new_memo, record_id)
-    grace_threshold = time.time() - settings.orphan_grace_seconds
+    grace_seconds = int(
+        get_runtime_setting("orphan_grace_seconds", default=settings.orphan_grace_seconds)
+    )
+    grace_threshold = time.time() - grace_seconds
     deleted = 0
 
     try:

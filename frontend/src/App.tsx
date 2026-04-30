@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider, App as AntApp } from 'antd'
 import AppLayout from '@/components/layout/AppLayout'
 import { ThemeProvider, useThemeStore } from '@/stores/themeStore'
+import { PrefsProvider } from '@/stores/prefsStore'
 import { themeConfigOf } from '@/theme/antdTheme'
 import HomePage from '@/pages/HomePage'
 import ExperimentDetailPage from '@/pages/ExperimentDetailPage'
@@ -21,6 +22,13 @@ import LiveTradingStrategyDetailPage from '@/pages/live-trading/LiveTradingStrat
 import WorkbenchHomePage from '@/pages/workbench/WorkbenchHomePage'
 import WorkbenchCreatePage from '@/pages/workbench/WorkbenchCreatePage'
 import WorkbenchMonitorPage from '@/pages/workbench/WorkbenchMonitorPage'
+import SettingsLayout from '@/pages/settings/SettingsLayout'
+import SettingsAppearancePage from '@/pages/settings/SettingsAppearancePage'
+import SettingsRuntimePage from '@/pages/settings/SettingsRuntimePage'
+import SettingsNodesPage from '@/pages/settings/SettingsNodesPage'
+import SettingsSystemPage from '@/pages/settings/SettingsSystemPage'
+import SettingsEnvPage from '@/pages/settings/SettingsEnvPage'
+import SettingsAboutPage from '@/pages/settings/SettingsAboutPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,10 +61,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <ThemedAntdShell>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<AppLayout />}>
+        <PrefsProvider>
+          <ThemedAntdShell>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<AppLayout />}>
                 <Route index element={<TrainingRecordsPage />} />
                 <Route path="training/compare" element={<TrainingComparePage />} />
                 <Route path="training/:id" element={<TrainingDetailPage />} />
@@ -78,11 +87,21 @@ function App() {
                   <Route path="alpha101" element={<Alpha101DocsPage />} />
                   <Route path="alpha191" element={<Alpha191DocsPage />} />
                 </Route>
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<Navigate to="appearance" replace />} />
+                  <Route path="appearance" element={<SettingsAppearancePage />} />
+                  <Route path="runtime" element={<SettingsRuntimePage />} />
+                  <Route path="nodes" element={<SettingsNodesPage />} />
+                  <Route path="system" element={<SettingsSystemPage />} />
+                  <Route path="env" element={<SettingsEnvPage />} />
+                  <Route path="about" element={<SettingsAboutPage />} />
+                </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>
           </BrowserRouter>
         </ThemedAntdShell>
+        </PrefsProvider>
       </ThemeProvider>
     </QueryClientProvider>
   )

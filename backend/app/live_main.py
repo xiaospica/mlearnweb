@@ -38,8 +38,8 @@ async def deployment_sync_loop():
     异常吞掉只 log warn，不影响主流程。
     """
     from app.models.database import get_db_session
+    from app.services.app_settings_service import get_runtime_setting
 
-    interval = max(60, int(settings.deployment_sync_interval_seconds))
     while True:
         try:
             client = get_vnpy_client()
@@ -57,6 +57,15 @@ async def deployment_sync_loop():
         except Exception as exc:
             logger.warning("[deployment_sync] iteration failed: %s", exc)
         try:
+            interval = max(
+                60,
+                int(
+                    get_runtime_setting(
+                        "deployment_sync_interval_seconds",
+                        default=settings.deployment_sync_interval_seconds,
+                    )
+                ),
+            )
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise

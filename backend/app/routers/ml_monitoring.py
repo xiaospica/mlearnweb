@@ -123,11 +123,13 @@ def prediction_all_by_date(
     (qlib subprocess 落盘), 读时通过 tushare ``stock_list.parquet`` 做股票名 enrichment.
     """
     from app.core.config import settings
+    # ml_live_output_root 是部署绑定的本地挂载点（指向策略服务器输出），
+    # 不暴露给 web UI 修改；通过 .env 的 ML_LIVE_OUTPUT_ROOT 配置后重启 app.main。
     root = settings.ml_live_output_root
     if not root:
         return LiveTradingListResponse(
             success=False, data=None,
-            warning="需配置 ML_LIVE_OUTPUT_ROOT 环境变量",
+            warning="需在 .env 设置 ML_LIVE_OUTPUT_ROOT 后重启 app.main",
             message="missing ml_live_output_root",
         )
     try:
@@ -164,11 +166,12 @@ def backtest_diff(
 ) -> LiveTradingListResponse:
     """对比训练侧 backtest pred.pkl 与 live predictions per date."""
     from app.core.config import settings
+    # ml_live_output_root：部署绑定的本地挂载点，仅 .env 可改 + 重启生效
     root = live_output_root or settings.ml_live_output_root
     if not root:
         return LiveTradingListResponse(
             success=False, data=None,
-            warning="需配置 live_output_root 或设置 ML_LIVE_OUTPUT_ROOT 环境变量",
+            warning="需提供 live_output_root 参数，或在 .env 设置 ML_LIVE_OUTPUT_ROOT 后重启 app.main",
             message="missing live_output_root",
         )
     try:

@@ -22,6 +22,13 @@ import {
   AppstoreOutlined,
   FileTextOutlined,
   ProfileOutlined,
+  SettingOutlined,
+  BgColorsOutlined,
+  ControlOutlined,
+  ClusterOutlined,
+  SafetyCertificateOutlined,
+  CodeOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons'
 
 export type NavBadgeKey = 'liveAlerts' | 'runningJobs'
@@ -50,7 +57,8 @@ const isTrainingRecordsPath = (p: string): boolean =>
     !p.startsWith('/experiments') &&
     !p.startsWith('/report') &&
     !p.startsWith('/live-trading') &&
-    !p.startsWith('/help'))
+    !p.startsWith('/help') &&
+    !p.startsWith('/settings'))
 
 export const PRIMARY_NAV: NavItem[] = [
   {
@@ -112,6 +120,51 @@ export const PRIMARY_NAV: NavItem[] = [
         label: 'Alpha191',
         path: '/help/alpha191',
         icon: ProfileOutlined,
+      },
+    ],
+  },
+  {
+    key: 'settings',
+    label: '设置',
+    path: '/settings',
+    icon: SettingOutlined,
+    match: (p) => p.startsWith('/settings'),
+    children: [
+      {
+        key: 'settings-appearance',
+        label: '外观',
+        path: '/settings/appearance',
+        icon: BgColorsOutlined,
+      },
+      {
+        key: 'settings-runtime',
+        label: '运行期默认',
+        path: '/settings/runtime',
+        icon: ControlOutlined,
+      },
+      {
+        key: 'settings-nodes',
+        label: 'vnpy 节点',
+        path: '/settings/nodes',
+        icon: ClusterOutlined,
+      },
+      {
+        key: 'settings-system',
+        label: '系统限制',
+        path: '/settings/system',
+        icon: SafetyCertificateOutlined,
+      },
+      {
+        key: 'settings-env',
+        label: '环境信息',
+        path: '/settings/env',
+        icon: CodeOutlined,
+      },
+      {
+        key: 'settings-about',
+        label: '关于',
+        path: '/settings/about',
+        icon: InfoCircleOutlined,
       },
     ],
   },

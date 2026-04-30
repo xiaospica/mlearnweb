@@ -90,6 +90,8 @@ def detect_corp_actions(
     """
     from app.core.config import settings  # 避免循环依赖
 
+    # daily_merged_root 是部署绑定的本地挂载点（指向策略服务器输出），
+    # 不暴露给 web UI 修改；只能改 .env 后重启 app.main。
     root = Path(merged_root) if merged_root else Path(settings.daily_merged_root)
     if not root.exists():
         logger.warning("daily_merged_root 不存在: %s", root)
