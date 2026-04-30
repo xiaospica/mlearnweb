@@ -28,6 +28,7 @@ import type { ColumnsType } from 'antd/es/table'
 
 import { tuningService } from '@/services/tuningService'
 import type { TuningJob, TuningJobStatus } from '@/types/tuning'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text } = Typography
 
@@ -317,30 +318,27 @@ const WorkbenchHomePage: React.FC = () => {
   ]
 
   return (
-    <div>
-      {/* 顶部统计 + 操作 */}
+    <PageContainer
+      title="训练工作台"
+      subtitle="超参搜索 / 调参 Job 管理"
+      actions={
+        <Space wrap>
+          <Button icon={<ReloadOutlined />} loading={isFetching} onClick={() => refetch()}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/workbench/new')}>
+            新建调参 Job
+          </Button>
+        </Space>
+      }
+    >
+      {/* 顶部统计卡（4 张 KPI），后续 PR-7 切换 MetricCardGrid */}
       <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
           <Statistic title="总数" value={stats.total} />
           <Statistic title="运行中" value={stats.running} valueStyle={{ color: '#1677ff' }} />
           <Statistic title="已完成" value={stats.done} valueStyle={{ color: '#52c41a' }} />
           <Statistic title="失败/僵尸" value={stats.failed} valueStyle={{ color: '#ff4d4f' }} />
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={isFetching}
-              onClick={() => refetch()}
-            >
-              刷新
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/workbench/new')}
-            >
-              新建调参 Job
-            </Button>
-          </div>
         </div>
       </Card>
 
@@ -449,7 +447,7 @@ const WorkbenchHomePage: React.FC = () => {
           </Spin>
         </Card>
       )}
-    </div>
+    </PageContainer>
   )
 }
 

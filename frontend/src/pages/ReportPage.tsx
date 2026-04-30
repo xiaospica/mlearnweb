@@ -12,6 +12,7 @@ import { factorDocService } from '@/services/factorDocService'
 import { FactorInfoModal } from '@/components/FactorInfoModal'
 import type { ReportData, KeyMetrics, InSampleBacktestResponse, InSampleSegmentResult, FeatureImportanceData, SHAPAnalysisData, LagICAnalysis, HoldingsAnalysis, SHAPHeatmapData } from '@/types'
 import { computeEqualScaleTicks, fixPlotlyFigureXAxis } from '@/utils/chartHelpers'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text } = Typography
 
@@ -52,10 +53,11 @@ const MetricCard: React.FC<{
     <Card
       size="small"
       style={{
-        background: '#ffffff',
+        background: 'var(--ap-panel)',
+        border: '1px solid var(--ap-border)',
         borderLeft: `3px solid ${color}`,
         borderRadius: 8,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+        boxShadow: '0 1px 3px var(--ap-shadow)',
       }}
       styles={{ body: { padding: '14px 18px' } }}
     >
@@ -73,7 +75,13 @@ const MetricCard: React.FC<{
           fontSize: 22,
           fontWeight: 700,
           fontFamily: "'SF Mono', 'Consolas', monospace",
-          color: numValue !== null ? (isPositive ? (title.includes('回撤') || title.includes('Drawdown') ? '#ff4d4f' : '#1677ff') : '#ff4d4f') : '#9ca3af',
+          color: numValue !== null
+            ? (isPositive
+                ? (title.includes('回撤') || title.includes('Drawdown')
+                    ? 'var(--ap-danger)'
+                    : 'var(--ap-brand-primary)')
+                : 'var(--ap-danger)')
+            : 'var(--ap-text-dim)',
         }}>
           {displayValue}{suffix}
         </span>
@@ -4587,31 +4595,33 @@ const ReportPage: React.FC = () => {
   const durationSeconds = runInfo.duration_seconds as number | undefined
 
   return (
-    <div>
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/experiments/${expId}`)}>
-          返回实验
-        </Button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Title level={4} style={{ color: '#1f2937', margin: 0 }} ellipsis>
+    <PageContainer
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/experiments/${expId}`)} size="small">
+            返回实验
+          </Button>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {runName}
-          </Title>
-          <Space size={12}>
-            <Tag color={STATUS_COLORS[status] || '#d9d9d9'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-              {status}
-            </Tag>
-            <Text type="secondary" style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-              ID: {runId?.slice(0, 16)}...
+          </span>
+        </span>
+      }
+      tags={
+        <Space size={8} wrap>
+          <Tag color={STATUS_COLORS[status] || '#d9d9d9'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+            {status}
+          </Tag>
+          <Text type="secondary" style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+            ID: {runId?.slice(0, 16)}...
+          </Text>
+          {durationSeconds && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              耗时: {(durationSeconds / 60).toFixed(1)}min
             </Text>
-            {durationSeconds && (
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                耗时: {(durationSeconds / 60).toFixed(1)}min
-              </Text>
-            )}
-          </Space>
-        </div>
-      </div>
-
+          )}
+        </Space>
+      }
+    >
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={12} sm={6} md={4}>
           <MetricCard
@@ -4789,7 +4799,7 @@ const ReportPage: React.FC = () => {
           },
         ]}
       />
-    </div>
+    </PageContainer>
   )
 }
 

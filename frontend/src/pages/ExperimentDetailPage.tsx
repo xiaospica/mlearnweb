@@ -13,6 +13,7 @@ import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
 import { runService } from '@/services/runService'
 import type { RunListItem, RunLinkSource, RunLinkType } from '@/types'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text } = Typography
 
@@ -216,20 +217,26 @@ const ExperimentDetailPage: React.FC = () => {
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/experiments')}>
-          返回
-        </Button>
-        <div style={{ flex: 1 }}>
-          <Title level={3} style={{ color: '#1f2937', margin: 0 }}>{experiment.name}</Title>
-          <Text type="secondary" style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
-            ID: {experiment.experiment_id}
-          </Text>
-        </div>
+    <PageContainer
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/experiments')} size="small">
+            返回
+          </Button>
+          {experiment.name}
+        </span>
+      }
+      subtitle={
+        <span style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
+          ID: {experiment.experiment_id}
+        </span>
+      }
+      tags={
         <Tag color="#1677ff" style={{ fontFamily: "'SF Mono', 'Consolas', monospace" }}>
           {experiment.run_count} 次运行
         </Tag>
+      }
+      actions={
         <Button
           danger
           icon={<DeleteOutlined />}
@@ -237,8 +244,8 @@ const ExperimentDetailPage: React.FC = () => {
         >
           清理未关联记录
         </Button>
-      </div>
-
+      }
+    >
       <Tabs
         defaultActiveKey="all-runs"
         items={[
@@ -428,7 +435,7 @@ const ExperimentDetailPage: React.FC = () => {
           </>
         )}
       </Modal>
-    </div>
+    </PageContainer>
   )
 }
 

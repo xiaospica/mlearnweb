@@ -27,6 +27,7 @@ import MiniEquityChart from './components/MiniEquityChart'
 import NodeStatusBar from './components/NodeStatusBar'
 import StrategyActions from './components/StrategyActions'
 import StrategyCreateWizard from './components/StrategyCreateWizard'
+import PageContainer from '@/components/layout/PageContainer'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -275,24 +276,11 @@ const LiveTradingPage: React.FC = () => {
   const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
 
   return (
-    <div style={{ padding: '24px 32px' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 16,
-        }}
-      >
-        <div>
-          <Title level={3} style={{ margin: 0 }}>
-            实盘交易
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            跨节点策略汇总 · 5秒自动刷新
-          </Text>
-        </div>
-        <Space>
+    <PageContainer
+      title="实盘交易"
+      subtitle="跨节点策略汇总 · 5秒自动刷新"
+      actions={
+        <Space wrap>
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
@@ -311,7 +299,8 @@ const LiveTradingPage: React.FC = () => {
             新建策略
           </Button>
         </Space>
-      </div>
+      }
+    >
 
       <Card styles={{ body: { padding: '12px 16px' } }} style={{ marginBottom: 12 }}>
         <NodeStatusBar nodes={nodes} />
@@ -383,7 +372,7 @@ const LiveTradingPage: React.FC = () => {
         nodes={nodes}
         initialValues={wizardInitialValues}
       />
-    </div>
+    </PageContainer>
   )
 }
 

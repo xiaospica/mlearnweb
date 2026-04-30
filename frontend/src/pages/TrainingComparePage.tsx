@@ -7,6 +7,7 @@ import ReactECharts from 'echarts-for-react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 import { trainingService } from '@/services/trainingService'
 import type { TrainingCompareRecord } from '@/types'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text } = Typography
 
@@ -311,12 +312,16 @@ const TrainingComparePage: React.FC = () => {
   const availableRecords = records.filter((r) => r.available)
 
   return (
-    <div style={{ padding: 24 }}>
-      <Space style={{ marginBottom: 16 }} size={12}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>返回列表</Button>
-        <Title level={4} style={{ margin: 0 }}>训练记录对比</Title>
-      </Space>
-
+    <PageContainer
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} size="small">
+            返回列表
+          </Button>
+          训练记录对比
+        </span>
+      }
+    >
       <Row gutter={[16, 16]}>
         <Col span={24}>
           <Card size="small" title="对比对象">
@@ -433,7 +438,7 @@ const TrainingComparePage: React.FC = () => {
           </>
         )}
       </Row>
-    </div>
+    </PageContainer>
   )
 }
 

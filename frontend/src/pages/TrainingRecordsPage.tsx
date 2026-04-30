@@ -9,6 +9,7 @@ import { trainingService } from '@/services/trainingService'
 import type { TrainingRecord } from '@/types'
 import MemoPopover from '@/components/MemoPopover/MemoPopover'
 import DeploymentBadges from '@/components/DeploymentBadges'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -593,17 +594,11 @@ const TrainingRecordsPage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <Title level={3} style={{ color: '#1f2937', margin: 0, marginBottom: 6 }}>
-            训练记录
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            管理所有训练会话 {total > 0 && `· 共 ${total} 条记录`}
-          </Text>
-        </div>
-        <Space size="small">
+    <PageContainer
+      title="训练记录"
+      subtitle={`管理所有训练会话${total > 0 ? ` · 共 ${total} 条记录` : ''}`}
+      actions={
+        <Space size="small" wrap>
           <Select
             placeholder="筛选类型"
             allowClear
@@ -702,7 +697,8 @@ const TrainingRecordsPage: React.FC = () => {
             </>
           )}
         </Space>
-      </div>
+      }
+    >
 
       {isError ? (
         <Alert
@@ -742,17 +738,18 @@ const TrainingRecordsPage: React.FC = () => {
                 size="small"
                 styles={{ body: { padding: '14px 16px' } }}
                 style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #1677ff',
+                  background: 'var(--ap-panel)',
+                  border: '1px solid var(--ap-border)',
+                  borderLeft: '3px solid var(--ap-brand-primary)',
                   borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  boxShadow: '0 1px 3px var(--ap-shadow)',
                 }}
               >
                 <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>总训练数</span>}
+                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>总训练数</span>}
                   value={total}
-                  valueStyle={{ color: '#1677ff', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<UnorderedListOutlined style={{ color: '#1677ff' }} />}
+                  valueStyle={{ color: 'var(--ap-brand-primary)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
+                  prefix={<UnorderedListOutlined style={{ color: 'var(--ap-brand-primary)' }} />}
                 />
               </Card>
             </Col>
@@ -761,17 +758,18 @@ const TrainingRecordsPage: React.FC = () => {
                 size="small"
                 styles={{ body: { padding: '14px 16px' } }}
                 style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #52c41a',
+                  background: 'var(--ap-panel)',
+                  border: '1px solid var(--ap-border)',
+                  borderLeft: '3px solid var(--ap-success)',
                   borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  boxShadow: '0 1px 3px var(--ap-shadow)',
                 }}
               >
                 <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>单次训练</span>}
+                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>单次训练</span>}
                   value={singleCount}
-                  valueStyle={{ color: '#52c41a', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<RocketOutlined style={{ color: '#52c41a' }} />}
+                  valueStyle={{ color: 'var(--ap-success)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
+                  prefix={<RocketOutlined style={{ color: 'var(--ap-success)' }} />}
                 />
               </Card>
             </Col>
@@ -780,17 +778,18 @@ const TrainingRecordsPage: React.FC = () => {
                 size="small"
                 styles={{ body: { padding: '14px 16px' } }}
                 style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #722ed1',
+                  background: 'var(--ap-panel)',
+                  border: '1px solid var(--ap-border)',
+                  borderLeft: '3px solid var(--ap-accent)',
                   borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  boxShadow: '0 1px 3px var(--ap-shadow)',
                 }}
               >
                 <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>滚动训练</span>}
+                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>滚动训练</span>}
                   value={rollingCount}
-                  valueStyle={{ color: '#722ed1', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<SyncOutlined style={{ color: '#722ed1' }} />}
+                  valueStyle={{ color: 'var(--ap-accent)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
+                  prefix={<SyncOutlined style={{ color: 'var(--ap-accent)' }} />}
                 />
               </Card>
             </Col>
@@ -799,17 +798,18 @@ const TrainingRecordsPage: React.FC = () => {
                 size="small"
                 styles={{ body: { padding: '14px 16px' } }}
                 style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #fa8c16',
+                  background: 'var(--ap-panel)',
+                  border: '1px solid var(--ap-border)',
+                  borderLeft: '3px solid var(--ap-warning)',
                   borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  boxShadow: '0 1px 3px var(--ap-shadow)',
                 }}
               >
                 <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>已完成</span>}
+                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>已完成</span>}
                   value={completedCount}
-                  valueStyle={{ color: '#fa8c16', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<CheckCircleOutlined style={{ color: '#fa8c16' }} />}
+                  valueStyle={{ color: 'var(--ap-warning)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
+                  prefix={<CheckCircleOutlined style={{ color: 'var(--ap-warning)' }} />}
                 />
               </Card>
             </Col>
@@ -839,7 +839,7 @@ const TrainingRecordsPage: React.FC = () => {
                 </Space>
               }
               key="favorite"
-              style={{ marginBottom: 16, background: '#fffbe6', borderRadius: 8, border: '1px solid #ffe58f' }}
+              style={{ marginBottom: 16, background: 'rgba(245, 158, 11, 0.08)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.3)' }}
             >
               <Table
                 dataSource={favoriteRecords}
@@ -902,7 +902,7 @@ const TrainingRecordsPage: React.FC = () => {
                       </Popconfirm>
                     </div>
                   }
-                  style={{ marginBottom: 16, background: '#f9f0ff', borderRadius: 8, border: '1px solid #d3adf7' }}
+                  style={{ marginBottom: 16, background: 'rgba(168, 85, 247, 0.08)', borderRadius: 8, border: '1px solid rgba(168, 85, 247, 0.3)' }}
                 >
                   {groupRecords.length === 0 ? (
                     <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -938,7 +938,7 @@ const TrainingRecordsPage: React.FC = () => {
               </Space>
             }
             key="normal"
-            style={{ marginBottom: 16, background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}
+            style={{ marginBottom: 16, background: 'var(--ap-panel)', borderRadius: 8, border: '1px solid var(--ap-border)' }}
           >
             {normalRecords.length === 0 ? (
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -979,7 +979,7 @@ const TrainingRecordsPage: React.FC = () => {
                 </Space>
               }
               key="favorite"
-              style={{ marginBottom: 16, background: '#fffbe6', borderRadius: 8, border: '1px solid #ffe58f' }}
+              style={{ marginBottom: 16, background: 'rgba(245, 158, 11, 0.08)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.3)' }}
             >
               <Row gutter={[20, 20]}>
                 {favoriteRecords
@@ -996,12 +996,12 @@ const TrainingRecordsPage: React.FC = () => {
                         onClick={() => navigate(`/training/${record.id}`)}
                         style={{
                           height: '100%',
-                          background: isSelected ? '#f0f7ff' : '#ffffff',
-                          border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel)',
+                          border: isSelected ? '2px solid var(--ap-brand-primary)' : '1px solid var(--ap-border)',
                           borderRadius: 8,
                           transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
+                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.20)' : '0 1px 3px var(--ap-shadow)',
                         }}
                         styles={{ body: { padding: 16 } }}
                       >
@@ -1179,7 +1179,7 @@ const TrainingRecordsPage: React.FC = () => {
                       </Popconfirm>
                     </div>
                   }
-                  style={{ marginBottom: 16, background: '#f9f0ff', borderRadius: 8, border: '1px solid #d3adf7' }}
+                  style={{ marginBottom: 16, background: 'rgba(168, 85, 247, 0.08)', borderRadius: 8, border: '1px solid rgba(168, 85, 247, 0.3)' }}
                 >
                   {groupRecords.length === 0 ? (
                     <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -1348,7 +1348,7 @@ const TrainingRecordsPage: React.FC = () => {
               </Space>
             }
             key="normal"
-            style={{ marginBottom: 16, background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}
+            style={{ marginBottom: 16, background: 'var(--ap-panel)', borderRadius: 8, border: '1px solid var(--ap-border)' }}
           >
             {normalRecords.length === 0 ? (
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -1368,12 +1368,12 @@ const TrainingRecordsPage: React.FC = () => {
                         onClick={() => navigate(`/training/${record.id}`)}
                         style={{
                           height: '100%',
-                          background: isSelected ? '#f0f7ff' : '#ffffff',
-                          border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel)',
+                          border: isSelected ? '2px solid var(--ap-brand-primary)' : '1px solid var(--ap-border)',
                           borderRadius: 8,
                           transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
+                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.20)' : '0 1px 3px var(--ap-shadow)',
                         }}
                         styles={{ body: { padding: 16 } }}
                       >
@@ -1614,7 +1614,7 @@ const TrainingRecordsPage: React.FC = () => {
           />
         </div>
       </Modal>
-    </div>
+    </PageContainer>
   )
 }
 

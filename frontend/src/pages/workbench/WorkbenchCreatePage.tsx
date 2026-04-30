@@ -38,6 +38,7 @@ import type {
   BtStrategy,
   SearchSpace,
 } from '@/types/tuning'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -367,30 +368,25 @@ const WorkbenchCreatePage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/workbench')}
-          >
+    <PageContainer
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/workbench')} size="small">
             返回列表
           </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            新建调参 Job
-          </Title>
-          <div style={{ marginLeft: 'auto' }}>
-            <Button
-              icon={<CodeOutlined />}
-              type={advancedJsonMode ? 'primary' : 'default'}
-              onClick={() => setAdvancedJsonMode((v) => !v)}
-            >
-              {advancedJsonMode ? '退出 JSON 高级模式' : 'JSON 高级模式'}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
+          新建调参 Job
+        </span>
+      }
+      actions={
+        <Button
+          icon={<CodeOutlined />}
+          type={advancedJsonMode ? 'primary' : 'default'}
+          onClick={() => setAdvancedJsonMode((v) => !v)}
+        >
+          {advancedJsonMode ? '退出 JSON 高级模式' : 'JSON 高级模式'}
+        </Button>
+      }
+    >
       <Alert
         type="success"
         showIcon
@@ -843,7 +839,7 @@ const WorkbenchCreatePage: React.FC = () => {
           </Space>
         </Space>
       </Card>
-    </div>
+    </PageContainer>
   )
 }
 

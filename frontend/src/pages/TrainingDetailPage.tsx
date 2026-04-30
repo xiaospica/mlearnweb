@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
 import ReactECharts from 'echarts-for-react'
 import DeploymentBadges from '@/components/DeploymentBadges'
+import PageContainer from '@/components/layout/PageContainer'
 
 const MemoEditor = React.lazy(() => import('@/components/MemoEditor/MemoEditor'))
 
@@ -305,29 +306,33 @@ const TrainingDetailPage: React.FC = () => {
   })
 
   return (
-    <div>
-      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
-          返回
-        </Button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Title level={3} style={{ color: '#1f2937', margin: 0 }}>{record.name}</Title>
-          <Space size={12}>
-            <Tag color={statusInfo.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-              {statusInfo.label}
-            </Tag>
-            <Tag color={(record.run_mappings?.length || record.run_count || 0) > 1 ? '#722ed1' : '#1677ff'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-              {(record.run_mappings?.length || record.run_count || 0) > 1 ? '滚动训练' : '单次训练'}
-            </Tag>
-            {record.duration_seconds && (
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                耗时: {(record.duration_seconds / 60).toFixed(1)}min
-              </Text>
-            )}
-          </Space>
-        </div>
-      </div>
-
+    <PageContainer
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} size="small">
+            返回
+          </Button>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {record.name}
+          </span>
+        </span>
+      }
+      tags={
+        <Space size={8} wrap>
+          <Tag color={statusInfo.color} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+            {statusInfo.label}
+          </Tag>
+          <Tag color={(record.run_mappings?.length || record.run_count || 0) > 1 ? '#722ed1' : '#1677ff'} style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+            {(record.run_mappings?.length || record.run_count || 0) > 1 ? '滚动训练' : '单次训练'}
+          </Tag>
+          {record.duration_seconds && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              耗时: {(record.duration_seconds / 60).toFixed(1)}min
+            </Text>
+          )}
+        </Space>
+      }
+    >
       <Row gutter={[20, 20]} style={{ marginBottom: 20 }}>
         <Col xs={24} lg={12}>
           <Card
@@ -469,7 +474,7 @@ const TrainingDetailPage: React.FC = () => {
           />
         </div>
       </Modal>
-    </div>
+    </PageContainer>
   )
 }
 

@@ -25,6 +25,7 @@ import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
+import PageContainer from '@/components/layout/PageContainer'
 
 dayjs.extend(relativeTime)
 
@@ -65,56 +66,51 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
     : '-'
 
   return (
-    <div style={{ padding: '24px 32px' }}>
-      <div style={{ marginBottom: 16 }}>
-        <Space size={8} style={{ marginBottom: 8 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/live-trading')}>
+    <PageContainer
+      sticky
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/live-trading')} size="small">
             返回
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()} size="small">
             刷新
           </Button>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name}
+          </span>
+        </span>
+      }
+      tags={
+        <Space size={4} wrap>
+          <Tag color="geekblue">{nodeId}</Tag>
+          <Tag color="purple">{engine}</Tag>
+          {detail?.class_name && <Tag>{detail.class_name}</Tag>}
+          {detail?.vt_symbol && <Tag color="gold">{detail.vt_symbol}</Tag>}
+          <Badge status={badgeStatus} text={<Text style={{ fontSize: 12 }}>{badgeText}</Text>} />
         </Space>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 16,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <Title level={3} style={{ margin: 0 }}>
-              {name}
-            </Title>
-            <Space size={4} style={{ marginTop: 6 }}>
-              <Tag color="geekblue">{nodeId}</Tag>
-              <Tag color="purple">{engine}</Tag>
-              {detail?.class_name && <Tag>{detail.class_name}</Tag>}
-              {detail?.vt_symbol && <Tag color="gold">{detail.vt_symbol}</Tag>}
-              <Badge status={badgeStatus} text={<Text style={{ fontSize: 12 }}>{badgeText}</Text>} />
-            </Space>
-            {detail?.last_update_ts && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#8c8c8c' }}>
-                最后更新: {dayjs(detail.last_update_ts).fromNow()}
-              </div>
-            )}
-          </div>
-          {detail && (
-            <StrategyActions
-              nodeId={nodeId}
-              engine={engine}
-              name={name}
-              capabilities={detail.capabilities}
-              inited={detail.inited}
-              trading={detail.trading}
-              onEdit={() => setEditOpen(true)}
-            />
-          )}
-        </div>
-      </div>
-
+      }
+      subtitle={
+        detail?.last_update_ts ? (
+          <span style={{ fontSize: 11, color: 'var(--ap-text-dim)' }}>
+            最后更新: {dayjs(detail.last_update_ts).fromNow()}
+          </span>
+        ) : undefined
+      }
+      actions={
+        detail ? (
+          <StrategyActions
+            nodeId={nodeId}
+            engine={engine}
+            name={name}
+            capabilities={detail.capabilities}
+            inited={detail.inited}
+            trading={detail.trading}
+            onEdit={() => setEditOpen(true)}
+          />
+        ) : undefined
+      }
+    >
       {detail?.mode === 'live' && (
         <Alert
           type="error"
@@ -238,7 +234,7 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
           parameters={detail.parameters || {}}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }
 

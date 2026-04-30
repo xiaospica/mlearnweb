@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
 import type { Experiment } from '@/types'
+import PageContainer from '@/components/layout/PageContainer'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -126,25 +127,15 @@ const HomePage: React.FC = () => {
   const total = expData?.data?.total || 0
 
   return (
-    <div>
-      <div style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <Title level={3} style={{ color: '#1f2937', margin: 0, marginBottom: 6 }}>
-            实验浏览
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            浏览 MLFlow 原始实验数据 {total > 0 && `· 共 ${total} 个实验`}
-          </Text>
-        </div>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => refetch()}
-          size="small"
-        >
+    <PageContainer
+      title="实验浏览"
+      subtitle={`浏览 MLFlow 原始实验数据${total > 0 ? ` · 共 ${total} 个实验` : ''}`}
+      actions={
+        <Button icon={<ReloadOutlined />} onClick={() => refetch()} size="small">
           刷新数据
         </Button>
-      </div>
-
+      }
+    >
       {isError ? (
         <Alert
           type="error"
@@ -354,7 +345,7 @@ const HomePage: React.FC = () => {
           ))}
         </Row>
       )}
-    </div>
+    </PageContainer>
   )
 }
 

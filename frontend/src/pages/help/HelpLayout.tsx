@@ -33,7 +33,7 @@ const HelpLayout: React.FC = () => {
   ]
 
   return (
-    <div style={{ display: 'flex', gap: 16, padding: 24, minHeight: 'calc(100vh - 56px)' }}>
+    <div style={{ display: 'flex', gap: 16, minHeight: 'calc(100vh - 56px)', flexWrap: 'wrap' }}>
       <Card style={{ width: 200, height: 'fit-content' }}>
         <Menu
           mode="vertical"
