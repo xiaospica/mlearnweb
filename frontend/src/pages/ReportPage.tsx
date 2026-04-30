@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Row, Col, Card, Typography, Tabs, Tag, Button, Space, Spin, Table, Descriptions, Empty, Tooltip, message, notification, Select, Alert, Statistic, Collapse } from 'antd'
 import { ArrowLeftOutlined, BarChartOutlined, SettingOutlined, TableOutlined, InfoCircleOutlined, ExperimentOutlined, LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, BulbOutlined, DotChartOutlined, LineChartOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
-import ReactECharts from 'echarts-for-react'
 import Plot from 'react-plotly.js'
 import dayjs from 'dayjs'
 import { reportService } from '@/services/reportService'
@@ -59,14 +58,23 @@ const MetricCard: React.FC<{
       size="small"
       style={{
         background: 'var(--ap-panel)',
-        border: '1px solid var(--ap-border)',
+        border: '1px solid var(--ap-border-muted)',
         borderLeft: `3px solid ${color}`,
-        borderRadius: 8,
+        borderRadius: 12,
         boxShadow: '0 1px 3px var(--ap-shadow)',
+        height: '100%',
       }}
-      styles={{ body: { padding: '14px 18px' } }}
+      styles={{ body: { padding: 24 } }}
     >
-      <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      <Text
+        type="secondary"
+        style={{
+          fontSize: 12,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          color: 'var(--ap-text-muted)',
+        }}
+      >
         {combinedTooltip ? (
           <Tooltip title={combinedTooltip}>
             {titleContent}
@@ -75,10 +83,12 @@ const MetricCard: React.FC<{
           titleContent
         )}
       </Text>
-      <div style={{ marginTop: 4 }}>
+      <div style={{ marginTop: 6 }}>
         <span style={{
-          fontSize: 22,
+          fontSize: 28,
           fontWeight: 700,
+          lineHeight: 1.15,
+          letterSpacing: '-0.02em',
           fontFamily: "'SF Mono', 'Consolas', monospace",
           color: numValue !== null
             ? (isPositive
@@ -157,7 +167,8 @@ const CumulativeReturnChart: React.FC<{ data: ReportData['portfolio_data'] }> = 
   }
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { 
           trigger: 'axis', 
@@ -193,8 +204,8 @@ const CumulativeReturnChart: React.FC<{ data: ReportData['portfolio_data'] }> = 
           { type: 'inside', start: 0, end: 100 }
         ],
       }}
-      style={{ height: 280 }}
-      notMerge={true}
+      height={280}
+
     />
   )
 }
@@ -217,7 +228,8 @@ const DrawdownChart: React.FC<{ data: ReportData['portfolio_data'] }> = ({ data 
   }
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' }, formatter: ddTooltipFormatter },
         legend: { textStyle: { color: '#6b7280' }, top: 0 },
@@ -234,7 +246,7 @@ const DrawdownChart: React.FC<{ data: ReportData['portfolio_data'] }> = ({ data 
         series,
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -243,7 +255,8 @@ const TurnoverChart: React.FC<{ data: ReportData['portfolio_data'] }> = ({ data 
   if (!data?.available || !data.turnover) return <Empty description="无换手率数据" style={{ padding: 40 }} />
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' }, formatter: (p: any) => p?.[0]?.name + '<br/>' + p?.[0]?.marker + '换手率: ' + ((p?.[0]?.value * 100)?.toFixed(2) || '0') + '%' },
         grid: { left: 60, right: 30, top: 20, bottom: 30 },
@@ -252,7 +265,7 @@ const TurnoverChart: React.FC<{ data: ReportData['portfolio_data'] }> = ({ data 
         series: [{ name: '换手率', type: 'bar', data: data.turnover, itemStyle: { color: '#722ed1', borderRadius: [2, 2, 0, 0] }, barWidth: '60%' }],
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -262,7 +275,8 @@ const ICChart: React.FC<{ data: ReportData['ic_analysis'] }> = ({ data }) => {
   const icValues = data.ic_series.values.map((v: number | null) => v === null ? 0 : v)
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' } },
         legend: { data: ['IC值'], textStyle: { color: '#6b7280' }, top: 0 },
@@ -287,7 +301,7 @@ const ICChart: React.FC<{ data: ReportData['ic_analysis'] }> = ({ data }) => {
         },
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -310,7 +324,8 @@ const ICDistributionChart: React.FC<{ data: ReportData['ic_analysis'] }> = ({ da
   const binLabels = Array.from({ length: binCount }, (_, i) => (min + i * binWidth).toFixed(3))
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' } },
         grid: { left: 60, right: 30, top: 20, bottom: 50 },
@@ -324,7 +339,7 @@ const ICDistributionChart: React.FC<{ data: ReportData['ic_analysis'] }> = ({ da
           label: { formatter: '均值: {c}', color: '#6b7280' },
         },
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -335,7 +350,8 @@ const PredictionHistogram: React.FC<{ data: ReportData['prediction_stats'] }> = 
   const { counts, bin_centers } = data.histogram
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' } },
         grid: { left: 60, right: 30, top: 20, bottom: 30 },
@@ -343,7 +359,7 @@ const PredictionHistogram: React.FC<{ data: ReportData['prediction_stats'] }> = 
         yAxis: { type: 'value', axisLabel: { color: '#9ca3af' }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
         series: [{ name: '频次', type: 'bar', data: counts, itemStyle: { color: '#1677ff', borderRadius: [2, 2, 0, 0] } }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -407,32 +423,30 @@ const PredLabelScatterChart: React.FC<{ data?: { available: boolean; labels?: nu
         <Text type="secondary" style={{ fontSize: 12 }}>样本数: <Text strong>{count}</Text></Text>
         <Text type="secondary" style={{ fontSize: 12 }}>相关系数: <Text strong style={{ color: correlation && correlation > 0 ? '#52c41a' : '#ff4d4f' }}>{correlation?.toFixed(4) || '-'}</Text></Text>
       </div>
-      <div ref={ref} style={{ width: '100%', height: 280 }}>
-        <ReactECharts
-          option={{
-            tooltip: { trigger: 'item', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' }, formatter: (p: any) => `Score: ${p.value[0]?.toFixed(4)}<br/>Label: ${p.value[1]?.toFixed(4)}` },
-            grid: GRID,
-            xAxis: { type: 'value', min: ticks.xMin, max: ticks.xMax, interval: ticks.interval, name: '预测分数', nameLocation: 'middle', nameGap: 25, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } } },
-            yAxis: { type: 'value', min: ticks.yMin, max: ticks.yMax, interval: ticks.interval, name: '真实标签', nameLocation: 'middle', nameGap: 40, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#e5e7eb' } }, splitLine: { lineStyle: { color: '#f0f0f0' } } },
-            series: [{
-              type: 'scatter',
-              data: sampleData,
-              symbolSize: 5,
-              itemStyle: (params: any) => {
-                const score = params.data[0]
-                const label = params.data[1]
-                const isCorrect = (score > 0 && label > 0) || (score < 0 && label < 0)
-                return {
-                  color: isCorrect ? '#52c41a' : '#ff4d4f',
-                  opacity: 0.6,
-                }
-              },
-            }],
-          }}
-          style={{ width: '100%', height: '100%' }}
-          notMerge
-        />
-      </div>
+      <ChartContainer
+        library="echarts"
+        height={280}
+        option={{
+          tooltip: { trigger: 'item', formatter: (p: any) => `Score: ${p.value[0]?.toFixed(4)}<br/>Label: ${p.value[1]?.toFixed(4)}` },
+          grid: GRID,
+          xAxis: { type: 'value', min: ticks.xMin, max: ticks.xMax, interval: ticks.interval, name: '预测分数', nameLocation: 'middle', nameGap: 25, axisLabel: { fontSize: 10 } },
+          yAxis: { type: 'value', min: ticks.yMin, max: ticks.yMax, interval: ticks.interval, name: '真实标签', nameLocation: 'middle', nameGap: 40, axisLabel: { fontSize: 10 } },
+          series: [{
+            type: 'scatter',
+            data: sampleData,
+            symbolSize: 5,
+            itemStyle: (params: any) => {
+              const score = params.data[0]
+              const label = params.data[1]
+              const isCorrect = (score > 0 && label > 0) || (score < 0 && label < 0)
+              return {
+                color: isCorrect ? '#52c41a' : '#ff4d4f',
+                opacity: 0.6,
+              }
+            },
+          }],
+        }}
+      />
     </div>
   )
 }
@@ -447,7 +461,8 @@ const RollingStatsChart: React.FC<{ data?: { available: boolean; dates?: string[
   const validVol = data.rolling_volatility?.filter(v => v !== null) || []
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#e8e8e8', textStyle: { color: '#374151' } },
         legend: { data: ['滚动夏普', '滚动波动率'], textStyle: { color: '#6b7280' }, top: 0 },
@@ -463,7 +478,7 @@ const RollingStatsChart: React.FC<{ data?: { available: boolean; dates?: string[
         ],
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -476,7 +491,8 @@ const MonthlyReturnHistogram: React.FC<{ data?: { available: boolean; histogram?
   const { values, labels } = data.histogram
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -513,7 +529,7 @@ const MonthlyReturnHistogram: React.FC<{ data?: { available: boolean; histogram?
           barWidth: '60%',
         }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -536,7 +552,8 @@ const MonthlyReturnHeatmap: React.FC<{ data?: { available: boolean; years?: numb
   const absMax = Math.max(Math.abs(minReturn), Math.abs(maxReturn), 0.01)
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           position: 'top',
@@ -588,7 +605,7 @@ const MonthlyReturnHeatmap: React.FC<{ data?: { available: boolean; years?: numb
           },
         }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -646,7 +663,8 @@ const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_retu
           最差年份: <Text strong style={{ color: '#ff4d4f' }}>{(Math.min(...values) * 100).toFixed(2)}%</Text> ({years[values.indexOf(Math.min(...values))]})
         </Text>
       </div>
-      <ReactECharts
+      <ChartContainer
+      library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -725,7 +743,7 @@ const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_retu
             data: [{ yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } }],
           },
         }}
-        style={{ height: 280 }}
+        height={280}
       />
     </div>
   )
@@ -749,7 +767,8 @@ const DailyReturnDistributionChart: React.FC<{ data?: { available: boolean; hist
         <Text type="secondary" style={{ fontSize: 12 }}>正收益比例: <Text strong style={{ color: '#52c41a' }}>{positive_ratio ? ((positive_ratio * 100).toFixed(1)) + '%' : '-'}</Text></Text>
         <Text type="secondary" style={{ fontSize: 12 }}>负收益天数: <Text strong style={{ color: '#ff4d4f' }}>{negative_days || 0}</Text></Text>
       </div>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -807,7 +826,7 @@ const DailyReturnDistributionChart: React.FC<{ data?: { available: boolean; hist
             label: { formatter: '{c}%', color: '#6b7280' },
           },
         }}
-        style={{ height: 320 }}
+        height={320}
       />
     </div>
   )
@@ -1568,7 +1587,8 @@ const InSampleCumulativeReturnChart: React.FC<{ segments: Record<string, InSampl
   }
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -1664,8 +1684,8 @@ const InSampleCumulativeReturnChart: React.FC<{ segments: Record<string, InSampl
           { type: 'inside', start: 0, end: 100 },
         ],
       }}
-      style={{ height: 350 }}
-      notMerge={true}
+      height={350}
+
     />
   )
 }
@@ -1743,7 +1763,8 @@ const InSampleDrawdownChart: React.FC<{ segments: Record<string, InSampleSegment
   })
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -1813,7 +1834,7 @@ const InSampleDrawdownChart: React.FC<{ segments: Record<string, InSampleSegment
         ],
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -1852,7 +1873,8 @@ const InSampleDailyReturnDistributionChart: React.FC<{ segments: Record<string, 
   const binCenters = segments[firstSegmentName]?.daily_return_distribution?.histogram?.bin_centers || []
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -1893,7 +1915,7 @@ const InSampleDailyReturnDistributionChart: React.FC<{ segments: Record<string, 
         },
         series,
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -1971,7 +1993,8 @@ const InSampleTurnoverChart: React.FC<{ segments: Record<string, InSampleSegment
   })
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -2029,7 +2052,7 @@ const InSampleTurnoverChart: React.FC<{ segments: Record<string, InSampleSegment
         ],
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -2076,7 +2099,8 @@ const InSampleRadarChart: React.FC<{ segments: Record<string, InSampleSegmentRes
   }
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'item',
@@ -2117,7 +2141,7 @@ const InSampleRadarChart: React.FC<{ segments: Record<string, InSampleSegmentRes
           areaStyle: { opacity: 0.1 },
         }],
       }}
-      style={{ height: 320 }}
+      height={320}
     />
   )
 }
@@ -2299,7 +2323,8 @@ const FeatureImportanceChart: React.FC<{ data: FeatureImportanceData }> = ({ dat
         </Tooltip>
       </div>
 
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -2390,9 +2415,8 @@ const FeatureImportanceChart: React.FC<{ data: FeatureImportanceData }> = ({ dat
             },
           ],
         }}
-        style={{ height: Math.max(400, topN * 20) }}
-        notMerge={true}
-        onEvents={{ click: handleChartClick }}
+        height={Math.max(400, topN * 20)}
+        echartsProps={{ onEvents: { click: handleChartClick } }}
       />
       
       <FactorInfoModal
@@ -2488,7 +2512,8 @@ const SHAPSummaryPlot: React.FC<{ data: SHAPAnalysisData }> = ({ data }) => {
         </Text>
       </div>
 
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'item',
@@ -2548,8 +2573,8 @@ const SHAPSummaryPlot: React.FC<{ data: SHAPAnalysisData }> = ({ data }) => {
             },
           ],
         }}
-        style={{ height: Math.max(400, topN * 25) }}
-        notMerge={true}
+        height={Math.max(400, topN * 25)}
+  
       />
 
       <div style={{ marginTop: 16, padding: 12, background: '#fafafa', borderRadius: 6 }}>
@@ -2597,7 +2622,8 @@ const SHAPDependencePlot: React.FC<{
 
   return (
     <div>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'item',
@@ -2651,8 +2677,8 @@ const SHAPDependencePlot: React.FC<{
             },
           ],
         }}
-        style={{ height: 350 }}
-        notMerge={true}
+        height={350}
+  
       />
     </div>
   )
@@ -2765,7 +2791,7 @@ const LagICDecayCurve: React.FC<{ segments: Record<string, InSampleSegmentResult
           <InfoCircleOutlined style={{ color: '#1677ff', cursor: 'pointer', fontSize: 14 }} />
         </Tooltip>
       </div>
-      <ReactECharts option={option} style={{ height: 350 }} notMerge />
+      <ChartContainer library="echarts" option={option} height={350} />
     </div>
   )
 }
@@ -2948,7 +2974,7 @@ const PositionAnalysisChart: React.FC<{ segments: Record<string, InSampleSegment
     ],
   }
 
-  return <ReactECharts option={option} style={{ height: 350 }} notMerge />
+  return <ChartContainer library="echarts" option={option} height={350} />
 }
 
 // 持仓分析图组件
@@ -3021,7 +3047,7 @@ const HoldingsAnalysisChart: React.FC<{ segments: Record<string, InSampleSegment
         <Text type="secondary">平均持仓天数: <strong>{holdings.avg_holding_days}</strong></Text>
         <Text type="secondary">总交易日: <strong>{holdings.total_days}</strong></Text>
       </div>
-      <ReactECharts option={option} style={{ height: Math.max(350, stocks.length * 26 + 40) }} notMerge />
+      <ChartContainer library="echarts" option={option} height={Math.max(350, stocks.length * 26 + 40)} />
     </div>
   )
 }
@@ -3109,7 +3135,7 @@ const SHAPHeatmapChart: React.FC<{ expId: string; runId: string }> = ({ expId, r
       <div style={{ marginBottom: 8 }}>
         <Text type="secondary">Top {features.length} 特征 × {periods.length} 个 Rolling Period — 颜色越深表示 SHAP 重要性越高</Text>
       </div>
-      <ReactECharts option={option} style={{ height: Math.max(400, features.length * 22 + 120) }} notMerge />
+      <ChartContainer library="echarts" option={option} height={Math.max(400, features.length * 22 + 120)} />
     </div>
   )
 }
@@ -3354,7 +3380,8 @@ const InSampleICChart: React.FC<{ segments: Record<string, InSampleSegmentResult
         <Text type="secondary" style={{ fontSize: 12 }}>均值IC: <Text strong style={{ color: meanIC > 0 ? '#52c41a' : '#ff4d4f' }}>{meanIC.toFixed(4)}</Text></Text>
         <Text type="secondary" style={{ fontSize: 12 }}>胜率: <Text strong>{((icArr.filter(v => v > 0).length / icArr.length) * 100).toFixed(1)}%</Text></Text>
       </div>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -3441,8 +3468,8 @@ const InSampleICChart: React.FC<{ segments: Record<string, InSampleSegmentResult
             { type: 'inside', start: 0, end: 100 },
           ],
         }}
-        style={{ height: 350 }}
-        notMerge={true}
+        height={350}
+  
       />
     </div>
   )
@@ -3517,7 +3544,8 @@ const InSampleICIRChart: React.FC<{ segments: Record<string, InSampleSegmentResu
   })
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -3594,7 +3622,7 @@ const InSampleICIRChart: React.FC<{ segments: Record<string, InSampleSegmentResu
         ],
         dataZoom: [{ type: 'inside', start: 0, end: 100 }],
       }}
-      style={{ height: 280 }}
+      height={280}
     />
   )
 }
@@ -3657,7 +3685,8 @@ const InSampleScatterChart: React.FC<{ segments: Record<string, InSampleSegmentR
 
   return (
     <div ref={ref} style={{ width: '100%', height: 350 }}>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'item',
@@ -3701,7 +3730,6 @@ const InSampleScatterChart: React.FC<{ segments: Record<string, InSampleSegmentR
           series,
         }}
         style={{ width: '100%', height: '100%' }}
-        notMerge
       />
     </div>
   )
@@ -3744,7 +3772,8 @@ const InSampleScoreHistogramChart: React.FC<{ segments: Record<string, InSampleS
   const xAxisData = series[0].xAxisData as string[]
   
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -3777,7 +3806,7 @@ const InSampleScoreHistogramChart: React.FC<{ segments: Record<string, InSampleS
           itemStyle: s.itemStyle,
         })),
       }}
-      style={{ height: 300 }}
+      height={300}
     />
   )
 }
@@ -3819,7 +3848,8 @@ const InSampleLabelHistogramChart: React.FC<{ segments: Record<string, InSampleS
   const xAxisData = series[0].xAxisData as string[]
   
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -3852,7 +3882,7 @@ const InSampleLabelHistogramChart: React.FC<{ segments: Record<string, InSampleS
           itemStyle: s.itemStyle,
         })),
       }}
-      style={{ height: 300 }}
+      height={300}
     />
   )
 }
@@ -4117,7 +4147,8 @@ const InSampleICComprehensiveChart: React.FC<{ segments: Record<string, InSample
           <InfoCircleOutlined style={{ color: '#1677ff', cursor: 'pointer' }} />
         </Tooltip>
       </div>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -4238,8 +4269,8 @@ const InSampleICComprehensiveChart: React.FC<{ segments: Record<string, InSample
             { type: 'inside', start: 0, end: 100 },
           ],
         }}
-        style={{ height: 400 }}
-        notMerge={true}
+        height={400}
+  
       />
       <div style={{ marginTop: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
         <Text type="secondary" style={{ fontSize: 11 }}>

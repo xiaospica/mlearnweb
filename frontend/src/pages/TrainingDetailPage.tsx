@@ -5,8 +5,8 @@ import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOu
 import { useParams, useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
-import ReactECharts from 'echarts-for-react'
 import DeploymentBadges from '@/components/DeploymentBadges'
+import ChartContainer from '@/components/responsive/ChartContainer'
 import PageContainer from '@/components/layout/PageContainer'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
@@ -593,7 +593,8 @@ const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_retu
           最差年份: <Text strong style={{ color: '#ff4d4f' }}>{(Math.min(...values) * 100).toFixed(2)}%</Text> ({years[values.indexOf(Math.min(...values))]})
         </Text>
       </div>
-      <ReactECharts
+      <ChartContainer
+        library="echarts"
         option={{
           tooltip: {
             trigger: 'axis',
@@ -672,7 +673,7 @@ const AnnualReturnHistogram: React.FC<{ data?: { available: boolean; annual_retu
             data: [{ yAxis: 0, name: '零线', lineStyle: { color: '#d9d9d9', type: 'solid' } }],
           },
         }}
-        style={{ height: 280 }}
+        height={280}
       />
     </div>
   )
@@ -755,7 +756,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
 
         <Col span={24}>
           <Card title="合并累计收益曲线" size="small">
-            <ReactECharts
+            <ChartContainer
+              library="echarts"
               option={{
                 tooltip: {
                   trigger: 'axis',
@@ -834,14 +836,15 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   { type: 'inside', start: 0, end: 100 },
                 ],
               }}
-              style={{ height: 350 }}
+              height={350}
             />
           </Card>
         </Col>
 
         <Col xs={24} lg={12}>
           <Card title="回撤分析" size="small">
-            <ReactECharts
+            <ChartContainer
+              library="echarts"
               option={{
                 tooltip: {
                   trigger: 'axis',
@@ -880,14 +883,15 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   { type: 'inside', start: 0, end: 100 },
                 ],
               }}
-              style={{ height: 280 }}
+              height={280}
             />
           </Card>
         </Col>
 
         <Col xs={24} lg={12}>
           <Card title="换手率" size="small">
-            <ReactECharts
+            <ChartContainer
+              library="echarts"
               option={{
                 tooltip: {
                   trigger: 'axis',
@@ -926,7 +930,7 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   { type: 'inside', start: 0, end: 100 },
                 ],
               }}
-              style={{ height: 280 }}
+              height={280}
             />
           </Card>
         </Col>
@@ -935,7 +939,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
           <>
             <Col xs={24} lg={12}>
               <Card title="IC 时序分析" size="small">
-                <ReactECharts
+                <ChartContainer
+                  library="echarts"
                   option={{
                     tooltip: {
                       trigger: 'axis',
@@ -968,14 +973,15 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                       { type: 'inside', start: 0, end: 100 },
                     ],
                   }}
-                  style={{ height: 280 }}
+                  height={280}
                 />
               </Card>
             </Col>
 
             <Col xs={24} lg={12}>
               <Card title="IC 分布直方图" size="small">
-                <ReactECharts
+                <ChartContainer
+                  library="echarts"
                   option={{
                     tooltip: {
                       trigger: 'axis',
@@ -1006,7 +1012,7 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                       itemStyle: { color: '#1677ff' },
                     }],
                   }}
-                  style={{ height: 280 }}
+                  height={280}
                 />
               </Card>
             </Col>
@@ -1017,7 +1023,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
           <>
             <Col xs={24} lg={12}>
               <Card title="月度收益直方图" size="small">
-                <ReactECharts
+                <ChartContainer
+                  library="echarts"
                   option={{
                     tooltip: {
                       trigger: 'axis',
@@ -1053,14 +1060,15 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                       }),
                     }],
                   }}
-                  style={{ height: 280 }}
+                  height={280}
                 />
               </Card>
             </Col>
 
             <Col xs={24} lg={12}>
               <Card title="月度收益热力图" size="small">
-                <ReactECharts
+                <ChartContainer
+                  library="echarts"
                   option={{
                     tooltip: {
                       position: 'top',
@@ -1113,7 +1121,7 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                       },
                     }],
                   }}
-                  style={{ height: 280 }}
+                  height={280}
                 />
               </Card>
             </Col>
@@ -1123,7 +1131,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
         {rolling_stats?.available && (
           <Col span={24}>
             <Card title={`滚动统计 (窗口=${rolling_stats.window}天)`} size="small">
-              <ReactECharts
+              <ChartContainer
+                library="echarts"
                 option={{
                   tooltip: {
                     trigger: 'axis',
@@ -1186,7 +1195,7 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                     { type: 'inside', start: 0, end: 100 },
                   ],
                 }}
-                style={{ height: 300 }}
+                height={300}
               />
             </Card>
           </Col>
@@ -1202,7 +1211,8 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
 
         <Col xs={24} lg={12}>
           <Card title="日收益率分布" size="small">
-            <ReactECharts
+            <ChartContainer
+              library="echarts"
               option={{
                 tooltip: {
                   trigger: 'axis',
@@ -1235,7 +1245,7 @@ const MergedReportPanel: React.FC<{ data: any }> = ({ data }) => {
                   }),
                 }],
               }}
-              style={{ height: 280 }}
+              height={280}
             />
           </Card>
         </Col>

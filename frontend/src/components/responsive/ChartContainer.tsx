@@ -66,7 +66,12 @@ interface BaseProps {
 
 interface EChartsProps extends BaseProps {
   library: 'echarts'
-  option: EChartsOption
+  // ECharts 类型签名比 ReactECharts 实际接受范围严格得多
+  // （legend.data 要求 string|DataItem 而非 unknown，formatter 类型不全等）；
+  // 用 EChartsOption 会让大量真实 chart 配置过不了 TS。这里放松为 any，
+  // 由 echarts 运行时本身校验
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  option: any
   /** 透传到 echarts-for-react 的其它 props（不含 option/style） */
   echartsProps?: Omit<EChartsReactProps, 'option' | 'style'>
 }

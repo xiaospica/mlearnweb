@@ -3,11 +3,11 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Card, Col, Empty, Row, Space, Spin, Table, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
-import ReactECharts from 'echarts-for-react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 import { trainingService } from '@/services/trainingService'
 import type { TrainingCompareRecord } from '@/types'
 import PageContainer from '@/components/layout/PageContainer'
+import ChartContainer from '@/components/responsive/ChartContainer'
 
 const { Title, Text } = Typography
 
@@ -141,7 +141,8 @@ const OverlayTimeSeriesChart: React.FC<{
   })
 
   return (
-    <ReactECharts
+    <ChartContainer
+      library="echarts"
       option={{
         tooltip: {
           trigger: 'axis',
@@ -170,8 +171,7 @@ const OverlayTimeSeriesChart: React.FC<{
         ],
         series,
       }}
-      style={{ height }}
-      notMerge
+      height={height}
     />
   )
 }
