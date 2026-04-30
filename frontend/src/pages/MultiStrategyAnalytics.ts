@@ -429,17 +429,17 @@ export const computeDrawdownAttribution = (
 // ----------------------------------------------------------
 
 export interface PortfolioMetrics {
-  /** 累积收益: cum[-1] = product(1+r) - 1 */
+  /** 累积收益（复利）: product(1+r) - 1 */
   totalReturn: number
-  /** 年化收益（单利，与后端一致）: mean(r) * 252 */
+  /** 年化收益（复利）: (1+total)^(252/T) - 1 */
   annualizedReturn: number
   /** 年化波动率: std(r, ddof=1) * sqrt(252) */
   annualVolatility: number
-  /** Sharpe (rf=0): mean / std * sqrt(252) — std=0 返回 null */
+  /** Sharpe (rf=0): mean / std * sqrt(252) — std=0 返回 null。算术口径（行业标准） */
   sharpe: number | null
-  /** Sortino: mean / std_downside * sqrt(252) — 无下跌哨兵 std=0.0001 */
-  sortino: number
-  /** Calmar: mean*252 / |max_dd| — max_dd=0 返回 null */
+  /** Sortino: mean / std_downside * sqrt(252) — 无下跌或 std=0 返回 null */
+  sortino: number | null
+  /** Calmar: 复利年化 / |max_dd| — max_dd=0 返回 null */
   calmar: number | null
   /** 最大回撤（负数） */
   maxDrawdown: number
@@ -457,13 +457,14 @@ export interface PortfolioMetrics {
  * 给定权重，计算组合的关键指标。
  *
  * **严格对齐后端 `_compute_merged_metrics`（mlearnweb/backend/app/routers/training_records.py:513）**
- * 公式参考：
- *  - annualized_return = mean(daily) * 252  (单利)
- *  - sharpe = mean / std(ddof=1) * sqrt(252)
- *  - sortino = mean / std_downside(ddof=1) * sqrt(252)，无下跌时 std 哨兵=0.0001
- *  - max_drawdown = min((cum - cummax) / cummax)，cum 用 NAV 起点 1
- *  - calmar = mean*252 / |max_dd|
- *  - win_rate = count(daily > 0) / len(daily)
+ * 全部用 **复利口径**：
+ *  - total_return     = (1+r).prod() - 1
+ *  - annualized       = (1+total)^(252/T) - 1
+ *  - max_drawdown     = min((nav-cummax)/cummax)，nav=(1+r).cumprod()
+ *  - sharpe           = mean / std(ddof=1) * sqrt(252)        算术（行业标准，rf=0）
+ *  - sortino          = mean / std_downside * sqrt(252)       无下跌返回 null
+ *  - calmar           = 复利年化 / |max_dd|                    null 若 max_dd=0
+ *  - win_rate         = count(r>0) / len(r)
  *
  * 数据流复用 computePortfolioCumulative 的对齐 + 权重归一化逻辑（同口径）。
  */
@@ -524,15 +525,24 @@ export const computePortfolioMetrics = (
     if (dd < maxDD) maxDD = dd
   }
 
-  // sortino: 下跌方差仅用 r<0 子集（与后端一致）；无下跌时 std 哨兵 0.0001
+  // sortino: 仅 r<0 子集；无下跌或 std=0 返回 null（与后端 _calc_sortino_ratio 对齐）
   const downside = portDaily.filter((r) => r < 0)
-  const downsideStd = downside.length > 0 ? stdSample(downside) : 0.0001
-  const sortino = (meanR / downsideStd) * Math.sqrt(TRADING_DAYS_PER_YEAR)
+  let sortino: number | null = null
+  if (downside.length > 0) {
+    const downsideStd = stdSample(downside)
+    if (downsideStd > 0) {
+      sortino = (meanR / downsideStd) * Math.sqrt(TRADING_DAYS_PER_YEAR)
+    }
+  }
 
-  const annualizedReturn = meanR * TRADING_DAYS_PER_YEAR
+  // 复利年化（与后端一致）
+  const annualizedReturn =
+    portDaily.length > 0
+      ? Math.pow(1 + totalReturn, TRADING_DAYS_PER_YEAR / portDaily.length) - 1
+      : 0
   const annualVol = stdR * Math.sqrt(TRADING_DAYS_PER_YEAR)
   const sharpe = stdR > 0 ? (meanR / stdR) * Math.sqrt(TRADING_DAYS_PER_YEAR) : null
-  const calmar = Math.abs(maxDD) > 0 ? annualizedReturn / Math.abs(maxDD) : null
+  const calmar = Math.abs(maxDD) > 1e-12 ? annualizedReturn / Math.abs(maxDD) : null
 
   return {
     totalReturn,

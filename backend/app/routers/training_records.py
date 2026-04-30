@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Depends, Body, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import pandas as pd
 import numpy as np
@@ -511,6 +511,20 @@ def _merge_rolling_returns(reports: List[Dict]) -> Dict[str, Any]:
 
 
 def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    汇总训练记录指标。统一用 **复利口径**（前后端必须一致）。
+
+    口径说明:
+      - total_return     = (1+r).prod() - 1                          复利累计
+      - annualized       = (1+total)^(252/T) - 1                     复利年化
+      - max_drawdown     = min((nav - cummax)/cummax)，nav=(1+r).cumprod()  从 1 起
+      - sharpe           = mean(r)/std(r,ddof=1) * sqrt(252)         算术（行业标准，rf=0）
+      - sortino          = mean(r)/std(r[r<0],ddof=1) * sqrt(252)    算术，无下跌返回 None
+      - calmar           = annualized / |max_drawdown|               用复利年化分子
+      - win_rate         = (r>0).mean()                              全天数为分母
+      - excess_annualized = annualized_strat - annualized_bench       复利年化对减
+      - information_ratio = excess.mean() / excess.std() * sqrt(252)  算术
+    """
     if not merged_data.get("available"):
         return {"available": False}
 
@@ -518,21 +532,40 @@ def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
     if len(returns) == 0:
         return {"available": False}
 
-    cum_ret = pd.Series(merged_data.get("cumulative_return", []))
+    n_days = len(returns)
+
+    # 复利总收益 / 年化（直接用日收益反推，避免依赖 cumulative_return 的起点形式）
+    total_return = float((1 + returns).prod() - 1)
+    annualized_return = (
+        float((1 + total_return) ** (252 / n_days) - 1) if n_days > 0 else 0.0
+    )
+
+    # 反推 NAV（起点 1）→ 算最大回撤；这样不依赖外部 cum_returns 起点
+    nav = (1 + returns).cumprod()
+    max_dd = float(_calc_max_drawdown_from_nav(nav))
+
+    std_daily = float(returns.std())  # ddof=1 (pandas 默认)
+    mean_daily = float(returns.mean())
 
     metrics = {
         "available": True,
-        "total_trading_days": int(len(returns)),
-        "total_return": float((cum_ret.iloc[-1] / cum_ret.iloc[0] - 1)) if len(cum_ret) > 1 else 0,
-        "annualized_return": float(returns.mean() * 252),
-        "mean_daily_return": float(returns.mean()),
-        "std_daily_return": float(returns.std()),
-        "max_drawdown": float(_calc_max_drawdown(cum_ret)),
-        "sharpe_ratio": float(returns.mean() / returns.std() * np.sqrt(252)) if returns.std() > 0 else None,
-        "sortino_ratio": float(_calc_sortino_ratio(returns)),
-        "calmar_ratio": float(returns.mean() * 252 / abs(_calc_max_drawdown(cum_ret))) if abs(_calc_max_drawdown(cum_ret)) > 0 else None,
+        "total_trading_days": int(n_days),
+        "total_return": total_return,
+        "annualized_return": annualized_return,
+        "mean_daily_return": mean_daily,
+        "std_daily_return": std_daily,
+        "max_drawdown": max_dd,
+        "sharpe_ratio": float(mean_daily / std_daily * np.sqrt(252)) if std_daily > 0 else None,
+        "sortino_ratio": _calc_sortino_ratio(returns),
+        "calmar_ratio": (
+            float(annualized_return / abs(max_dd)) if abs(max_dd) > 1e-12 else None
+        ),
         "win_rate": float((returns > 0).mean()),
-        "profit_loss_ratio": float(abs(returns[returns > 0].mean()) / abs(returns[returns < 0].mean())) if (returns < 0).any() else None,
+        "profit_loss_ratio": (
+            float(abs(returns[returns > 0].mean()) / abs(returns[returns < 0].mean()))
+            if (returns < 0).any() and (returns > 0).any()
+            else None
+        ),
         "max_single_day_gain": float(returns.max()),
         "max_single_day_loss": float(returns.min()),
         "number_of_runs": len(merged_data.get("run_boundaries", [])),
@@ -540,27 +573,53 @@ def _compute_merged_metrics(merged_data: Dict[str, Any]) -> Dict[str, Any]:
 
     if "daily_benchmark" in merged_data:
         bench_returns = pd.Series(merged_data["daily_benchmark"]).dropna()
-        excess_returns = returns - bench_returns
-        metrics.update({
-            "excess_annualized_return": float(excess_returns.mean() * 252),
-            "tracking_error": float(excess_returns.std() * np.sqrt(252)),
-            "information_ratio": float(excess_returns.mean() / excess_returns.std() * np.sqrt(252)) if excess_returns.std() > 0 else None,
-        })
+        if len(bench_returns) > 0:
+            # 复利年化基准 → 复利对减得超额年化（不再用 mean*252）
+            total_bench = float((1 + bench_returns).prod() - 1)
+            n_bench = len(bench_returns)
+            annualized_bench = (
+                float((1 + total_bench) ** (252 / n_bench) - 1) if n_bench > 0 else 0.0
+            )
+
+            # 信息比率 / 跟踪误差仍用算术每日超额（行业标准）
+            excess_returns = returns - bench_returns
+            excess_std = float(excess_returns.std())
+            metrics.update({
+                "excess_annualized_return": annualized_return - annualized_bench,
+                "tracking_error": float(excess_std * np.sqrt(252)),
+                "information_ratio": (
+                    float(excess_returns.mean() / excess_std * np.sqrt(252))
+                    if excess_std > 0
+                    else None
+                ),
+            })
 
     return metrics
 
 
-def _calc_max_drawdown(cum_returns: pd.Series) -> float:
-    running_max = cum_returns.cummax()
-    drawdown = (cum_returns - running_max) / running_max
-    return drawdown.min()
+def _calc_max_drawdown_from_nav(nav: pd.Series) -> float:
+    """从 NAV（起点为 1 的累计净值）计算最大回撤。返回值是负数（或 0）。"""
+    if len(nav) == 0:
+        return 0.0
+    running_max = nav.cummax()
+    drawdown = (nav - running_max) / running_max
+    return float(drawdown.min())
 
 
-def _calc_sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
-    excess_returns = returns - risk_free_rate
+def _calc_sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> Optional[float]:
+    """Sortino 比率：用下跌方差代替全样本方差的算术 Sharpe。
+
+    无下跌（r<0 样本数 0 或 std=0）时返回 None — 该情形 Sortino 数学上无意义，
+    旧实现用 0.0001 哨兵会出现非常大的虚假数值，已弃用。
+    """
     downside_returns = returns[returns < 0]
-    downside_std = downside_returns.std() if len(downside_returns) > 0 else 0.0001
-    return float(excess_returns.mean() / downside_std * np.sqrt(252))
+    if len(downside_returns) == 0:
+        return None
+    downside_std = float(downside_returns.std())
+    if downside_std == 0:
+        return None
+    excess_mean = float((returns - risk_free_rate).mean())
+    return float(excess_mean / downside_std * np.sqrt(252))
 
 
 def _merge_ic_analysis(experiment_id: str, run_ids: List[str]) -> Dict[str, Any]:
