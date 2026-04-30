@@ -99,11 +99,11 @@ export interface Palette {
 
 export const PALETTE_DARK: Palette = {
   // 中性纯黑色板（对位 QuantDinger 截图）— 无蓝调
-  // bg 与 panel 的亮度差 ~16 单位，确保卡片在页面上清晰浮起
-  bg: '#0A0A0A',
-  panel: '#1A1A1A',
-  panelElevated: '#222222',
-  panelMuted: '#202020',
+  // bg 与 panel 亮度差 ~16 单位 + 卡片顶部 inset highlight 营造立体感
+  bg: '#0F0F0F',
+  panel: '#1F1F1F',
+  panelElevated: '#2A2A2A',
+  panelMuted: '#181818',
   border: '#2A2A2A',
   borderMuted: '#222222',
   text: '#F5F5F5',

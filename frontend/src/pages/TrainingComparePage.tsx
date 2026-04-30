@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Card, Col, Empty, Row, Space, Spin, Table, Tag, Typography } from 'antd'
@@ -8,6 +8,12 @@ import { trainingService } from '@/services/trainingService'
 import type { TrainingCompareRecord } from '@/types'
 import PageContainer from '@/components/layout/PageContainer'
 import ChartContainer from '@/components/responsive/ChartContainer'
+import {
+  computePortfolioCumulative,
+  type PortfolioCombo,
+  type StrategySeries,
+} from './PortfolioCombo'
+import PortfolioComboBuilder from './PortfolioComboBuilder'
 
 const { Title, Text } = Typography
 
@@ -48,7 +54,7 @@ function icStats(values: Array<number | null | undefined>): { meanIC: number; ic
 const RecordHeaderChip: React.FC<{ record: TrainingCompareRecord; color: string; index: number }> = ({ record, color, index }) => (
   <Space size={6}>
     <Tag color={color} style={{ fontSize: 12 }}>对照 {String.fromCharCode(65 + index)}</Tag>
-    <Text strong style={{ color: '#1f2937' }}>{record.name || `#${record.id}`}</Text>
+    <Text strong style={{ color: 'var(--ap-text)' }}>{record.name || `#${record.id}`}</Text>
     <Text type="secondary" style={{ fontSize: 11 }}>ID: {record.id}</Text>
     {record.category && <Tag>{record.category}</Tag>}
   </Space>
@@ -87,7 +93,7 @@ const MetricsCompareTable: React.FC<{ records: TrainingCompareRecord[] }> = ({ r
             strong={isBest}
             style={{
               fontFamily: "'SF Mono', 'Consolas', monospace",
-              color: isBest ? '#52c41a' : '#374151',
+              color: isBest ? 'var(--ap-success)' : 'var(--ap-text)',
             }}
           >
             {val}
@@ -106,7 +112,9 @@ const OverlayTimeSeriesChart: React.FC<{
   title: string
   yFormat?: (v: number) => string
   height?: number
-}> = ({ records, extract, title, yFormat, height = 280 }) => {
+  /** 可选的策略组合曲线（计算后追加到 series 数组）*/
+  portfolios?: PortfolioCombo[]
+}> = ({ records, extract, title, yFormat, height = 280, portfolios }) => {
   const perRecord = records.map((r, idx) => {
     const data = extract(r)
     if (!data.dates || !data.values) return null
@@ -124,9 +132,28 @@ const OverlayTimeSeriesChart: React.FC<{
     return <Empty description={`${title} 无数据`} style={{ padding: 40 }} />
   }
 
-  const allDates = Array.from(new Set(usable.flatMap((p) => p.dates))).sort()
+  // 计算组合曲线（仅 portfolios 提供时启用）
+  const portfolioSeries: Array<{ name: string; values: Array<number | null>; dates: string[]; color: string }> = []
+  if (portfolios && portfolios.length > 0) {
+    const strategySeries: StrategySeries[] = usable.map(({ record, dates, map }) => ({
+      id: record.id,
+      dates,
+      cumulative: dates.map((d) => map.get(d) ?? null),
+    }))
+    for (const p of portfolios) {
+      const { dates, cumulative } = computePortfolioCumulative(strategySeries, p.weights)
+      portfolioSeries.push({ name: p.name, values: cumulative, dates, color: p.color })
+    }
+  }
 
-  const series = usable.map(({ record, idx, map }) => {
+  const allDates = Array.from(
+    new Set([
+      ...usable.flatMap((p) => p.dates),
+      ...portfolioSeries.flatMap((p) => p.dates),
+    ]),
+  ).sort()
+
+  const recordSeries = usable.map(({ record, idx, map }) => {
     const aligned = allDates.map((d) => (map.has(d) ? map.get(d)! : null))
     const color = PALETTE[idx] || '#1677ff'
     return {
@@ -139,6 +166,23 @@ const OverlayTimeSeriesChart: React.FC<{
       itemStyle: { color },
     }
   })
+
+  const comboSeries = portfolioSeries.map((p) => {
+    const m = new Map<string, number | null>()
+    p.dates.forEach((d, i) => m.set(d, p.values[i] ?? null))
+    const aligned = allDates.map((d) => (m.has(d) ? m.get(d)! : null))
+    return {
+      name: p.name,
+      type: 'line',
+      data: aligned,
+      showSymbol: false,
+      connectNulls: false,
+      lineStyle: { width: 2, color: p.color, type: 'dashed' as const },
+      itemStyle: { color: p.color },
+    }
+  })
+
+  const series = [...recordSeries, ...comboSeries]
 
   return (
     <ChartContainer
@@ -268,6 +312,8 @@ const ConfigDiffPanel: React.FC<{ records: TrainingCompareRecord[] }> = ({ recor
 const TrainingComparePage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  // 策略组合（用户在累计收益卡上方编辑）
+  const [portfolios, setPortfolios] = useState<PortfolioCombo[]>([])
 
   const ids = useMemo(() => {
     const raw = searchParams.get('ids') || ''
@@ -354,6 +400,11 @@ const TrainingComparePage: React.FC = () => {
 
             <Col span={24}>
               <Card size="small" title="累计收益率（overlay）">
+                <PortfolioComboBuilder
+                  records={availableRecords}
+                  combos={portfolios}
+                  onChange={setPortfolios}
+                />
                 <OverlayTimeSeriesChart
                   records={availableRecords}
                   extract={(r) => ({
@@ -363,6 +414,7 @@ const TrainingComparePage: React.FC = () => {
                   })}
                   title="累计收益率"
                   yFormat={(v) => `${(v * 100).toFixed(2)}%`}
+                  portfolios={portfolios}
                 />
               </Card>
             </Col>

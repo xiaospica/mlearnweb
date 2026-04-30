@@ -61,16 +61,19 @@
 
 /* ============================================================
  * 深色主题（默认）— 中性纯黑色板，对位 QuantDinger 截图
- * bg ↔ panel 16 单位亮度差，确保卡片清晰抬起
+ * bg ↔ panel 16 单位亮度差 + 卡片 inset highlight 营造立体感
  * ============================================================ */
 :root,
 :root[data-theme='dark'] {
-  --ap-bg: #0a0a0a;
-  --ap-panel: #1a1a1a;
-  --ap-panel-elevated: #222222;
-  --ap-panel-muted: #202020;
+  --ap-bg: #0f0f0f;
+  --ap-panel: #1f1f1f;
+  --ap-panel-elevated: #2a2a2a;
+  --ap-panel-muted: #181818;
   --ap-border: #2a2a2a;
   --ap-border-muted: #222222;
+  /** 卡片立体感：顶边白色微高光（受光面）+ 外阴影 */
+  --ap-elevation-1: inset 0 1px 0 0 rgba(255, 255, 255, 0.04), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --ap-elevation-2: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 4px 12px rgba(0, 0, 0, 0.5);
   --ap-text: #f5f5f5;
   --ap-text-muted: #999999;
   --ap-text-dim: #666666;
@@ -119,6 +122,8 @@
   --ap-shadow: rgba(15, 23, 42, 0.08);
   --ap-shadow-lg: rgba(15, 23, 42, 0.16);
   --ap-brand-soft: #e8f4fd;
+  --ap-elevation-1: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --ap-elevation-2: 0 4px 12px rgba(15, 23, 42, 0.10), 0 2px 4px rgba(15, 23, 42, 0.05);
   color-scheme: light;
 }
 
@@ -169,6 +174,17 @@ body {
   font-family: var(--ap-font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================================
+ * 卡片立体感：所有 AntD Card 默认应用 elevation-1
+ * 顶部 inset 高光 + 外阴影，与页面 bg 形成清晰层次
+ * ============================================================ */
+.ant-card {
+  box-shadow: var(--ap-elevation-1);
+}
+.ant-card.ant-card-bordered {
+  border-color: var(--ap-border-muted);
 }
 
 /* ============================================================

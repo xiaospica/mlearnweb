@@ -87,6 +87,7 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
         background: 'var(--ap-panel)',
         border: '1px solid var(--ap-border-muted)',
         borderRadius: 12,
+        boxShadow: 'var(--ap-elevation-1)',
         cursor: item.onClick ? 'pointer' : 'default',
         height: '100%',
       }}

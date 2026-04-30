@@ -1218,7 +1218,7 @@ const ModelParamsPanel: React.FC<{ params: Record<string, unknown>; config?: Rec
 
       {config && (
         <Card size="small" title={<Text strong style={{ color: '#fa8c16', fontSize: 13 }}>完整配置快照</Text>}>
-          <pre style={{ color: '#4b5563', fontSize: 11, maxHeight: 300, overflow: 'auto', margin: 0, fontFamily: "'SF Mono', 'Consolas', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#fafafa', padding: 12, borderRadius: 6 }}>
+          <pre style={{ color: '#4b5563', fontSize: 11, maxHeight: 300, overflow: 'auto', margin: 0, fontFamily: "'SF Mono', 'Consolas', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'var(--ap-panel-muted)', padding: 12, borderRadius: 6 }}>
             {JSON.stringify(config, null, 2)}
           </pre>
         </Card>
@@ -1324,7 +1324,7 @@ const InSampleMetricCard: React.FC<{
 
   const content = (
     <div style={{
-      background: highlight ? '#fff7e6' : '#fafafa',
+      background: highlight ? 'rgba(245, 158, 11, 0.08)' : 'var(--ap-panel-muted)',
       borderRadius: 6,
       padding: '10px 14px',
       borderLeft: `3px solid ${segmentColor}`,
@@ -2577,7 +2577,7 @@ const SHAPSummaryPlot: React.FC<{ data: SHAPAnalysisData }> = ({ data }) => {
   
       />
 
-      <div style={{ marginTop: 16, padding: 12, background: '#fafafa', borderRadius: 6 }}>
+      <div style={{ marginTop: 16, padding: 12, background: 'var(--ap-panel-muted)', borderRadius: 6 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
           <strong>说明：</strong>
           每个点代表一个样本。X轴为SHAP值（正值表示正向贡献，负值表示负向贡献）。
@@ -4106,7 +4106,7 @@ const InSampleICComprehensiveChart: React.FC<{ segments: Record<string, InSample
           const config = SEGMENT_CONFIG[segName] || { color: '#8c8c8c', label: segName }
           if (!stats) return null
           return (
-            <div key={segName} style={{ padding: '4px 8px', background: '#fafafa', borderRadius: 4 }}>
+            <div key={segName} style={{ padding: '4px 8px', background: 'var(--ap-panel-muted)', borderRadius: 4 }}>
               <Tag color={config.color} style={{ marginRight: 4 }}>{config.label}</Tag>
               <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
                 IC: <Text strong style={{ color: stats.meanIC > 0 ? '#52c41a' : '#ff4d4f' }}>{stats.meanIC.toFixed(4)}</Text>
@@ -4272,7 +4272,7 @@ const InSampleICComprehensiveChart: React.FC<{ segments: Record<string, InSample
         height={400}
   
       />
-      <div style={{ marginTop: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+      <div style={{ marginTop: 8, padding: 8, background: 'var(--ap-panel-muted)', borderRadius: 4 }}>
         <Text type="secondary" style={{ fontSize: 11 }}>
           <strong>说明：</strong>点击图例可隐藏/显示对应曲线。IC = Spearman相关系数，Rank IC = Pearson(rank(score), rank(label))，ICIR = IC均值/IC标准差。
         </Text>

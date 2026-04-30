@@ -1441,7 +1441,7 @@ const WalkForwardModal: React.FC<{
       />
       <Form layout="vertical">
         <Form.Item label={<span>选中的 trial_numbers ({selectedTrials.length})</span>}>
-          <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
+          <div style={{ background: 'var(--ap-panel-muted)', padding: 8, borderRadius: 4 }}>
             {selectedTrials.length > 0 ? (
               <Space wrap size={4}>
                 {selectedTrials.map((n) => (

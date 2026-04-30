@@ -66,8 +66,8 @@ const MiniReturnChart: React.FC<{ data?: { values: number[]; final_return: numbe
 const UsageGuide: React.FC = () => (
   <Card
     style={{
-      background: '#f0f5ff',
-      border: '1px solid #d6e4ff',
+      background: 'rgba(59, 130, 246, 0.06)',
+      border: '1px solid rgba(59, 130, 246, 0.20)',
       borderRadius: 8,
     }}
     styles={{ body: { padding: '24px 28px' } }}
@@ -75,7 +75,7 @@ const UsageGuide: React.FC = () => (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
       <div style={{
         width: 44, height: 44, borderRadius: 10,
-        background: '#e8f4fd',
+        background: 'rgba(59, 130, 246, 0.16)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
       }}>
@@ -730,7 +730,7 @@ const TrainingRecordsPage: React.FC = () => {
                 请确保后端服务已启动:
               </Text>
               <div style={{
-                marginTop: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 6,
+                marginTop: 8, padding: '8px 12px', background: 'var(--ap-panel-muted)', borderRadius: 6,
                 fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11, color: 'var(--ap-text-muted)',
               }}>
                 cd mlearnweb/backend && python -m uvicorn app.main:app --port 8000
