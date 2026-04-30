@@ -25,6 +25,7 @@ import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
+import TradesCard from './components/TradesCard'
 import PageContainer from '@/components/layout/PageContainer'
 
 dayjs.extend(relativeTime)
@@ -174,8 +175,9 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                   {engine === 'MlStrategy' && (
                     <LatestTopkCard nodeId={nodeId} strategyName={name} />
                   )}
+                  <TradesCard nodeId={nodeId} engine={engine} strategyName={name} />
                   <CorpActionsCard
-                    vtSymbols={(detail.positions || []).map((p) => p.vt_symbol)}
+                    vtSymbols={(detail.positions || []).filter((p) => Number(p.volume) > 0).map((p) => p.vt_symbol)}
                     days={30}
                   />
                   <Card title="参数 / 运行时变量" style={{ marginTop: 16 }}>

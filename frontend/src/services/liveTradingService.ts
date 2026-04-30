@@ -9,6 +9,7 @@ import type {
   StrategyEditPayload,
   StrategyEngineInfo,
   StrategySummary,
+  StrategyTrade,
 } from '@/types/liveTrading'
 
 // ─── Ops password storage ───────────────────────────────────────────────
@@ -76,6 +77,16 @@ export const liveTradingService = {
       .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}`, {
         params: { window_days: windowDays },
       })
+      .then((r) => r.data)
+  },
+
+  listStrategyTrades(
+    nodeId: string,
+    engine: string,
+    name: string,
+  ): Promise<LiveTradingResponse<StrategyTrade[]>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/trades`)
       .then((r) => r.data)
   },
 

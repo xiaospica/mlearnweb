@@ -293,6 +293,48 @@ class TestResolveStrategyValue:
         assert label == "unavailable"
         assert equity is None
 
+    def test_source_c_includes_position_market_value(self):
+        """关键回归：account_equity = cash + 持仓市值 (volume × cost_price + pnl)。
+
+        旧 bug: account_equity 只取 account.balance（cash），买入后 cash 暴跌
+        但持仓未计入 → 权益曲线显示从 1M 跌到 149K 是误导。
+        """
+        from app.services.vnpy.live_trading_service import _resolve_strategy_value
+
+        strategy = {"vt_symbol": None, "variables": {}}
+        positions = [
+            # 持有 1000 股 @ 11 (cost) + 100 浮盈 → 市值 11100
+            {"vt_symbol": "000001.SZSE", "volume": 1000, "price": 11.0, "pnl": 100},
+            # 持有 500 股 @ 20 (cost) - 50 浮亏 → 市值 9950
+            {"vt_symbol": "600000.SSE", "volume": 500, "price": 20.0, "pnl": -50},
+            # volume=0 已平仓位 → 不计入
+            {"vt_symbol": "002001.SZSE", "volume": 0, "price": 30.0, "pnl": 0},
+        ]
+        accounts = [{"balance": 100_000}]  # cash 10w
+        value, label, equity = _resolve_strategy_value(strategy, positions, accounts)
+        # 总权益 = 100_000 cash + 11100 + 9950 = 121_050
+        assert label == "account_equity"
+        assert value == 121_050
+        assert equity == 121_050
+
+    def test_source_c_filters_by_gateway_name(self):
+        """多 gateway 沙盒：accounts/positions 按 gateway_name 过滤。"""
+        from app.services.vnpy.live_trading_service import _resolve_strategy_value
+
+        strategy = {"vt_symbol": None, "variables": {}}
+        positions = [
+            # gateway A: 持仓 11100
+            {"vt_symbol": "000001.SZSE", "volume": 1000, "price": 11.0, "pnl": 100, "gateway_name": "QMT_SIM_A"},
+            # gateway B: 不算
+            {"vt_symbol": "600000.SSE", "volume": 500, "price": 20.0, "pnl": -50, "gateway_name": "QMT_SIM_B"},
+        ]
+        accounts = [
+            {"balance": 100_000, "gateway_name": "QMT_SIM_A"},
+            {"balance": 999_999, "gateway_name": "QMT_SIM_B"},  # 不算
+        ]
+        value, _, _ = _resolve_strategy_value(strategy, positions, accounts, gateway_name="QMT_SIM_A")
+        assert value == 100_000 + 11100  # = 111_100
+
 
 # ---------------------------------------------------------------------------
 # Registry tests

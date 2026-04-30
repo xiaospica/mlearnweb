@@ -125,6 +125,62 @@ def _first_account_equity(accounts: List[Dict[str, Any]]) -> Optional[float]:
     return None
 
 
+def _total_account_equity(
+    accounts: List[Dict[str, Any]],
+    positions: List[Dict[str, Any]],
+    gateway_name: Optional[str] = None,
+) -> Optional[float]:
+    """计算账户**总权益** = 现金 + 持仓市值（用 cost_price + pnl 反推 current_price）。
+
+    旧实现 _first_account_equity 只取 account.balance（cash 余额），买入后大幅下跌
+    但实际有持仓市值未反映 → 权益曲线显示从 1M 跌到 149k 是误导。
+
+    新实现对齐"组合总价值"语义：
+        total = cash + sum_over_positions(volume × cost_price + pnl)
+              = cash + sum_over_positions(volume × current_price)
+
+    若提供 gateway_name，按 gateway 过滤账户和持仓（多 gateway 沙盒隔离）。
+    """
+    if not accounts and not positions:
+        return None
+
+    # 1. 累加 cash (按 gateway 过滤)
+    cash = 0.0
+    cash_hit = False
+    for acc in accounts or []:
+        if gateway_name and str(acc.get("gateway_name", "")) != gateway_name:
+            continue
+        bal = acc.get("balance")
+        if bal is None:
+            continue
+        try:
+            cash += float(bal)
+            cash_hit = True
+        except (TypeError, ValueError):
+            continue
+
+    # 2. 累加持仓市值（仅 volume > 0 的持仓；vnpy OMS 会保留 volume=0 的已平仓位）
+    market_value = 0.0
+    pos_hit = False
+    for p in positions or []:
+        if gateway_name and str(p.get("gateway_name", "")) != gateway_name:
+            continue
+        try:
+            volume = float(p.get("volume") or 0)
+            if volume <= 0:
+                continue
+            cost_price = float(p.get("price") or 0)
+            pnl = float(p.get("pnl") or 0)
+            market_value += volume * cost_price + pnl
+            pos_hit = True
+        except (TypeError, ValueError):
+            continue
+
+    if not cash_hit and not pos_hit:
+        return None
+    return cash + market_value
+
+
 def _count_positions(vt_symbol: Optional[str], positions: List[Dict[str, Any]]) -> int:
     if not positions:
         return 0
@@ -137,13 +193,16 @@ def _resolve_strategy_value(
     strategy: Dict[str, Any],
     positions: List[Dict[str, Any]],
     accounts: List[Dict[str, Any]],
+    gateway_name: Optional[str] = None,
 ) -> Tuple[Optional[float], str, Optional[float]]:
     """Return (strategy_value, source_label, account_equity).
 
-    account_equity is always returned when available so the snapshot row
-    can persist it even when source is strategy_pnl / position_sum_pnl.
+    account_equity is**总权益**= cash + sum(volume × cost_price + pnl)（按 gateway 过滤），
+    含持仓市值。旧实现只取 account.balance（cash），买入后大跌但持仓未计 → 曲线失真。
+
+    gateway_name : 若提供，按 gateway 过滤 accounts/positions（多 gateway 沙盒）。
     """
-    account_equity = _first_account_equity(accounts)
+    account_equity = _total_account_equity(accounts, positions, gateway_name=gateway_name)
     variables = strategy.get("variables") or {}
 
     # Source A
@@ -290,11 +349,13 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
         for s in item.get("data") or []:
             engine_name = s.get("engine", "")
             name = s.get("name", "")
-            value, label, acct_eq = _resolve_strategy_value(s, node_positions, node_accounts)
+            mode, gateway_name = _infer_strategy_mode(s, node_mode)
+            value, label, acct_eq = _resolve_strategy_value(
+                s, node_positions, node_accounts, gateway_name=gateway_name or None,
+            )
             curve = _read_curve(db, node_id, engine_name, name, limit=60)
             inited = bool(s.get("inited"))
             trading = bool(s.get("trading"))
-            mode, gateway_name = _infer_strategy_mode(s, node_mode)
             summaries.append({
                 "node_id": node_id,
                 "engine": engine_name,
@@ -308,7 +369,15 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
                 "strategy_value": value,
                 "source_label": label,
                 "account_equity": acct_eq,
-                "positions_count": _count_positions(s.get("vt_symbol"), node_positions),
+                "positions_count": (
+                    _count_positions(s.get("vt_symbol"), node_positions)
+                    if s.get("vt_symbol")
+                    else sum(
+                        1 for p in node_positions
+                        if (not gateway_name or str(p.get("gateway_name", "")) == gateway_name)
+                        and float(p.get("volume") or 0) > 0
+                    )
+                ),
                 "last_update_ts": now_ms,
                 "mini_curve": curve,
                 "capabilities": capabilities.get(node_id, {}).get(engine_name, []),
@@ -359,14 +428,22 @@ async def get_strategy_detail(
 
     node_positions = positions_by_node.get(node_id, [])
     node_accounts = accounts_by_node.get(node_id, [])
-    value, label, acct_eq = _resolve_strategy_value(strategy, node_positions, node_accounts)
+    node_mode = next((getattr(n, "mode", "sim") for n in getattr(client, "nodes", []) if n.node_id == node_id), "sim")
+    mode, gateway_name = _infer_strategy_mode(strategy, node_mode)
+    value, label, acct_eq = _resolve_strategy_value(
+        strategy, node_positions, node_accounts, gateway_name=gateway_name or None,
+    )
 
     # filter positions to just this strategy's if it has a vt_symbol
     vt_symbol = strategy.get("vt_symbol")
     if vt_symbol:
         positions = [p for p in node_positions if str(p.get("vt_symbol", "")) == vt_symbol]
     else:
-        positions = list(node_positions)
+        # 多 symbol 策略：按 gateway_name 过滤（多 gateway 沙盒隔离）
+        if gateway_name:
+            positions = [p for p in node_positions if str(p.get("gateway_name", "")) == gateway_name]
+        else:
+            positions = list(node_positions)
 
     # capabilities (single node → single engine lookup)
     try:
@@ -384,8 +461,6 @@ async def get_strategy_detail(
 
     inited = bool(strategy.get("inited"))
     trading = bool(strategy.get("trading"))
-    node_mode = next((getattr(n, "mode", "sim") for n in getattr(client, "nodes", []) if n.node_id == node_id), "sim")
-    mode, gateway_name = _infer_strategy_mode(strategy, node_mode)
     detail = {
         "node_id": node_id,
         "engine": engine,
@@ -429,6 +504,58 @@ async def list_node_statuses() -> List[Dict[str, Any]]:
     return await client.probe_nodes()
 
 
+async def list_strategy_trades(
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """拉取指定策略的历史成交，按日期倒序返回。
+
+    数据源：vnpy_webtrader ``/api/v1/trade``（当前会话内成交，进程重启会丢；
+    跨日持久化由 vnpy_qmt_sim SQLite 保证 — 但 RPC 客户端只暴露当前会话）。
+    过滤：trade.reference 以 ``{strategy_name}:`` 开头（vnpy_qmt_sim Phase 2.x
+    在 sim_trades.reference 写入 ``{strategy_name}:{seq}`` 格式）。
+    """
+    client = get_vnpy_client()
+    if node_id not in client.node_ids:
+        return [], f"未知节点: {node_id}"
+
+    try:
+        trades_fo = await client.get_trades()
+    except Exception as e:
+        logger.warning("[live_trading] list_strategy_trades fetch failed: %s", e)
+        return [], f"拉取 trades 失败: {e}"
+
+    warning = None
+    rows: List[Dict[str, Any]] = []
+    for item in trades_fo:
+        if item.get("node_id") != node_id:
+            continue
+        if not item.get("ok"):
+            warning = f"节点 {node_id}: {item.get('error')}"
+            break
+        prefix = f"{strategy_name}:"
+        for t in item.get("data") or []:
+            ref = str(t.get("reference") or "")
+            if not ref.startswith(prefix):
+                continue
+            rows.append({
+                "vt_symbol": t.get("vt_symbol") or "",
+                "tradeid": t.get("tradeid") or "",
+                "orderid": t.get("orderid") or "",
+                "direction": t.get("direction") or "",
+                "offset": t.get("offset") or "",
+                "price": float(t.get("price") or 0),
+                "volume": float(t.get("volume") or 0),
+                "datetime": t.get("datetime") or "",
+                "reference": ref,
+            })
+
+    # 按 datetime 倒序，最新在前
+    rows.sort(key=lambda r: str(r["datetime"]), reverse=True)
+    return rows, warning
+
+
 # ---------------------------------------------------------------------------
 # Snapshot writer (background loop)
 # ---------------------------------------------------------------------------
@@ -457,6 +584,7 @@ async def snapshot_tick() -> None:
 
     accounts_by_node = _group_by_node(accounts_fo)
     positions_by_node = _group_by_node(positions_fo)
+    node_modes = {n.node_id: getattr(n, "mode", "sim") for n in getattr(client, "nodes", [])}
 
     now = datetime.now()
     SessionLocal = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
@@ -467,17 +595,30 @@ async def snapshot_tick() -> None:
             if not item.get("ok"):
                 continue
             node_id = item["node_id"]
+            node_mode = node_modes.get(node_id, "sim")
             for s in item.get("data") or []:
                 # only record while strategy is active (either inited or trading)
                 if not (s.get("inited") or s.get("trading")):
                     continue
                 engine_name = s.get("engine", "")
                 name = s.get("name", "")
+                _, gateway_name = _infer_strategy_mode(s, node_mode)
+                node_pos = positions_by_node.get(node_id, [])
                 value, label, acct_eq = _resolve_strategy_value(
                     s,
-                    positions_by_node.get(node_id, []),
+                    node_pos,
                     accounts_by_node.get(node_id, []),
+                    gateway_name=gateway_name or None,
                 )
+                # 持仓数：过滤 volume=0 + 按 gateway（避免多 gateway 时计入别家持仓）
+                if s.get("vt_symbol"):
+                    pos_count = _count_positions(s.get("vt_symbol"), node_pos)
+                else:
+                    pos_count = sum(
+                        1 for p in node_pos
+                        if (not gateway_name or str(p.get("gateway_name", "")) == gateway_name)
+                        and float(p.get("volume") or 0) > 0
+                    )
                 row = StrategyEquitySnapshot(
                     node_id=node_id,
                     engine=engine_name,
@@ -486,7 +627,7 @@ async def snapshot_tick() -> None:
                     strategy_value=value,
                     source_label=label,
                     account_equity=acct_eq,
-                    positions_count=_count_positions(s.get("vt_symbol"), positions_by_node.get(node_id, [])),
+                    positions_count=pos_count,
                     raw_variables_json=json.dumps(s.get("variables") or {}, ensure_ascii=False),
                 )
                 session.add(row)

@@ -76,6 +76,20 @@ async def get_strategy(
     return _ok(detail, warning=warning)
 
 
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/trades",
+    response_model=LiveTradingListResponse,
+)
+async def list_strategy_trades(
+    node_id: str,
+    engine: str,
+    name: str,
+) -> LiveTradingListResponse:
+    """指定策略的成交记录（当前会话内，按 datetime 倒序）。"""
+    rows, warning = await svc.list_strategy_trades(node_id, engine, name)
+    return _ok(rows, warning=warning)
+
+
 @router.get("/corp-actions", response_model=LiveTradingListResponse)
 async def list_corp_actions(
     vt_symbols: str = Query(..., description="逗号分隔的 vt_symbol 列表，如 000001.SZSE,600519.SSE"),

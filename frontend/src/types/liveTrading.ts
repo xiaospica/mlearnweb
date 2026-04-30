@@ -34,6 +34,18 @@ export interface LivePosition {
   frozen?: number | null
 }
 
+export interface StrategyTrade {
+  vt_symbol: string
+  tradeid: string
+  orderid: string
+  direction: string
+  offset: string
+  price: number
+  volume: number
+  datetime: string
+  reference: string
+}
+
 export interface CorpActionEvent {
   vt_symbol: string
   name: string

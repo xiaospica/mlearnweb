@@ -21,7 +21,11 @@ function pnlColor(v: number | null | undefined): string {
 }
 
 const PositionsTable: React.FC<Props> = ({ rows }) => {
-  if (!rows || rows.length === 0) {
+  // 过滤 volume=0 记录：vnpy OMS 会保留已平仓位记录（volume=0），
+  // 这些无价值且会让 positions_count 误导用户，前端只展示真实持仓。
+  const visible = (rows || []).filter((r) => Number(r.volume) > 0)
+
+  if (visible.length === 0) {
     return <Empty description="当前无持仓" />
   }
 
@@ -97,7 +101,7 @@ const PositionsTable: React.FC<Props> = ({ rows }) => {
     <ResponsiveTable<LivePosition>
       size="small"
       rowKey={(r) => `${r.vt_symbol}-${r.direction}`}
-      dataSource={rows}
+      dataSource={visible}
       pagination={false}
       scrollX={780}
       columns={columns}
