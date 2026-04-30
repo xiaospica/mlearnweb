@@ -14,6 +14,7 @@ import {
   type StrategySeries,
 } from './PortfolioCombo'
 import PortfolioComboBuilder from './PortfolioComboBuilder'
+import RollingCorrelationChart from './RollingCorrelationChart'
 
 const { Title, Text } = Typography
 
@@ -416,6 +417,12 @@ const TrainingComparePage: React.FC = () => {
                   yFormat={(v) => `${(v * 100).toFixed(2)}%`}
                   portfolios={portfolios}
                 />
+              </Card>
+            </Col>
+
+            <Col span={24}>
+              <Card size="small" title="滚动相关性（pearson，基于日收益）">
+                <RollingCorrelationChart records={availableRecords} />
               </Card>
             </Col>
 

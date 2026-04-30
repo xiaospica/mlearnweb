@@ -65,15 +65,16 @@
  * ============================================================ */
 :root,
 :root[data-theme='dark'] {
-  --ap-bg: #0f0f0f;
+  --ap-bg: #141414;
   --ap-panel: #1f1f1f;
-  --ap-panel-elevated: #2a2a2a;
-  --ap-panel-muted: #181818;
-  --ap-border: #2a2a2a;
-  --ap-border-muted: #222222;
-  /** 卡片立体感：顶边白色微高光（受光面）+ 外阴影 */
-  --ap-elevation-1: inset 0 1px 0 0 rgba(255, 255, 255, 0.04), 0 1px 3px rgba(0, 0, 0, 0.4);
-  --ap-elevation-2: inset 0 1px 0 0 rgba(255, 255, 255, 0.05), 0 4px 12px rgba(0, 0, 0, 0.5);
+  --ap-panel-elevated: #2c2c2c;
+  --ap-panel-muted: #1a1a1a;
+  --ap-border: #363636;
+  --ap-border-muted: #2a2a2a;
+  /** 卡片立体感：顶边白色微高光（受光面）+ 多层外阴影
+   *  对位 QuantDinger 的"清晰但不张扬"风格 */
+  --ap-elevation-1: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 2px 4px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ap-elevation-2: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 8px 16px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3);
   --ap-text: #f5f5f5;
   --ap-text-muted: #999999;
   --ap-text-dim: #666666;

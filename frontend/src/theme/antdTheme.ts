@@ -44,7 +44,8 @@ const darkComponents = {
     itemSelectedBg: PALETTE_DARK.panelMuted,
     itemHoverBg: PALETTE_DARK.panelMuted,
     itemSelectedColor: PALETTE_DARK.brandPrimary,
-    subMenuItemBg: PALETTE_DARK.panel,
+    // subMenu 与主菜单同 bg（透明继承 Sider），避免子菜单出现明显色块
+    subMenuItemBg: 'transparent',
   },
   Table: {
     headerBg: PALETTE_DARK.panelMuted,

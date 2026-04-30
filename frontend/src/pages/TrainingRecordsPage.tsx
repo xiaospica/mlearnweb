@@ -901,7 +901,7 @@ const TrainingRecordsPage: React.FC = () => {
               </Space>
             }
             key="normal"
-            style={{ marginBottom: 16, background: 'var(--ap-panel)', borderRadius: 8, border: '1px solid var(--ap-border)' }}
+            style={{ marginBottom: 16, background: 'transparent', borderRadius: 8, border: '1px solid var(--ap-border-muted)' }}
           >
             {normalRecords.length === 0 ? (
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -956,12 +956,12 @@ const TrainingRecordsPage: React.FC = () => {
                         onClick={() => navigate(`/training/${record.id}`)}
                         style={{
                           height: '100%',
-                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel)',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel-elevated)',
                           border: isSelected ? '2px solid var(--ap-brand-primary)' : '1px solid var(--ap-border)',
                           borderRadius: 8,
                           transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.20)' : '0 1px 3px var(--ap-shadow)',
+                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.25)' : 'var(--ap-elevation-1)',
                         }}
                         styles={{ body: { padding: 16 } }}
                       >
@@ -1308,7 +1308,7 @@ const TrainingRecordsPage: React.FC = () => {
               </Space>
             }
             key="normal"
-            style={{ marginBottom: 16, background: 'var(--ap-panel)', borderRadius: 8, border: '1px solid var(--ap-border)' }}
+            style={{ marginBottom: 16, background: 'transparent', borderRadius: 8, border: '1px solid var(--ap-border-muted)' }}
           >
             {normalRecords.length === 0 ? (
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -1328,12 +1328,12 @@ const TrainingRecordsPage: React.FC = () => {
                         onClick={() => navigate(`/training/${record.id}`)}
                         style={{
                           height: '100%',
-                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel)',
+                          background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel-elevated)',
                           border: isSelected ? '2px solid var(--ap-brand-primary)' : '1px solid var(--ap-border)',
                           borderRadius: 8,
                           transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.20)' : '0 1px 3px var(--ap-shadow)',
+                          boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.25)' : 'var(--ap-elevation-1)',
                         }}
                         styles={{ body: { padding: 16 } }}
                       >

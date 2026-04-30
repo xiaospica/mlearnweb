@@ -35,7 +35,7 @@ export interface PortfolioCombo {
   color: string
 }
 
-const cumToDaily = (cum: Array<number | null | undefined>): Array<number | null> => {
+export const cumToDaily = (cum: Array<number | null | undefined>): Array<number | null> => {
   if (cum.length === 0) return []
   const out: Array<number | null> = []
   let prev: number | null = null
@@ -112,6 +112,106 @@ export const computePortfolioCumulative = (
 
 /** 默认组合调色板（避开对照色 PALETTE = [蓝/紫/橙]） */
 export const PORTFOLIO_COLORS = ['#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
+
+// ----------------------------------------------------------
+// 滚动相关性分析（pearson）
+// ----------------------------------------------------------
+
+export interface PairCorrelation {
+  /** 策略 A id */
+  aId: number | string
+  /** 策略 B id */
+  bId: number | string
+  aName: string
+  bName: string
+  /** 与 dates 等长，前 windowSize-1 个为 null */
+  values: Array<number | null>
+}
+
+const pearson = (x: number[], y: number[]): number | null => {
+  const n = x.length
+  if (n < 2) return null
+  const mx = x.reduce((s, v) => s + v, 0) / n
+  const my = y.reduce((s, v) => s + v, 0) / n
+  let cov = 0
+  let vx = 0
+  let vy = 0
+  for (let i = 0; i < n; i++) {
+    const dx = x[i] - mx
+    const dy = y[i] - my
+    cov += dx * dy
+    vx += dx * dx
+    vy += dy * dy
+  }
+  if (vx === 0 || vy === 0) return null
+  return cov / Math.sqrt(vx * vy)
+}
+
+/**
+ * 计算所有策略两两的滚动相关性。
+ *
+ * - 用 cumulative_return 反推日收益
+ * - 在每个时点 t 取过去 windowSize 天（含当日）窗口
+ * - 仅当窗口内 ≥ windowSize/2 天双方都有数据才计算（否则 null）
+ *
+ * @returns dates 全策略并集排序；pairs 长度 = N*(N-1)/2
+ */
+export const computeRollingCorrelations = (
+  strategies: Array<{
+    id: number | string
+    name: string
+    dates: string[]
+    cumulative: Array<number | null | undefined>
+  }>,
+  windowSize: number = 20,
+): { dates: string[]; pairs: PairCorrelation[] } => {
+  if (strategies.length < 2) return { dates: [], pairs: [] }
+
+  const daily = strategies.map((s) => {
+    const d = cumToDaily(s.cumulative)
+    const m = new Map<string, number | null>()
+    s.dates.forEach((dt, i) => m.set(dt, d[i] ?? null))
+    return { id: s.id, name: s.name, m }
+  })
+
+  const allDates = Array.from(new Set(strategies.flatMap((s) => s.dates))).sort()
+
+  const pairs: PairCorrelation[] = []
+  for (let i = 0; i < daily.length; i++) {
+    for (let j = i + 1; j < daily.length; j++) {
+      const a = daily[i]
+      const b = daily[j]
+      const values: Array<number | null> = []
+      for (let t = 0; t < allDates.length; t++) {
+        if (t < windowSize - 1) {
+          values.push(null)
+          continue
+        }
+        const xs: number[] = []
+        const ys: number[] = []
+        for (let k = t - windowSize + 1; k <= t; k++) {
+          const d = allDates[k]
+          const av = a.m.get(d)
+          const bv = b.m.get(d)
+          if (typeof av === 'number' && typeof bv === 'number' && Number.isFinite(av) && Number.isFinite(bv)) {
+            xs.push(av)
+            ys.push(bv)
+          }
+        }
+        if (xs.length < Math.floor(windowSize / 2)) {
+          values.push(null)
+          continue
+        }
+        values.push(pearson(xs, ys))
+      }
+      pairs.push({ aId: a.id, bId: b.id, aName: a.name, bName: b.name, values })
+    }
+  }
+  return { dates: allDates, pairs }
+}
+
+/** 配色：相关性曲线用渐变色板（避开对照/组合色） */
+export const CORRELATION_COLORS = ['#52c41a', '#1890ff', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96']
 
 export const makeDefaultCombo = (
   records: Array<{ id: number | string; name?: string }>,
