@@ -1,5 +1,6 @@
 import React, { Suspense, useState } from 'react'
 import { Popover, Spin } from 'antd'
+import { useTheme } from '@/hooks/useTheme'
 
 import '@uiw/react-markdown-preview/markdown.css'
 import './MemoPopover.css'
@@ -13,9 +14,10 @@ interface Props {
 
 const MemoPopover: React.FC<Props> = ({ memo, children }) => {
   const [open, setOpen] = useState(false)
+  const { mode } = useTheme()
 
   const content = open ? (
-    <div className="memo-popover-content" data-color-mode="light">
+    <div className="memo-popover-content" data-color-mode={mode}>
       <Suspense
         fallback={
           <div style={{ textAlign: 'center', padding: 24 }}>

@@ -1,5 +1,5 @@
 .memo-popover-content {
-  width: 360px;
+  width: min(360px, calc(100vw - 32px));
   max-height: 420px;
   overflow: auto;
 }

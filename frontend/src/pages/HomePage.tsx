@@ -35,8 +35,8 @@ const UsageGuide: React.FC = () => (
         <CodeOutlined style={{ fontSize: 20, color: '#1677ff' }} />
       </div>
       <div style={{ flex: 1 }}>
-        <Title level={5} style={{ color: '#1f2937', margin: '0 0 8px 0' }}>如何使用回测看板</Title>
-        <Paragraph style={{ color: '#6b7280', margin: 0, fontSize: 13, lineHeight: 1.8 }}>
+        <Title level={5} style={{ color: 'var(--ap-text)', margin: '0 0 8px 0' }}>如何使用回测看板</Title>
+        <Paragraph style={{ color: 'var(--ap-text-muted)', margin: 0, fontSize: 13, lineHeight: 1.8 }}>
           看板用于可视化 <Text code>mlruns/</Text> 目录中的历史回测记录。
           要在看板中看到数据，请先通过命令行执行训练：
         </Paragraph>
@@ -44,41 +44,41 @@ const UsageGuide: React.FC = () => (
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', background: '#ffffff', borderRadius: 6,
-            borderLeft: '3px solid #1677ff',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            padding: '10px 14px', background: 'var(--ap-panel-muted)', borderRadius: 6,
+            borderLeft: '3px solid var(--ap-brand-primary)',
+            boxShadow: '0 1px 2px var(--ap-shadow)',
           }}>
-            <ThunderboltOutlined style={{ color: '#faad14', fontSize: 14 }} />
-            <Text style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12, color: '#374151' }}>
+            <ThunderboltOutlined style={{ color: 'var(--ap-warning)', fontSize: 14 }} />
+            <Text style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12, color: 'var(--ap-text)' }}>
               cd strategy_dev &amp;&amp; python tushare_hs300_rolling_train.py --name "我的训练"
             </Text>
           </div>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', background: '#ffffff', borderRadius: 6,
-            borderLeft: '3px solid #52c41a',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            padding: '10px 14px', background: 'var(--ap-panel-muted)', borderRadius: 6,
+            borderLeft: '3px solid var(--ap-success)',
+            boxShadow: '0 1px 2px var(--ap-shadow)',
           }}>
-            <DatabaseOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+            <DatabaseOutlined style={{ color: 'var(--ap-success)', fontSize: 14 }} />
+            <Text style={{ fontSize: 12, color: 'var(--ap-text-muted)' }}>
               训练完成后，结果自动保存到 <Text code>mlruns/</Text> 目录，
               刷新此页面即可看到新的实验记录。
             </Text>
           </div>
         </div>
 
-        <Divider style={{ borderColor: '#e8e8e8', margin: '16px 0' }} />
+        <Divider style={{ borderColor: 'var(--ap-border-muted)', margin: '16px 0' }} />
 
         <Row gutter={24}>
           <Col span={8}>
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#e8f4fd', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(59, 130, 246, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <ExperimentOutlined style={{ color: '#1677ff', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>1. 浏览实验</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>1. 浏览实验</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>点击实验卡片查看详情</Text>
             </div>
           </Col>
@@ -86,11 +86,11 @@ const UsageGuide: React.FC = () => (
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#f0fff0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(34, 197, 94, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <LoadingOutlined style={{ color: '#1677ff', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>2. 查看运行</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>2. 查看运行</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>查看每次训练的运行记录</Text>
             </div>
           </Col>
@@ -98,11 +98,11 @@ const UsageGuide: React.FC = () => (
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#fff7e6', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(245, 158, 11, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <ThunderboltOutlined style={{ color: '#fa8c16', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>3. 查看报告</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>3. 查看报告</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>收益曲线、模型参数、完整指标</Text>
             </div>
           </Col>
@@ -148,7 +148,7 @@ const HomePage: React.FC = () => {
               </Text>
               <div style={{
                 marginTop: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 6,
-                fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11, color: '#6b7280',
+                fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11, color: 'var(--ap-text-muted)',
               }}>
                 cd mlearnweb/backend &amp;&amp; python -m uvicorn app.main:app --port 8000
               </div>
@@ -231,12 +231,12 @@ const HomePage: React.FC = () => {
                 onClick={() => navigate(`/experiments/${exp.experiment_id}`)}
                 style={{
                   height: '100%',
-                  background: '#ffffff',
-                  border: '1px solid #e8e8e8',
+                  background: 'var(--ap-panel)',
+                  border: '1px solid var(--ap-border)',
                   borderRadius: 8,
                   transition: 'all 0.2s ease',
                   cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  boxShadow: '0 1px 3px var(--ap-shadow)',
                 }}
                 styles={{ body: { padding: 20 } }}
               >
@@ -250,7 +250,7 @@ const HomePage: React.FC = () => {
                     </Tag>
                   </div>
 
-                  <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, minHeight: 48 }}>
+                  <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, minHeight: 48 }}>
                     {exp.name || exp.experiment_id}
                   </Title>
 
