@@ -488,10 +488,19 @@ const TrainingDetailPage: React.FC = () => {
             {configSnapshot ? (
               <div>
                 {Object.entries(configSnapshot).map(([key, val]) => (
-                  <div key={key} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
+                  <div
+                    key={key}
+                    style={{
+                      marginBottom: 12,
+                      paddingBottom: 12,
+                      borderBottom: '1px solid var(--ap-border-muted)',
+                    }}
+                  >
                     <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>{key}</Text>
                     <div style={{
-                      fontSize: 12, color: '#374151', marginTop: 4,
+                      fontSize: 12,
+                      color: 'var(--ap-text)',
+                      marginTop: 4,
                       fontFamily: typeof val === 'object' ? "'SF Mono', 'Consolas', monospace" : undefined,
                       wordBreak: 'break-all',
                       whiteSpace: 'pre-wrap',

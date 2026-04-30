@@ -2,6 +2,7 @@ import React, { useCallback, useRef } from 'react'
 import MDEditor from '@uiw/react-md-editor'
 import { message } from 'antd'
 import { trainingImageService } from '@/services/trainingImageService'
+import { useTheme } from '@/hooks/useTheme'
 
 import '@uiw/react-md-editor/markdown-editor.css'
 import '@uiw/react-markdown-preview/markdown.css'
@@ -17,6 +18,7 @@ interface Props {
 const MemoEditor: React.FC<Props> = ({ recordId, value, onChange, height = 420 }) => {
   const valueRef = useRef(value)
   valueRef.current = value
+  const { mode } = useTheme()
 
   const insertAtCursor = useCallback(
     (textarea: HTMLTextAreaElement, snippet: string) => {
@@ -105,7 +107,7 @@ const MemoEditor: React.FC<Props> = ({ recordId, value, onChange, height = 420 }
   )
 
   return (
-    <div data-color-mode="light" className="memo-editor-wrapper">
+    <div data-color-mode={mode} className="memo-editor-wrapper">
       <MDEditor
         value={value}
         onChange={(v) => onChange(v || '')}
