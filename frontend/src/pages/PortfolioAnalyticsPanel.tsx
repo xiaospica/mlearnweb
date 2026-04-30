@@ -11,7 +11,10 @@ import { ThunderboltOutlined } from '@ant-design/icons'
 import type { TrainingCompareRecord } from '@/types'
 import ChartContainer from '@/components/responsive/ChartContainer'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
-import type { PortfolioCombo } from './PortfolioCombo'
+import {
+  computePortfolioCumulative,
+  type PortfolioCombo,
+} from './PortfolioCombo'
 import {
   computeDrawdownAttribution,
   computeMaxSharpeWeights,
@@ -144,8 +147,12 @@ const PortfolioAnalyticsPanel: React.FC<Props> = ({ records, combos, onUpdateCom
 
       {/* 回撤归因 */}
       <Card size="small" title="回撤归因（Top 5 区间）">
-        {drawdownPeriods.length > 0 ? (
-          <DrawdownAttributionView periods={drawdownPeriods} />
+        {drawdownPeriods.length > 0 && activeCombo ? (
+          <DrawdownAttributionView
+            records={records}
+            combo={activeCombo}
+            periods={drawdownPeriods}
+          />
         ) : (
           <Empty description="组合未出现明显回撤区间" style={{ padding: 24 }} />
         )}
@@ -208,9 +215,116 @@ const RiskContributionView: React.FC<{
 
 // ----------------------------------------------------------
 // 回撤归因子视图
+// 上：组合累积收益曲线 + Top-N 回撤区间用浅红 markArea 标记 + 区间编号
+// 下：详情表（区间起止 / 持续天数 / 回撤幅度 / 各策略贡献）
 // ----------------------------------------------------------
-const DrawdownAttributionView: React.FC<{ periods: DrawdownPeriod[] }> = ({ periods }) => {
-  const columns: ResponsiveColumn<DrawdownPeriod & { key: string }>[] = [
+const DrawdownAttributionView: React.FC<{
+  records: TrainingCompareRecord[]
+  combo: PortfolioCombo
+  periods: DrawdownPeriod[]
+}> = ({ records, combo, periods }) => {
+  // 计算组合累积收益曲线（用 PortfolioCombo 的 computePortfolioCumulative 同口径）
+  const portfolioCurve = useMemo(() => {
+    const inputs = records
+      .map((r) => ({
+        id: r.id,
+        dates: r.merged_report?.dates ?? [],
+        cumulative: r.merged_report?.cumulative_return ?? [],
+      }))
+      .filter((s) => s.dates.length > 0 && s.cumulative.length > 0)
+    return computePortfolioCumulative(inputs, combo.weights)
+  }, [records, combo.weights])
+
+  // markArea：每个 DD 区间一条带；颜色按 |drawdown| 强度渐变（最深红 → 浅红）
+  const maxAbsDD = Math.max(...periods.map((p) => Math.abs(p.drawdown)))
+  const markAreaData = periods.map((p, i) => {
+    const intensity = maxAbsDD > 0 ? Math.abs(p.drawdown) / maxAbsDD : 1
+    const opacity = 0.10 + intensity * 0.18 // 0.10..0.28
+    return [
+      {
+        xAxis: p.startDate,
+        itemStyle: { color: `rgba(239, 68, 68, ${opacity.toFixed(3)})` },
+        label: {
+          show: true,
+          position: 'insideTop' as const,
+          color: 'var(--ap-text)',
+          fontSize: 11,
+          fontWeight: 'bold' as const,
+          formatter: `#${i + 1}`,
+        },
+      },
+      { xAxis: p.endDate },
+    ]
+  })
+
+  // 把区间细节做成 dateRange→period 的查找表，给 tooltip 用
+  const periodByStartDate = new Map<string, { idx: number; period: DrawdownPeriod }>()
+  periods.forEach((p, idx) => periodByStartDate.set(p.startDate, { idx, period: p }))
+
+  const option = {
+    tooltip: {
+      trigger: 'axis' as const,
+      valueFormatter: (v: unknown) => (typeof v === 'number' ? `${v.toFixed(2)}%` : '-'),
+    },
+    grid: { left: 60, right: 30, top: 20, bottom: 50 },
+    xAxis: {
+      type: 'category' as const,
+      data: portfolioCurve.dates,
+      axisLabel: { fontSize: 10 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value' as const,
+      axisLabel: { formatter: (v: number) => `${v.toFixed(0)}%` },
+    },
+    dataZoom: [
+      { type: 'slider', start: 0, end: 100, height: 20, bottom: 5 },
+      { type: 'inside', start: 0, end: 100 },
+    ],
+    series: [
+      {
+        name: '组合累积收益',
+        type: 'line' as const,
+        data: portfolioCurve.cumulative.map((v) => (v == null ? null : v * 100)),
+        showSymbol: false,
+        lineStyle: { width: 2, color: '#3B82F6' },
+        areaStyle: {
+          color: {
+            type: 'linear' as const,
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(59, 130, 246, 0.20)' },
+              { offset: 1, color: 'rgba(59, 130, 246, 0.02)' },
+            ],
+          },
+        },
+        markArea: {
+          itemStyle: { color: 'rgba(239, 68, 68, 0.15)' },
+          data: markAreaData,
+          silent: false,
+        },
+      },
+    ],
+  }
+
+  // 详情表
+  const columns: ResponsiveColumn<DrawdownPeriod & { key: string; index: number }>[] = [
+    {
+      title: '#',
+      dataIndex: 'index',
+      key: 'index',
+      width: 50,
+      align: 'center',
+      mobileRole: 'badge',
+      render: (i: number) => (
+        <Text strong style={{ fontFamily: "'SF Mono', monospace" }}>
+          #{i + 1}
+        </Text>
+      ),
+    },
     {
       title: '区间',
       key: 'range',
@@ -226,7 +340,7 @@ const DrawdownAttributionView: React.FC<{ periods: DrawdownPeriod[] }> = ({ peri
       key: 'drawdown',
       width: 110,
       align: 'right',
-      mobileRole: 'badge',
+      mobileRole: 'metric',
       render: (_, p) => (
         <Text strong style={{ color: 'var(--ap-market-down)', fontFamily: "'SF Mono', monospace" }}>
           {(p.drawdown * 100).toFixed(2)}%
@@ -265,17 +379,22 @@ const DrawdownAttributionView: React.FC<{ periods: DrawdownPeriod[] }> = ({ peri
     },
   ]
 
-  const dataSource = periods.map((p, i) => ({ ...p, key: `${p.startDate}-${i}` }))
+  const dataSource = periods.map((p, i) => ({ ...p, key: `${p.startDate}-${i}`, index: i }))
 
   return (
-    <ResponsiveTable
-      dataSource={dataSource}
-      columns={columns}
-      rowKey="key"
-      pagination={false}
-      size="small"
-      scrollX={780}
-    />
+    <div>
+      <ChartContainer library="echarts" height={360} option={option} />
+      <div style={{ marginTop: 12 }}>
+        <ResponsiveTable
+          dataSource={dataSource}
+          columns={columns}
+          rowKey="key"
+          pagination={false}
+          size="small"
+          scrollX={830}
+        />
+      </div>
+    </div>
   )
 }
 
