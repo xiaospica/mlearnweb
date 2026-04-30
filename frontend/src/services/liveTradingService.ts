@@ -2,6 +2,7 @@ import type { AxiosRequestConfig } from 'axios'
 import apiClient from './apiClient'
 import type {
   CorpActionEvent,
+  DeleteRecordsStats,
   LiveTradingResponse,
   NodeStatus,
   StrategyCreatePayload,
@@ -211,6 +212,19 @@ export const liveTradingService = {
     return apiClient
       .delete(
         `/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}`,
+        withOpsPassword(),
+      )
+      .then((r) => r.data)
+  },
+
+  deleteStrategyRecords(
+    nodeId: string,
+    engine: string,
+    name: string,
+  ): Promise<LiveTradingResponse<DeleteRecordsStats>> {
+    return apiClient
+      .delete(
+        `/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/records`,
         withOpsPassword(),
       )
       .then((r) => r.data)

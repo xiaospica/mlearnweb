@@ -34,6 +34,11 @@ export interface LivePosition {
   frozen?: number | null
 }
 
+export interface DeleteRecordsStats {
+  equity_snapshots: number
+  ml_metric_snapshots: number
+}
+
 export interface StrategyTrade {
   vt_symbol: string
   tradeid: string
@@ -88,6 +93,9 @@ export interface StrategyDetail extends StrategySummary {
   variables: Record<string, unknown>
   curve: EquityPoint[]
   positions: LivePosition[]
+  // 节点离线时后端从 mlearnweb.db 拼出的离线视图标识（仅在离线时存在）
+  node_offline?: boolean
+  offline_reason?: string
 }
 
 export interface StrategyEngineInfo {

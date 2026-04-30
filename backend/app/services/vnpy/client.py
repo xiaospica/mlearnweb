@@ -148,6 +148,9 @@ class _PerNodeClient:
     async def get_trades(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/trade") or []
 
+    async def get_orders(self) -> List[Dict[str, Any]]:
+        return await self._request("GET", "/api/v1/order") or []
+
     async def get_engines(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/strategy/engines") or []
 
@@ -287,6 +290,9 @@ class VnpyMultiNodeClient:
 
     async def get_trades(self) -> List[FanoutItem]:
         return await self._fanout("get_trades")
+
+    async def get_orders(self) -> List[FanoutItem]:
+        return await self._fanout("get_orders")
 
     # --- ML fanout reads (Phase 3.2) ----------------------------------------
 

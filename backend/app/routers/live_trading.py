@@ -242,3 +242,23 @@ async def delete_strategy(node_id: str, engine: str, name: str) -> LiveTradingLi
         return _ok(await svc.delete_strategy(node_id, engine, name))
     except VnpyClientError as e:
         raise _client_error_to_http(e) from e
+
+
+@router.delete(
+    "/strategies/{node_id}/{engine}/{name}/records",
+    response_model=LiveTradingListResponse,
+    dependencies=[Depends(require_ops_password)],
+)
+async def delete_strategy_records(
+    node_id: str,
+    engine: str,
+    name: str,
+    db: Session = Depends(get_db_session),
+) -> LiveTradingListResponse:
+    """删除指定策略在 mlearnweb 端的历史记录（权益曲线 + ML 监控快照）。
+
+    用途：策略停运 / 重置后清理无效历史曲线。不影响 vnpy 侧持仓/账户
+    （那由 vnpy_strategy_dev/scripts/reset_sim_state.py 单独管）。
+    """
+    stats = svc.delete_strategy_records(db, node_id, engine, name)
+    return _ok(stats)

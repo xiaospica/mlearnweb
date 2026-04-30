@@ -1,18 +1,22 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
+  App as AntApp,
   Badge,
   Button,
   Card,
   Empty,
+  Popconfirm,
   Space,
   Spin,
   Tabs,
   Tag,
   Typography,
 } from 'antd'
+import { DeleteOutlined } from '@ant-design/icons'
+import { useOpsPassword } from '@/hooks/useOpsPassword'
 import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -39,6 +43,9 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const engine = decodeURIComponent(params.engine || '')
   const name = decodeURIComponent(params.name || '')
   const [editOpen, setEditOpen] = useState(false)
+  const { message } = AntApp.useApp()
+  const { guardWrite } = useOpsPassword()
+  const queryClient = useQueryClient()
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['live-strategy', nodeId, engine, name],
@@ -50,6 +57,25 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
 
   const detail = data?.success ? data?.data : null
   const warning = data?.warning || (!data?.success ? data?.message : null)
+  const isOffline = Boolean(detail?.node_offline)
+
+  const handleDeleteRecords = async () => {
+    const result = await guardWrite(() =>
+      liveTradingService.deleteStrategyRecords(nodeId, engine, name),
+    )
+    if (result?.success) {
+      const stats = result.data
+      message.success(
+        `已删除 ${stats?.equity_snapshots ?? 0} 条权益快照、${stats?.ml_metric_snapshots ?? 0} 条 ML 指标`,
+      )
+      queryClient.invalidateQueries({ queryKey: ['live-strategy', nodeId, engine, name] })
+      queryClient.invalidateQueries({ queryKey: ['live-strategies'] })
+      // 历史曲线已清，离线策略此时应跳回列表（节点离线时无法 refetch 出新数据）
+      if (isOffline) {
+        setTimeout(() => navigate('/live-trading'), 1000)
+      }
+    }
+  }
 
   const badgeStatus: 'processing' | 'default' | 'warning' | 'error' = detail
     ? detail.running
@@ -100,19 +126,60 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
       }
       actions={
         detail ? (
-          <StrategyActions
-            nodeId={nodeId}
-            engine={engine}
-            name={name}
-            capabilities={detail.capabilities}
-            inited={detail.inited}
-            trading={detail.trading}
-            onEdit={() => setEditOpen(true)}
-          />
+          <Space size={6} wrap>
+            {!isOffline && (
+              <StrategyActions
+                nodeId={nodeId}
+                engine={engine}
+                name={name}
+                capabilities={detail.capabilities}
+                inited={detail.inited}
+                trading={detail.trading}
+                onEdit={() => setEditOpen(true)}
+              />
+            )}
+            <Popconfirm
+              title="删除该策略的历史记录？"
+              description={
+                <span>
+                  将删除 mlearnweb 端的：
+                  <br />· 权益曲线快照 (strategy_equity_snapshots)
+                  <br />· ML 监控指标快照 (ml_metric_snapshots)
+                  <br />
+                  <Text type="warning" style={{ fontSize: 12 }}>
+                    不影响 vnpy 侧持仓 / 账户数据。
+                  </Text>
+                </span>
+              }
+              okText="确认删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={handleDeleteRecords}
+            >
+              <Button danger size="small" icon={<DeleteOutlined />}>
+                删除记录
+              </Button>
+            </Popconfirm>
+          </Space>
         ) : undefined
       }
     >
-      {detail?.mode === 'live' && (
+      {isOffline && (
+        <Alert
+          type="warning"
+          showIcon
+          message="🔌 节点已断开 — 当前展示历史快照"
+          description={
+            <span>
+              {detail?.offline_reason || '无法连到 vnpy 节点'}
+              。权益曲线 / 持仓为最近一次心跳前的状态，操作按钮已隐藏。
+              如不再需要这条策略历史，可点击右上角"删除记录"清理。
+            </span>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {detail?.mode === 'live' && !isOffline && (
         <Alert
           type="error"
           showIcon
@@ -121,7 +188,7 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
           style={{ marginBottom: 12 }}
         />
       )}
-      {detail?.mode === 'sim' && (
+      {detail?.mode === 'sim' && !isOffline && (
         <Alert
           type="success"
           showIcon

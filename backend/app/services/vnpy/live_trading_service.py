@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.database import StrategyEquitySnapshot, engine as db_engine
+from app.models.ml_monitoring import MLMetricSnapshot
 from app.services.vnpy.client import VnpyClientError, get_vnpy_client
 from app.services.vnpy.naming import classify_gateway
 
@@ -388,6 +389,54 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
     return summaries, warning
 
 
+def _offline_detail_from_history(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    window_days: int,
+    offline_reason: str,
+) -> Optional[Dict[str, Any]]:
+    """节点离线 / 策略已停运时，从 mlearnweb.db 历史快照拼出 detail 视图。
+
+    用途：让前端策略详情页**离线时仍展示历史权益曲线**（而不是空白），
+    用户可以看历史回放结果 + 决定是否清理记录。
+    """
+    since = datetime.now() - timedelta(days=window_days)
+    full_curve = _read_curve(db, node_id, engine, strategy_name, since=since)
+    if not full_curve:
+        return None  # 历史也没有 → 真的什么都没有，让上游报错
+
+    last = full_curve[-1]
+    return {
+        "node_id": node_id,
+        "engine": engine,
+        "strategy_name": strategy_name,
+        "class_name": None,
+        "vt_symbol": None,
+        "author": None,
+        "inited": False,
+        "trading": False,
+        "running": False,
+        "strategy_value": last.get("strategy_value"),
+        "source_label": last.get("source_label") or "unavailable",
+        "account_equity": last.get("account_equity"),
+        "positions_count": 0,
+        "last_update_ts": last.get("ts"),
+        "mini_curve": [],
+        "capabilities": [],
+        "parameters": {},
+        "variables": {},
+        "curve": full_curve,
+        "mode": None,
+        "gateway_name": None,
+        "positions": [],
+        # 标记给前端的离线提示（前端按此显示 "节点离线" 角标）
+        "node_offline": True,
+        "offline_reason": offline_reason,
+    }
+
+
 async def get_strategy_detail(
     db: Session,
     node_id: str,
@@ -397,6 +446,13 @@ async def get_strategy_detail(
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     client = get_vnpy_client()
     if node_id not in client.node_ids:
+        # 未知节点（vnpy_nodes.yaml 没配过）— 仍尝试从历史快照拼出离线视图
+        offline = _offline_detail_from_history(
+            db, node_id, engine, strategy_name, window_days,
+            offline_reason="未知节点（已从 vnpy_nodes.yaml 移除？）",
+        )
+        if offline is not None:
+            return offline, "节点离线，展示历史快照"
         return None, f"未知节点: {node_id}"
 
     try:
@@ -406,6 +462,12 @@ async def get_strategy_detail(
             client.get_positions(),
         )
     except VnpyClientError as e:
+        offline = _offline_detail_from_history(
+            db, node_id, engine, strategy_name, window_days,
+            offline_reason=f"vnpy 接口不可达: {e}",
+        )
+        if offline is not None:
+            return offline, "节点离线，展示历史快照"
         return None, f"vnpy 接口不可达: {e}"
     except Exception as e:
         logger.exception("[live_trading] detail fetch failed: %s", e)
@@ -424,6 +486,13 @@ async def get_strategy_detail(
                     strategy = s
                     break
     if strategy is None:
+        # 节点本身可达但本策略已不在（停运 / 移除）— fallback 到历史
+        offline = _offline_detail_from_history(
+            db, node_id, engine, strategy_name, window_days,
+            offline_reason="策略当前未运行（节点上找不到）",
+        )
+        if offline is not None:
+            return offline, "策略已停运，展示历史快照"
         return None, warning or f"策略 {node_id}/{engine}/{strategy_name} 不存在"
 
     node_positions = positions_by_node.get(node_id, [])
@@ -504,6 +573,49 @@ async def list_node_statuses() -> List[Dict[str, Any]]:
     return await client.probe_nodes()
 
 
+def delete_strategy_records(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+) -> Dict[str, int]:
+    """删除指定策略在 mlearnweb 端积累的所有记录。
+
+    清理的表：
+      - strategy_equity_snapshots: 权益曲线快照
+      - ml_metric_snapshots: ML 监控指标快照（IC/PSI/直方图等）
+
+    不动 vnpy 侧（vnpy_qmt_sim 持仓 / 账户 / sim_*.db）— 那由 reset_sim_state.py 管。
+    不动训练记录（training_records 等）— 与策略运行无关。
+
+    返回各表删除行数 dict（前端展示）。
+    """
+    n_equity = (
+        db.query(StrategyEquitySnapshot)
+        .filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == engine,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+        )
+        .delete(synchronize_session=False)
+    )
+    # ml_metric_snapshots 没有 engine 字段，按 node_id + strategy_name 过滤即可
+    try:
+        n_ml = (
+            db.query(MLMetricSnapshot)
+            .filter(
+                MLMetricSnapshot.node_id == node_id,
+                MLMetricSnapshot.strategy_name == strategy_name,
+            )
+            .delete(synchronize_session=False)
+        )
+    except Exception as exc:
+        logger.warning("[delete_strategy_records] ml_metric_snapshots 删除失败: %s", exc)
+        n_ml = 0
+    db.commit()
+    return {"equity_snapshots": n_equity, "ml_metric_snapshots": n_ml}
+
+
 async def list_strategy_trades(
     node_id: str,
     engine: str,
@@ -511,38 +623,58 @@ async def list_strategy_trades(
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """拉取指定策略的历史成交，按日期倒序返回。
 
-    数据源：vnpy_webtrader ``/api/v1/trade``（当前会话内成交，进程重启会丢；
-    跨日持久化由 vnpy_qmt_sim SQLite 保证 — 但 RPC 客户端只暴露当前会话）。
-    过滤：trade.reference 以 ``{strategy_name}:`` 开头（vnpy_qmt_sim Phase 2.x
-    在 sim_trades.reference 写入 ``{strategy_name}:{seq}`` 格式）。
+    数据源：vnpy_webtrader ``/api/v1/trade`` + ``/api/v1/order``（当前会话内）。
+
+    过滤思路：vnpy ``TradeData`` **不带 reference 字段**（dataclass 无此 field），
+    但 ``OrderData`` 有 reference 且 vnpy_qmt_sim 在 send_order 写入
+    ``{strategy_name}:{seq}`` 格式。所以同时拉 orders + trades，按 orderid 关联，
+    再用 order.reference 过滤本策略成交。
     """
     client = get_vnpy_client()
     if node_id not in client.node_ids:
         return [], f"未知节点: {node_id}"
 
     try:
-        trades_fo = await client.get_trades()
+        trades_fo, orders_fo = await asyncio.gather(
+            client.get_trades(),
+            client.get_orders(),
+        )
     except Exception as e:
         logger.warning("[live_trading] list_strategy_trades fetch failed: %s", e)
-        return [], f"拉取 trades 失败: {e}"
+        return [], f"拉取 trades/orders 失败: {e}"
 
-    warning = None
+    # 构造 orderid → reference map（节点本地视图）
+    orderid_ref: Dict[str, str] = {}
+    warning: Optional[str] = None
+    for item in orders_fo:
+        if item.get("node_id") != node_id:
+            continue
+        if not item.get("ok"):
+            warning = f"节点 {node_id} orders: {item.get('error')}"
+            break
+        for o in item.get("data") or []:
+            oid = str(o.get("orderid") or "")
+            ref = str(o.get("reference") or "")
+            if oid:
+                orderid_ref[oid] = ref
+
     rows: List[Dict[str, Any]] = []
+    prefix = f"{strategy_name}:"
     for item in trades_fo:
         if item.get("node_id") != node_id:
             continue
         if not item.get("ok"):
-            warning = f"节点 {node_id}: {item.get('error')}"
+            warning = warning or f"节点 {node_id} trades: {item.get('error')}"
             break
-        prefix = f"{strategy_name}:"
         for t in item.get("data") or []:
-            ref = str(t.get("reference") or "")
+            oid = str(t.get("orderid") or "")
+            ref = orderid_ref.get(oid, "")
             if not ref.startswith(prefix):
                 continue
             rows.append({
                 "vt_symbol": t.get("vt_symbol") or "",
                 "tradeid": t.get("tradeid") or "",
-                "orderid": t.get("orderid") or "",
+                "orderid": oid,
                 "direction": t.get("direction") or "",
                 "offset": t.get("offset") or "",
                 "price": float(t.get("price") or 0),
