@@ -208,6 +208,13 @@ body {
   border-radius: 0 3px 3px 0;
 }
 
+/* AntD subMenuItemBg token 仅作用于 popup 模式；inline 模式需要 CSS 直接覆盖
+ * 让展开的子菜单与 Sider 同色，避免出现明显色块 */
+.ap-sidebar .ant-menu-sub.ant-menu-inline,
+.ap-sidebar .ant-menu-sub.ant-menu-inline .ant-menu-item {
+  background: transparent !important;
+}
+
 /* Sidebar logo 区域 hover 反馈 */
 .ap-sidebar-logo {
   cursor: pointer;

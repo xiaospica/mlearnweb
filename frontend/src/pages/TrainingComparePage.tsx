@@ -15,6 +15,8 @@ import {
 } from './PortfolioCombo'
 import PortfolioComboBuilder from './PortfolioComboBuilder'
 import RollingCorrelationChart from './RollingCorrelationChart'
+import PortfolioAnalyticsPanel from './PortfolioAnalyticsPanel'
+import { useTheme } from '@/hooks/useTheme'
 
 const { Title, Text } = Typography
 
@@ -264,6 +266,7 @@ function normalizeConfigForDiff(value: unknown): unknown {
 }
 
 const ConfigDiffPanel: React.FC<{ records: TrainingCompareRecord[] }> = ({ records }) => {
+  const { isDark } = useTheme()
   const diffs = useMemo(() => {
     if (records.length < 2) return []
     const base = records[0]
@@ -298,7 +301,7 @@ const ConfigDiffPanel: React.FC<{ records: TrainingCompareRecord[] }> = ({ recor
               newValue={d.rightText}
               splitView
               compareMethod={DiffMethod.WORDS}
-              useDarkTheme={false}
+              useDarkTheme={isDark}
               hideLineNumbers={false}
               extraLinesSurroundingDiff={2}
               styles={{ contentText: { fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 } }}
@@ -416,6 +419,20 @@ const TrainingComparePage: React.FC = () => {
                   title="累计收益率"
                   yFormat={(v) => `${(v * 100).toFixed(2)}%`}
                   portfolios={portfolios}
+                />
+              </Card>
+            </Col>
+
+            <Col span={24}>
+              <Card size="small" title="组合风险与回撤归因">
+                <PortfolioAnalyticsPanel
+                  records={availableRecords}
+                  combos={portfolios}
+                  onUpdateCombo={(key, weights) =>
+                    setPortfolios((prev) =>
+                      prev.map((c) => (c.key === key ? { ...c, weights } : c)),
+                    )
+                  }
                 />
               </Card>
             </Col>
