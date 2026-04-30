@@ -73,16 +73,17 @@ interface StrategyCardProps {
 
 const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
   const label = (item.source_label || 'unavailable') as SourceLabel
+  const isOffline = Boolean(item.node_offline)
   const badgeStatus: 'processing' | 'default' | 'warning' | 'error' =
-    item.running ? 'processing' : item.inited ? 'warning' : 'default'
-  const badgeText = item.running ? '运行中' : item.inited ? '已初始化' : '未初始化'
+    isOffline ? 'error' : item.running ? 'processing' : item.inited ? 'warning' : 'default'
+  const badgeText = isOffline ? '节点离线' : item.running ? '运行中' : item.inited ? '已初始化' : '未初始化'
 
-  // mode 视觉编码：实盘红色警示，模拟绿色（详见 vnpy_common/naming.py 命名约定）
+  // mode 视觉编码：实盘红色警示，模拟绿色，离线灰色
   const isLive = item.mode === 'live'
-  const modeColor = isLive ? '#cf1322' : '#389e0d'
-  const modeBg = isLive ? '#fff1f0' : '#f6ffed'
-  const modeText = isLive ? '实盘' : '模拟'
-  const modeIcon = isLive ? '⚠' : '🧪'
+  const modeColor = isOffline ? '#8c8c8c' : isLive ? '#cf1322' : '#389e0d'
+  const modeBg = isOffline ? '#f5f5f5' : isLive ? '#fff1f0' : '#f6ffed'
+  const modeText = isOffline ? '离线' : isLive ? '实盘' : '模拟'
+  const modeIcon = isOffline ? '🔌' : isLive ? '⚠' : '🧪'
 
   return (
     <Card

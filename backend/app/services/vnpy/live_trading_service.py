@@ -324,6 +324,14 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             client.get_positions(),
         )
     except VnpyClientError as e:
+        # 全部节点不可达：从 db 历史快照查曾经存在过的策略，离线展示
+        offline_summaries: List[Dict[str, Any]] = []
+        for nid in client.node_ids:
+            offline_summaries.extend(
+                _list_offline_strategies_for_node(db, nid, f"vnpy 接口不可达: {e}")
+            )
+        if offline_summaries:
+            return offline_summaries, "节点全部离线，展示历史快照"
         return [], f"vnpy 接口不可达: {e}"
     except Exception as e:
         logger.exception("[live_trading] unexpected error in list_strategy_summaries: %s", e)
@@ -339,6 +347,14 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
 
     summaries: List[Dict[str, Any]] = []
     now_ms = int(time.time() * 1000)
+
+    # 收集 fanout 中失败的节点 → 这些节点的策略走离线 fallback
+    failed_nodes_with_reason: Dict[str, str] = {}
+    for item in strategies_fo:
+        if not item.get("ok"):
+            failed_nodes_with_reason[item["node_id"]] = (
+                f"vnpy 接口不可达: {item.get('error', '未知错误')}"
+            )
 
     for item in strategies_fo:
         if not item.get("ok"):
@@ -386,7 +402,69 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
                 "gateway_name": gateway_name,
             })
 
+    # 离线节点的策略：从 db 历史快照拼出 summary
+    for failed_node_id, reason in failed_nodes_with_reason.items():
+        offline_rows = _list_offline_strategies_for_node(db, failed_node_id, reason)
+        summaries.extend(offline_rows)
+
     return summaries, warning
+
+
+def _list_offline_strategies_for_node(
+    db: Session, node_id: str, offline_reason: str,
+) -> List[Dict[str, Any]]:
+    """节点 fanout 失败时，从 mlearnweb.db 历史快照查曾在该节点跑过的策略。
+
+    每条策略拼成离线版 summary（带 node_offline=true），让用户在列表页仍能看到，
+    并通过策略卡片进入详情查历史 / 删除记录。
+    """
+    rows = (
+        db.query(
+            StrategyEquitySnapshot.engine,
+            StrategyEquitySnapshot.strategy_name,
+        )
+        .filter(StrategyEquitySnapshot.node_id == node_id)
+        .distinct()
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for engine_name, strategy_name in rows:
+        last = (
+            db.query(StrategyEquitySnapshot)
+            .filter(
+                StrategyEquitySnapshot.node_id == node_id,
+                StrategyEquitySnapshot.engine == engine_name,
+                StrategyEquitySnapshot.strategy_name == strategy_name,
+            )
+            .order_by(StrategyEquitySnapshot.ts.desc())
+            .first()
+        )
+        if last is None:
+            continue
+        curve = _read_curve(db, node_id, engine_name, strategy_name, limit=60)
+        out.append({
+            "node_id": node_id,
+            "engine": engine_name,
+            "strategy_name": strategy_name,
+            "class_name": None,
+            "vt_symbol": None,
+            "author": None,
+            "inited": False,
+            "trading": False,
+            "running": False,
+            "strategy_value": last.strategy_value,
+            "source_label": last.source_label or "unavailable",
+            "account_equity": last.account_equity,
+            "positions_count": int(last.positions_count or 0),
+            "last_update_ts": int(last.ts.timestamp() * 1000),
+            "mini_curve": curve,
+            "capabilities": [],
+            "mode": None,
+            "gateway_name": None,
+            "node_offline": True,
+            "offline_reason": offline_reason,
+        })
+    return out
 
 
 def _offline_detail_from_history(

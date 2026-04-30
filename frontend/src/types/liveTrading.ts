@@ -81,9 +81,12 @@ export interface StrategySummary {
   last_update_ts: number | null
   mini_curve: EquityPoint[]
   capabilities: StrategyCapability[]
-  // 实盘 / 模拟 标识（详见 vnpy_common/naming.py 命名约定）
-  mode: StrategyMode
-  gateway_name: string
+  // 实盘 / 模拟 标识（详见 vnpy_common/naming.py 命名约定）；离线时为 null
+  mode: StrategyMode | null
+  gateway_name: string | null
+  // 节点离线时为 true，从 mlearnweb.db 历史快照拼出
+  node_offline?: boolean
+  offline_reason?: string
 }
 
 export type StrategyCapability = 'add' | 'edit' | 'init' | 'remove' | 'start' | 'stop'
@@ -93,9 +96,6 @@ export interface StrategyDetail extends StrategySummary {
   variables: Record<string, unknown>
   curve: EquityPoint[]
   positions: LivePosition[]
-  // 节点离线时后端从 mlearnweb.db 拼出的离线视图标识（仅在离线时存在）
-  node_offline?: boolean
-  offline_reason?: string
 }
 
 export interface StrategyEngineInfo {

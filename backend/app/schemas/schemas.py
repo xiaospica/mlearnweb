@@ -282,8 +282,11 @@ class StrategySummary(BaseModel):
     mini_curve: List[EquityPoint] = []
     capabilities: List[str] = []
     # 实盘 / 模拟 标识（详见 vnpy_common/naming.py 命名约定）
-    mode: str = "sim"  # "live" | "sim"
-    gateway_name: str = ""
+    mode: Optional[str] = "sim"  # "live" | "sim" | None (offline)
+    gateway_name: Optional[str] = ""
+    # 节点离线时从 mlearnweb.db 拼出的离线视图标识
+    node_offline: Optional[bool] = None
+    offline_reason: Optional[str] = None
 
 
 class StrategyDetail(StrategySummary):
