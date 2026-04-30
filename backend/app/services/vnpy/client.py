@@ -421,12 +421,24 @@ _instance: Optional[VnpyMultiNodeClient] = None
 
 
 def get_vnpy_client() -> VnpyMultiNodeClient:
-    """Return the process-wide VnpyMultiNodeClient, constructing it on first call."""
+    """Return the process-wide VnpyMultiNodeClient, constructing it on first call.
+
+    Self-heal: 若已构造的 singleton 节点数为 0（启动时 yaml 缺失 / 加载失败），
+    每次调用都尝试重新 load_nodes() 一次。一旦 yaml 被填好，后续请求自动恢复，
+    用户**无需重启 mlearnweb**。yaml 已含节点的情况下，singleton 已被设置，
+    后续不再触发 reload 路径（无性能损耗）。
+    """
     global _instance
     if _instance is None:
         nodes = load_nodes()
         _instance = VnpyMultiNodeClient(nodes)
         logger.info("[vnpy.client] initialized with %d nodes", len(nodes))
+        return _instance
+    if not _instance.node_ids:
+        nodes = load_nodes()
+        if nodes:
+            _instance = VnpyMultiNodeClient(nodes)
+            logger.info("[vnpy.client] yaml lazy-reload succeeded, now %d nodes", len(nodes))
     return _instance
 
 

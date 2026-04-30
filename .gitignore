@@ -10,6 +10,8 @@ __pycache__
 backend/uploads/
 backend/vnpy_nodes.yaml
 !backend/vnpy_nodes.yaml.example
+backend/.env
+!backend/.env.example
 
 # Build / incremental compile artifacts
 frontend/tsconfig.tsbuildinfo

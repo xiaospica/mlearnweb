@@ -315,6 +315,20 @@ def _read_curve(
 async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     client = get_vnpy_client()
     if not client.node_ids:
+        # 无 vnpy 节点配置：从 db 历史快照查曾跑过的策略 → 离线展示
+        # 避免 mlearnweb 启动时 yaml 缺失 / 用户删了 yaml 后丢失全部历史视图
+        offline: List[Dict[str, Any]] = []
+        all_node_ids = (
+            db.query(StrategyEquitySnapshot.node_id)
+            .distinct()
+            .all()
+        )
+        for (node_id,) in all_node_ids:
+            offline.extend(_list_offline_strategies_for_node(
+                db, node_id, "未配置 vnpy 节点（请检查 vnpy_nodes.yaml）"
+            ))
+        if offline:
+            return offline, "未配置 vnpy 节点，展示历史快照（请检查 vnpy_nodes.yaml）"
         return [], "未配置 vnpy 节点，请检查 vnpy_nodes.yaml"
 
     try:
