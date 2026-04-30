@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Table, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu, Pagination } from 'antd'
+import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu, Pagination } from 'antd'
 import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined, BarChartOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
@@ -10,6 +10,8 @@ import type { TrainingRecord } from '@/types'
 import MemoPopover from '@/components/MemoPopover/MemoPopover'
 import DeploymentBadges from '@/components/DeploymentBadges'
 import PageContainer from '@/components/layout/PageContainer'
+import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import { useIsMobile } from '@/hooks/useBreakpoint'
 
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -157,6 +159,10 @@ const TrainingRecordsPage: React.FC = () => {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined)
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card')
+  const isMobile = useIsMobile()
+  // xs (<md) 强制使用 rich card 网格（更大点击区 + mini chart 完整可见），
+  // 即使用户切到 list 模式也回退；隐藏 Segmented 切换器避免误操作
+  const effectiveViewMode = isMobile ? 'card' : viewMode
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [editModalVisible, setEditModalVisible] = useState(false)
   const [editingRecord, setEditingRecord] = useState<TrainingRecord | null>(null)
@@ -409,7 +415,7 @@ const TrainingRecordsPage: React.FC = () => {
     })
   }
 
-  const listColumns = [
+  const listColumns: ResponsiveColumn<TrainingRecord>[] = [
     {
       title: (
         <div
@@ -418,8 +424,8 @@ const TrainingRecordsPage: React.FC = () => {
             width: 20,
             height: 20,
             borderRadius: 4,
-            border: selectedIds.length === records.length && records.length > 0 ? 'none' : '2px solid #d1d5db',
-            background: selectedIds.length === records.length && records.length > 0 ? '#1677ff' : 'transparent',
+            border: selectedIds.length === records.length && records.length > 0 ? 'none' : '2px solid var(--ap-border)',
+            background: selectedIds.length === records.length && records.length > 0 ? 'var(--ap-brand-primary)' : 'transparent',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -435,6 +441,8 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'select',
       key: 'select',
       width: 60,
+      // 移动端不展示选择列（卡片视图无多选 UI），列表 sm 窄屏可省略
+      mobileRole: 'hidden',
       render: (_: unknown, record: TrainingRecord) => (
         <div
           onClick={(e) => {
@@ -445,8 +453,8 @@ const TrainingRecordsPage: React.FC = () => {
             width: 20,
             height: 20,
             borderRadius: 4,
-            border: selectedIds.includes(record.id) ? 'none' : '2px solid #d1d5db',
-            background: selectedIds.includes(record.id) ? '#1677ff' : 'transparent',
+            border: selectedIds.includes(record.id) ? 'none' : '2px solid var(--ap-border)',
+            background: selectedIds.includes(record.id) ? 'var(--ap-brand-primary)' : 'transparent',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -465,6 +473,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'id',
       key: 'id',
       width: 60,
+      mobileRole: 'hidden',
       render: (id: number) => (
         <Text type="secondary" style={{ fontSize: 12, fontFamily: "'SF Mono', 'Consolas', monospace" }}>
           #{id}
@@ -476,6 +485,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'name',
       key: 'name',
       width: 280,
+      mobileRole: 'title',
       render: (name: string, record: TrainingRecord) => (
         <Space size={4}>
           {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 12 }} />}
@@ -520,6 +530,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'category',
       key: 'category',
       width: 110,
+      mobileRole: 'badge',
       render: (_: string, record: TrainingRecord) => {
         const actualCategory = (record.run_count || 0) > 1 ? 'rolling' : 'single'
         const cfg = CATEGORY_CONFIG[actualCategory] || CATEGORY_CONFIG.single
@@ -531,6 +542,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'status',
       key: 'status',
       width: 100,
+      mobileRole: 'badge',
       render: (status: string) => {
         const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.completed
         return <Tag color={cfg.color} style={{ fontSize: 11 }}>{cfg.label}</Tag>
@@ -541,6 +553,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'description',
       key: 'description',
       ellipsis: true,
+      mobileRole: 'subtitle',
       render: (desc: string) => <Text type="secondary" style={{ fontSize: 12 }}>{desc || '-'}</Text>,
     },
     {
@@ -548,6 +561,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'cumulative_return_preview',
       key: 'cumulative_return',
       width: 180,
+      mobileRole: 'hidden', // mini chart 在 metric 2 列网格里太挤；放展开看
       render: (_: unknown, record: TrainingRecord) => (
         <MiniReturnChart data={record.cumulative_return_preview} />
       ),
@@ -558,12 +572,13 @@ const TrainingRecordsPage: React.FC = () => {
       key: 'run_count',
       width: 90,
       align: 'center' as const,
+      mobileRole: 'metric',
       render: (runCount: number, record: TrainingRecord) => (
         <Badge
           count={runCount || record.run_ids?.length || 0}
           overflowCount={9999}
           style={{
-            background: '#1677ff',
+            background: 'var(--ap-brand-primary)',
             fontFamily: "'SF Mono', 'Consolas', monospace",
             fontSize: 11,
           }}
@@ -575,6 +590,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'deployments',
       key: 'deployments',
       width: 220,
+      mobileRole: 'hidden',
       render: (_: unknown, record: TrainingRecord) => (
         <DeploymentBadges deployments={record.deployments} maxVisible={2} />
       ),
@@ -584,6 +600,7 @@ const TrainingRecordsPage: React.FC = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 150,
+      mobileRole: 'metric',
       render: (time: string) => (
         <Text type="secondary" style={{ fontSize: 12 }}>
           <ClockCircleOutlined style={{ marginRight: 4 }} />
@@ -628,15 +645,17 @@ const TrainingRecordsPage: React.FC = () => {
           >
             刷新
           </Button>
-          <Segmented
-            value={viewMode}
-            onChange={(value) => setViewMode(value as 'card' | 'list')}
-            options={[
-              { value: 'card', icon: <AppstoreOutlined />, label: '卡片' },
-              { value: 'list', icon: <UnorderedListOutlined />, label: '列表' },
-            ]}
-            size="small"
-          />
+          {!isMobile && (
+            <Segmented
+              value={viewMode}
+              onChange={(value) => setViewMode(value as 'card' | 'list')}
+              options={[
+                { value: 'card', icon: <AppstoreOutlined />, label: '卡片' },
+                { value: 'list', icon: <UnorderedListOutlined />, label: '列表' },
+              ]}
+              size="small"
+            />
+          )}
           {selectedIds.length > 0 && (
             <>
               <Tooltip title={selectedIds.length < 2 ? '至少选择 2 条' : selectedIds.length > 3 ? '最多对比 3 条' : ''}>
@@ -823,7 +842,7 @@ const TrainingRecordsPage: React.FC = () => {
         </div>
       ) : isError ? null : records.length === 0 ? (
         <UsageGuide />
-      ) : viewMode === 'list' ? (
+      ) : effectiveViewMode === 'list' ? (
         <Collapse
           defaultActiveKey={['favorite', 'normal']}
           bordered={false}
@@ -841,7 +860,7 @@ const TrainingRecordsPage: React.FC = () => {
               key="favorite"
               style={{ marginBottom: 16, background: 'rgba(245, 158, 11, 0.08)', borderRadius: 8, border: '1px solid rgba(245, 158, 11, 0.3)' }}
             >
-              <Table
+              <ResponsiveTable<TrainingRecord>
                 dataSource={favoriteRecords}
                 columns={listColumns}
                 rowKey="id"
@@ -853,10 +872,7 @@ const TrainingRecordsPage: React.FC = () => {
                   size: 'small',
                 }}
                 size="middle"
-                onRow={(record) => ({
-                  onClick: () => navigate(`/training/${record.id}`),
-                  style: { cursor: 'pointer', transition: 'all 0.2s' },
-                })}
+                onRowClick={(record) => navigate(`/training/${record.id}`)}
               />
             </Panel>
           )}
@@ -907,7 +923,7 @@ const TrainingRecordsPage: React.FC = () => {
                   {groupRecords.length === 0 ? (
                     <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
                   ) : (
-                    <Table
+                    <ResponsiveTable<TrainingRecord>
                       dataSource={groupRecords}
                       columns={listColumns}
                       rowKey="id"
@@ -919,10 +935,7 @@ const TrainingRecordsPage: React.FC = () => {
                         size: 'small',
                       }}
                       size="middle"
-                      onRow={(record) => ({
-                        onClick: () => navigate(`/training/${record.id}`),
-                        style: { cursor: 'pointer', transition: 'all 0.2s' },
-                      })}
+                      onRowClick={(record) => navigate(`/training/${record.id}`)}
                     />
                   )}
                 </Panel>
@@ -943,7 +956,7 @@ const TrainingRecordsPage: React.FC = () => {
             {normalRecords.length === 0 ? (
               <Empty description="暂无记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
-              <Table
+              <ResponsiveTable<TrainingRecord>
                 dataSource={normalRecords}
                 columns={listColumns}
                 rowKey="id"
@@ -955,10 +968,7 @@ const TrainingRecordsPage: React.FC = () => {
                   size: 'small',
                 }}
                 size="middle"
-                onRow={(record) => ({
-                  onClick: () => navigate(`/training/${record.id}`),
-                  style: { cursor: 'pointer', transition: 'all 0.2s' },
-                })}
+                onRowClick={(record) => navigate(`/training/${record.id}`)}
               />
             )}
           </Panel>
