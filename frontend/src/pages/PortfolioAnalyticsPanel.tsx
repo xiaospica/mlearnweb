@@ -6,7 +6,7 @@
  */
 
 import { useMemo, useState } from 'react'
-import { Alert, Button, Card, Empty, Segmented, Space, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Col, Empty, Row, Segmented, Space, Tooltip, Typography } from 'antd'
 import { ThunderboltOutlined } from '@ant-design/icons'
 import type { TrainingCompareRecord } from '@/types'
 import ChartContainer from '@/components/responsive/ChartContainer'
@@ -19,8 +19,10 @@ import {
   computeDrawdownAttribution,
   computeMaxSharpeWeights,
   computeMinVarianceWeights,
+  computePortfolioMetrics,
   computeRiskContributions,
   type DrawdownPeriod,
+  type PortfolioMetrics,
 } from './MultiStrategyAnalytics'
 
 const { Text } = Typography
@@ -83,6 +85,14 @@ const PortfolioAnalyticsPanel: React.FC<Props> = ({ records, combos, onUpdateCom
     return r ? r.portfolioVolatility : null
   }, [strategyInputs, activeCombo])
 
+  // KPI 指标 + 单策略 best 对比 (Phase 2)
+  const portfolioMetrics = useMemo(
+    () => (activeCombo ? computePortfolioMetrics(strategyInputs, activeCombo.weights) : null),
+    [strategyInputs, activeCombo],
+  )
+
+  const bestSingleStrategy = useMemo(() => computeBestSingleStrategyMetrics(records), [records])
+
   if (combos.length === 0) {
     return (
       <Empty
@@ -135,6 +145,11 @@ const PortfolioAnalyticsPanel: React.FC<Props> = ({ records, combos, onUpdateCom
           </Tooltip>
         </Space>
       </div>
+
+      {/* 关键指标 KPI（含 vs 单策略最佳 对比 delta） */}
+      {portfolioMetrics && bestSingleStrategy && (
+        <KpiGrid metrics={portfolioMetrics} best={bestSingleStrategy} />
+      )}
 
       {/* 风险贡献分解 */}
       <Card size="small" title="风险贡献分解" style={{ marginBottom: 16 }}>
@@ -397,5 +412,175 @@ const DrawdownAttributionView: React.FC<{
     </div>
   )
 }
+
+// ============================================================
+// KPI Grid: 8 项关键指标 + vs 单策略最佳对比
+// ============================================================
+
+interface BestMetrics {
+  totalReturn: number | null
+  annualizedReturn: number | null
+  sharpe: number | null
+  sortino: number | null
+  calmar: number | null
+  maxDrawdown: number | null
+  annualVolatility: number | null
+  winRate: number | null
+}
+
+const safeMax = (xs: Array<number | null | undefined>): number | null => {
+  const valid = xs.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  return valid.length ? Math.max(...valid) : null
+}
+const safeMin = (xs: Array<number | null | undefined>): number | null => {
+  const valid = xs.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  return valid.length ? Math.min(...valid) : null
+}
+
+const computeBestSingleStrategyMetrics = (records: TrainingCompareRecord[]): BestMetrics => {
+  const m = (key: string) =>
+    records.map((r) => (r.merged_metrics?.[key] as number | undefined) ?? null)
+  return {
+    totalReturn: safeMax(m('total_return')),
+    annualizedReturn: safeMax(m('annualized_return')),
+    sharpe: safeMax(m('sharpe_ratio')),
+    sortino: safeMax(m('sortino_ratio')),
+    calmar: safeMax(m('calmar_ratio')),
+    // max_drawdown 是负数；最佳 = 最接近 0 = max
+    maxDrawdown: safeMax(m('max_drawdown')),
+    // 年化波动率 = std_daily * sqrt(252)；最佳 = 最低
+    annualVolatility: (() => {
+      const stds = m('std_daily_return')
+      const minStd = safeMin(stds)
+      return minStd !== null ? minStd * Math.sqrt(252) : null
+    })(),
+    winRate: safeMax(m('win_rate')),
+  }
+}
+
+const fmtPct = (v: number | null, digits = 2): string =>
+  v == null ? '-' : `${(v * 100).toFixed(digits)}%`
+const fmtRatio = (v: number | null, digits = 3): string =>
+  v == null ? '-' : v.toFixed(digits)
+
+interface KpiSpec {
+  key: keyof PortfolioMetrics
+  bestKey: keyof BestMetrics
+  label: string
+  /** 是否 "高 = 好" */
+  higherIsBetter: boolean
+  /** 显示格式：'pct' 百分比 / 'ratio' 比率 */
+  format: 'pct' | 'ratio'
+}
+
+const KPI_SPECS: KpiSpec[] = [
+  { key: 'totalReturn', bestKey: 'totalReturn', label: '总收益', higherIsBetter: true, format: 'pct' },
+  { key: 'annualizedReturn', bestKey: 'annualizedReturn', label: '年化收益', higherIsBetter: true, format: 'pct' },
+  { key: 'sharpe', bestKey: 'sharpe', label: 'Sharpe', higherIsBetter: true, format: 'ratio' },
+  { key: 'sortino', bestKey: 'sortino', label: 'Sortino', higherIsBetter: true, format: 'ratio' },
+  { key: 'calmar', bestKey: 'calmar', label: 'Calmar', higherIsBetter: true, format: 'ratio' },
+  { key: 'maxDrawdown', bestKey: 'maxDrawdown', label: '最大回撤', higherIsBetter: true, format: 'pct' },
+  { key: 'annualVolatility', bestKey: 'annualVolatility', label: '年化波动率', higherIsBetter: false, format: 'pct' },
+  { key: 'winRate', bestKey: 'winRate', label: '胜率', higherIsBetter: true, format: 'pct' },
+]
+
+const KpiCard: React.FC<{ spec: KpiSpec; value: number | null; best: number | null }> = ({
+  spec,
+  value,
+  best,
+}) => {
+  const fmt = spec.format === 'pct' ? fmtPct : fmtRatio
+  const valueStr = fmt(value)
+  const bestStr = fmt(best)
+
+  let comparisonNode: React.ReactNode = null
+  if (value != null && best != null && Number.isFinite(value) && Number.isFinite(best)) {
+    const delta = value - best
+    const isBetter = spec.higherIsBetter ? delta > 1e-9 : delta < -1e-9
+    const isWorse = spec.higherIsBetter ? delta < -1e-9 : delta > 1e-9
+    const tone = isBetter
+      ? 'var(--ap-success)'
+      : isWorse
+        ? 'var(--ap-warning)'
+        : 'var(--ap-text-muted)'
+    const arrow = delta > 0 ? '↑' : delta < 0 ? '↓' : '='
+    const deltaStr =
+      spec.format === 'pct'
+        ? `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(2)}pp`
+        : `${delta >= 0 ? '+' : ''}${delta.toFixed(3)}`
+    comparisonNode = (
+      <div
+        style={{
+          fontSize: 11,
+          color: tone,
+          fontFamily: "'SF Mono', 'Consolas', monospace",
+          marginTop: 4,
+        }}
+      >
+        {arrow} {deltaStr}{' '}
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          (单策略最佳 {bestStr})
+        </Text>
+      </div>
+    )
+  }
+
+  return (
+    <Card
+      style={{
+        background: 'var(--ap-panel)',
+        border: '1px solid var(--ap-border-muted)',
+        borderRadius: 12,
+        boxShadow: 'var(--ap-elevation-1)',
+        height: '100%',
+      }}
+      styles={{ body: { padding: 16 } }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--ap-text-muted)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          marginBottom: 6,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {spec.label}
+      </div>
+      <div
+        style={{
+          fontSize: 22,
+          fontWeight: 700,
+          color: 'var(--ap-text)',
+          lineHeight: 1.15,
+          letterSpacing: '-0.02em',
+          fontFamily: "'SF Mono', 'Consolas', monospace",
+        }}
+      >
+        {valueStr}
+      </div>
+      {comparisonNode}
+    </Card>
+  )
+}
+
+const KpiGrid: React.FC<{ metrics: PortfolioMetrics; best: BestMetrics }> = ({ metrics, best }) => (
+  <div style={{ marginBottom: 16 }}>
+    <Row gutter={[12, 12]}>
+      {KPI_SPECS.map((spec) => (
+        <Col key={spec.key} xs={12} sm={12} md={8} lg={6} xl={6}>
+          <KpiCard
+            spec={spec}
+            value={metrics[spec.key]}
+            best={best[spec.bestKey]}
+          />
+        </Col>
+      ))}
+    </Row>
+  </div>
+)
 
 export default PortfolioAnalyticsPanel

@@ -54,6 +54,16 @@ const alignDailyReturns = (strategies: StrategyInput[]): AlignedReturns => {
 /** 矢量均值 */
 const mean = (xs: number[]): number => xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length)
 
+/** 样本标准差（与 pandas Series.std() 等价，ddof=1） */
+const stdSample = (xs: number[]): number => {
+  const n = xs.length
+  if (n < 2) return 0
+  const mu = mean(xs)
+  let ss = 0
+  for (const v of xs) ss += (v - mu) * (v - mu)
+  return Math.sqrt(ss / (n - 1))
+}
+
 /** 协方差矩阵（无偏估计 N-1） */
 const covMatrix = (returns: number[][]): number[][] => {
   const n = returns.length
@@ -412,4 +422,129 @@ export const computeDrawdownAttribution = (
 
   // 按 |drawdown| 降序，取 topN
   return periods.sort((a, b) => a.drawdown - b.drawdown).slice(0, topN)
+}
+
+// ----------------------------------------------------------
+// 4. 组合关键指标（与后端 _compute_merged_metrics 严格对齐）
+// ----------------------------------------------------------
+
+export interface PortfolioMetrics {
+  /** 累积收益: cum[-1] = product(1+r) - 1 */
+  totalReturn: number
+  /** 年化收益（单利，与后端一致）: mean(r) * 252 */
+  annualizedReturn: number
+  /** 年化波动率: std(r, ddof=1) * sqrt(252) */
+  annualVolatility: number
+  /** Sharpe (rf=0): mean / std * sqrt(252) — std=0 返回 null */
+  sharpe: number | null
+  /** Sortino: mean / std_downside * sqrt(252) — 无下跌哨兵 std=0.0001 */
+  sortino: number
+  /** Calmar: mean*252 / |max_dd| — max_dd=0 返回 null */
+  calmar: number | null
+  /** 最大回撤（负数） */
+  maxDrawdown: number
+  /** 胜率：count(r>0) / 全天数（与后端 .mean() 等价） */
+  winRate: number
+  /** 单日最大盈利 */
+  maxSingleDayGain: number
+  /** 单日最大亏损 */
+  maxSingleDayLoss: number
+  /** 有效样本天数（reset 组合曲线的总天数） */
+  totalTradingDays: number
+}
+
+/**
+ * 给定权重，计算组合的关键指标。
+ *
+ * **严格对齐后端 `_compute_merged_metrics`（mlearnweb/backend/app/routers/training_records.py:513）**
+ * 公式参考：
+ *  - annualized_return = mean(daily) * 252  (单利)
+ *  - sharpe = mean / std(ddof=1) * sqrt(252)
+ *  - sortino = mean / std_downside(ddof=1) * sqrt(252)，无下跌时 std 哨兵=0.0001
+ *  - max_drawdown = min((cum - cummax) / cummax)，cum 用 NAV 起点 1
+ *  - calmar = mean*252 / |max_dd|
+ *  - win_rate = count(daily > 0) / len(daily)
+ *
+ * 数据流复用 computePortfolioCumulative 的对齐 + 权重归一化逻辑（同口径）。
+ */
+export const computePortfolioMetrics = (
+  strategies: StrategyInput[],
+  weights: Record<string | number, number>,
+): PortfolioMetrics | null => {
+  if (strategies.length === 0) return null
+
+  // 对齐 + 反推日收益
+  const dailyMaps = strategies.map((s) => {
+    const daily = cumToDaily(s.cumulative)
+    const m = new Map<string, number | null>()
+    s.dates.forEach((d, i) => m.set(d, daily[i] ?? null))
+    return { id: s.id, m }
+  })
+
+  const allDates = Array.from(new Set(strategies.flatMap((s) => s.dates))).sort()
+  const portDaily: number[] = []
+  const portNav: number[] = []
+  let nav = 1
+
+  for (const d of allDates) {
+    // 当日有数据的策略 + 权重
+    const samples: Array<{ w: number; r: number }> = []
+    for (const sm of dailyMaps) {
+      const w = weights[sm.id]
+      if (!Number.isFinite(w) || (w as number) <= 0) continue
+      const r = sm.m.get(d)
+      if (typeof r !== 'number' || !Number.isFinite(r)) continue
+      samples.push({ w: w as number, r })
+    }
+    let portR = 0
+    if (samples.length > 0) {
+      const wSum = samples.reduce((s, x) => s + x.w, 0)
+      portR = samples.reduce((s, x) => s + (x.w / wSum) * x.r, 0)
+    }
+    portDaily.push(portR)
+    nav *= 1 + portR
+    portNav.push(nav)
+  }
+
+  if (portDaily.length === 0) return null
+
+  // total_return = cum[-1]/cum[0] - 1 (NAV 起点 = 1 → 等价于 nav[-1] - 1 = product(1+r) - 1)
+  const totalReturn = portNav[portNav.length - 1] - 1
+
+  // mean / std (与 pandas dropna().mean() / std(ddof=1) 等价；这里 portDaily 已是连续 finite)
+  const meanR = mean(portDaily)
+  const stdR = stdSample(portDaily)
+
+  // max drawdown: min((nav - cummax) / cummax)
+  let runningMax = portNav[0]
+  let maxDD = 0
+  for (const v of portNav) {
+    if (v > runningMax) runningMax = v
+    const dd = runningMax > 0 ? (v - runningMax) / runningMax : 0
+    if (dd < maxDD) maxDD = dd
+  }
+
+  // sortino: 下跌方差仅用 r<0 子集（与后端一致）；无下跌时 std 哨兵 0.0001
+  const downside = portDaily.filter((r) => r < 0)
+  const downsideStd = downside.length > 0 ? stdSample(downside) : 0.0001
+  const sortino = (meanR / downsideStd) * Math.sqrt(TRADING_DAYS_PER_YEAR)
+
+  const annualizedReturn = meanR * TRADING_DAYS_PER_YEAR
+  const annualVol = stdR * Math.sqrt(TRADING_DAYS_PER_YEAR)
+  const sharpe = stdR > 0 ? (meanR / stdR) * Math.sqrt(TRADING_DAYS_PER_YEAR) : null
+  const calmar = Math.abs(maxDD) > 0 ? annualizedReturn / Math.abs(maxDD) : null
+
+  return {
+    totalReturn,
+    annualizedReturn,
+    annualVolatility: annualVol,
+    sharpe,
+    sortino,
+    calmar,
+    maxDrawdown: maxDD,
+    winRate: portDaily.filter((r) => r > 0).length / portDaily.length,
+    maxSingleDayGain: Math.max(...portDaily),
+    maxSingleDayLoss: Math.min(...portDaily),
+    totalTradingDays: portDaily.length,
+  }
 }
