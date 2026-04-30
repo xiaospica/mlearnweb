@@ -85,25 +85,26 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
       onClick={item.onClick}
       style={{
         background: 'var(--ap-panel)',
-        border: '1px solid var(--ap-border)',
+        border: '1px solid var(--ap-border-muted)',
+        borderRadius: 12,
         cursor: item.onClick ? 'pointer' : 'default',
         height: '100%',
       }}
-      styles={{ body: { padding: 16 } }}
+      styles={{ body: { padding: 24 } }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         {item.icon != null && (
           <div
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 8,
+              width: 48,
+              height: 48,
+              borderRadius: 10,
               background: tone.bg,
               color: tone.fg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 20,
+              fontSize: 22,
               flexShrink: 0,
             }}
           >
@@ -113,11 +114,11 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: 'var(--ap-text-muted)',
               textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              marginBottom: 4,
+              letterSpacing: '0.06em',
+              marginBottom: 6,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -127,10 +128,11 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
           </div>
           <div
             style={{
-              fontSize: 22,
+              fontSize: 28,
               fontWeight: 700,
               color: 'var(--ap-text)',
-              lineHeight: 1.1,
+              lineHeight: 1.15,
+              letterSpacing: '-0.02em',
               wordBreak: 'break-word',
             }}
           >
@@ -139,8 +141,8 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
           {item.delta != null && (
             <div
               style={{
-                fontSize: 11,
-                marginTop: 4,
+                fontSize: 12,
+                marginTop: 6,
                 color: deltaColor,
                 whiteSpace: 'nowrap',
               }}
@@ -158,11 +160,16 @@ const MetricCardItem = ({ item }: MetricCardItemProps) => {
 
 const SkeletonCard = () => (
   <Card
-    style={{ background: 'var(--ap-panel)', border: '1px solid var(--ap-border)', height: '100%' }}
-    styles={{ body: { padding: 16 } }}
+    style={{
+      background: 'var(--ap-panel)',
+      border: '1px solid var(--ap-border-muted)',
+      borderRadius: 12,
+      height: '100%',
+    }}
+    styles={{ body: { padding: 24 } }}
   >
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <Skeleton.Avatar active size={40} shape="square" />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <Skeleton.Avatar active size={48} shape="square" />
       <div style={{ flex: 1 }}>
         <Skeleton active paragraph={{ rows: 1, width: '60%' }} title={{ width: '80%' }} />
       </div>

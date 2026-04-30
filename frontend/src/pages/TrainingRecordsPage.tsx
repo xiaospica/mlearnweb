@@ -11,6 +11,7 @@ import MemoPopover from '@/components/MemoPopover/MemoPopover'
 import DeploymentBadges from '@/components/DeploymentBadges'
 import PageContainer from '@/components/layout/PageContainer'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import MetricCardGrid from '@/components/responsive/MetricCardGrid'
 import { useIsMobile } from '@/hooks/useBreakpoint'
 
 const { Title, Text, Paragraph } = Typography
@@ -81,31 +82,31 @@ const UsageGuide: React.FC = () => (
         <ThunderboltOutlined style={{ fontSize: 20, color: '#1677ff' }} />
       </div>
       <div style={{ flex: 1 }}>
-        <Title level={5} style={{ color: '#1f2937', margin: '0 0 8px 0' }}>如何创建训练记录</Title>
-        <Paragraph style={{ color: '#6b7280', margin: 0, fontSize: 13, lineHeight: 1.8 }}>
+        <Title level={5} style={{ color: 'var(--ap-text)', margin: '0 0 8px 0' }}>如何创建训练记录</Title>
+        <Paragraph style={{ color: 'var(--ap-text-muted)', margin: 0, fontSize: 13, lineHeight: 1.8 }}>
           执行训练脚本时传入 <Text code>--name</Text> 参数，训练完成后自动记录到 Dashboard：
         </Paragraph>
 
         <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', background: '#ffffff', borderRadius: 6,
-            borderLeft: '3px solid #1677ff',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            padding: '10px 14px', background: 'var(--ap-panel-muted)', borderRadius: 6,
+            borderLeft: '3px solid var(--ap-brand-primary)',
+            boxShadow: '0 1px 2px var(--ap-shadow)',
           }}>
             <ThunderboltOutlined style={{ color: '#faad14', fontSize: 14 }} />
-            <Text style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12, color: '#374151' }}>
+            <Text style={{ fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12, color: 'var(--ap-text)' }}>
               python tushare_hs300_rolling_train.py --name "CSI300滚动v2" --description "Alpha191因子"
             </Text>
           </div>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', background: '#ffffff', borderRadius: 6,
-            borderLeft: '3px solid #52c41a',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            padding: '10px 14px', background: 'var(--ap-panel-muted)', borderRadius: 6,
+            borderLeft: '3px solid var(--ap-success)',
+            boxShadow: '0 1px 2px var(--ap-shadow)',
           }}>
             <DatabaseOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-            <Text style={{ fontSize: 12, color: '#6b7280' }}>
+            <Text style={{ fontSize: 12, color: 'var(--ap-text-muted)' }}>
               训练完成后刷新此页面即可看到新的训练记录。
             </Text>
           </div>
@@ -116,11 +117,11 @@ const UsageGuide: React.FC = () => (
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#e8f4fd', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(59, 130, 246, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <ExperimentOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+                <ExperimentOutlined style={{ color: 'var(--ap-brand-primary)', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>1. 指定名称</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>1. 指定名称</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>--name "训练名"</Text>
             </div>
           </Col>
@@ -128,11 +129,11 @@ const UsageGuide: React.FC = () => (
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#f0fff0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(34, 197, 94, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <UnorderedListOutlined style={{ color: '#52c41a', fontSize: 18 }} />
+                <UnorderedListOutlined style={{ color: 'var(--ap-success)', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>2. 运行训练</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>2. 运行训练</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>等待训练完成</Text>
             </div>
           </Col>
@@ -140,11 +141,11 @@ const UsageGuide: React.FC = () => (
             <div style={{ textAlign: 'center' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, margin: '0 auto 8px',
-                background: '#fff7e6', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(245, 158, 11, 0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <CheckCircleOutlined style={{ color: '#fa8c16', fontSize: 18 }} />
+                <CheckCircleOutlined style={{ color: 'var(--ap-warning)', fontSize: 18 }} />
               </div>
-              <Text strong style={{ color: '#1f2937', fontSize: 12, display: 'block' }}>3. 查看结果</Text>
+              <Text strong style={{ color: 'var(--ap-text)', fontSize: 12, display: 'block' }}>3. 查看结果</Text>
               <Text type="secondary" style={{ fontSize: 11 }}>点击卡片查看详情</Text>
             </div>
           </Col>
@@ -730,7 +731,7 @@ const TrainingRecordsPage: React.FC = () => {
               </Text>
               <div style={{
                 marginTop: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 6,
-                fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11, color: '#6b7280',
+                fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11, color: 'var(--ap-text-muted)',
               }}>
                 cd mlearnweb/backend && python -m uvicorn app.main:app --port 8000
               </div>
@@ -750,90 +751,39 @@ const TrainingRecordsPage: React.FC = () => {
       ) : null}
 
       {!isError && records.length > 0 && (
-        <>
-          <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: 'var(--ap-panel)',
-                  border: '1px solid var(--ap-border)',
-                  borderLeft: '3px solid var(--ap-brand-primary)',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px var(--ap-shadow)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>总训练数</span>}
-                  value={total}
-                  valueStyle={{ color: 'var(--ap-brand-primary)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<UnorderedListOutlined style={{ color: 'var(--ap-brand-primary)' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: 'var(--ap-panel)',
-                  border: '1px solid var(--ap-border)',
-                  borderLeft: '3px solid var(--ap-success)',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px var(--ap-shadow)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>单次训练</span>}
-                  value={singleCount}
-                  valueStyle={{ color: 'var(--ap-success)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<RocketOutlined style={{ color: 'var(--ap-success)' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: 'var(--ap-panel)',
-                  border: '1px solid var(--ap-border)',
-                  borderLeft: '3px solid var(--ap-accent)',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px var(--ap-shadow)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>滚动训练</span>}
-                  value={rollingCount}
-                  valueStyle={{ color: 'var(--ap-accent)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<SyncOutlined style={{ color: 'var(--ap-accent)' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: 'var(--ap-panel)',
-                  border: '1px solid var(--ap-border)',
-                  borderLeft: '3px solid var(--ap-warning)',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px var(--ap-shadow)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: 'var(--ap-text-muted)', fontSize: 11 }}>已完成</span>}
-                  value={completedCount}
-                  valueStyle={{ color: 'var(--ap-warning)', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<CheckCircleOutlined style={{ color: 'var(--ap-warning)' }} />}
-                />
-              </Card>
-            </Col>
-          </Row>
-        </>
+        <MetricCardGrid
+          style={{ marginBottom: 20 }}
+          items={[
+            {
+              key: 'total',
+              label: '总训练数',
+              value: total,
+              tone: 'primary',
+              icon: <UnorderedListOutlined />,
+            },
+            {
+              key: 'single',
+              label: '单次训练',
+              value: singleCount,
+              tone: 'success',
+              icon: <RocketOutlined />,
+            },
+            {
+              key: 'rolling',
+              label: '滚动训练',
+              value: rollingCount,
+              tone: 'primary',
+              icon: <SyncOutlined />,
+            },
+            {
+              key: 'completed',
+              label: '已完成',
+              value: completedCount,
+              tone: 'warning',
+              icon: <CheckCircleOutlined />,
+            },
+          ]}
+        />
       )}
 
       {isLoading ? (
@@ -1050,7 +1000,7 @@ const TrainingRecordsPage: React.FC = () => {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />
                             <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
-                            <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {record.name}
                             </Title>
                             <Tooltip title="取消收藏">
@@ -1209,12 +1159,12 @@ const TrainingRecordsPage: React.FC = () => {
                               onClick={() => navigate(`/training/${record.id}`)}
                               style={{
                                 height: '100%',
-                                background: isSelected ? '#f0f7ff' : '#ffffff',
-                                border: isSelected ? '2px solid #1677ff' : '1px solid #e8e8e8',
+                                background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'var(--ap-panel)',
+                                border: isSelected ? '2px solid var(--ap-brand-primary)' : '1px solid var(--ap-border)',
                                 borderRadius: 8,
                                 transition: 'all 0.2s ease',
                                 cursor: 'pointer',
-                                boxShadow: isSelected ? '0 4px 12px rgba(22,119,255,0.15)' : '0 1px 3px rgba(0,0,0,0.06)',
+                                boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.20)' : '0 1px 3px var(--ap-shadow)',
                               }}
                               styles={{ body: { padding: 16 } }}
                             >
@@ -1240,7 +1190,7 @@ const TrainingRecordsPage: React.FC = () => {
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
-                                  <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {record.name}
                                   </Title>
                                   {!record.is_favorite && (
@@ -1422,7 +1372,7 @@ const TrainingRecordsPage: React.FC = () => {
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />}
                             <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
-                            <Title level={5} style={{ color: '#1f2937', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {record.name}
                             </Title>
                             {!record.is_favorite && (

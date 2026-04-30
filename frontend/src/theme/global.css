@@ -61,15 +61,16 @@
 
 /* ============================================================
  * 深色主题（默认）— 中性纯黑色板，对位 QuantDinger 截图
+ * bg ↔ panel 16 单位亮度差，确保卡片清晰抬起
  * ============================================================ */
 :root,
 :root[data-theme='dark'] {
-  --ap-bg: #0f0f0f;
-  --ap-panel: #161616;
-  --ap-panel-elevated: #1f1f1f;
-  --ap-panel-muted: #1a1a1a;
-  --ap-border: #262626;
-  --ap-border-muted: #1f1f1f;
+  --ap-bg: #0a0a0a;
+  --ap-panel: #1a1a1a;
+  --ap-panel-elevated: #222222;
+  --ap-panel-muted: #202020;
+  --ap-border: #2a2a2a;
+  --ap-border-muted: #222222;
   --ap-text: #f5f5f5;
   --ap-text-muted: #999999;
   --ap-text-dim: #666666;

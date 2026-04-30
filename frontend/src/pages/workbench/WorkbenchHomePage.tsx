@@ -22,6 +22,10 @@ import {
   PlusOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
+  UnorderedListOutlined,
+  LoadingOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
@@ -29,6 +33,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { tuningService } from '@/services/tuningService'
 import type { TuningJob, TuningJobStatus } from '@/types/tuning'
 import PageContainer from '@/components/layout/PageContainer'
+import MetricCardGrid from '@/components/responsive/MetricCardGrid'
 
 const { Title, Text } = Typography
 
@@ -332,15 +337,39 @@ const WorkbenchHomePage: React.FC = () => {
         </Space>
       }
     >
-      {/* 顶部统计卡（4 张 KPI），后续 PR-7 切换 MetricCardGrid */}
-      <Card style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
-          <Statistic title="总数" value={stats.total} />
-          <Statistic title="运行中" value={stats.running} valueStyle={{ color: '#1677ff' }} />
-          <Statistic title="已完成" value={stats.done} valueStyle={{ color: '#52c41a' }} />
-          <Statistic title="失败/僵尸" value={stats.failed} valueStyle={{ color: '#ff4d4f' }} />
-        </div>
-      </Card>
+      <MetricCardGrid
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: 'total',
+            label: '总数',
+            value: stats.total,
+            tone: 'neutral',
+            icon: <UnorderedListOutlined />,
+          },
+          {
+            key: 'running',
+            label: '运行中',
+            value: stats.running,
+            tone: 'primary',
+            icon: <LoadingOutlined />,
+          },
+          {
+            key: 'done',
+            label: '已完成',
+            value: stats.done,
+            tone: 'success',
+            icon: <CheckCircleOutlined />,
+          },
+          {
+            key: 'failed',
+            label: '失败/僵尸',
+            value: stats.failed,
+            tone: 'danger',
+            icon: <WarningOutlined />,
+          },
+        ]}
+      />
 
       {/* V3.3 队列视图（runner 状态 + 队列预览） */}
       {(queueItems.length > 0 || runnerBusy) && (

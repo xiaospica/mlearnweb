@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
 import type { Experiment } from '@/types'
 import PageContainer from '@/components/layout/PageContainer'
+import MetricCardGrid from '@/components/responsive/MetricCardGrid'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -168,84 +169,38 @@ const HomePage: React.FC = () => {
 
       {experiments.length > 0 && !isError && (
         <>
-          <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #1677ff',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>总实验数</span>}
-                  value={total}
-                  valueStyle={{ color: '#1677ff', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<ExperimentOutlined style={{ color: '#1677ff' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #52c41a',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>活跃实验</span>}
-                  value={experiments.filter(e => e.lifecycle_stage === 'active').length}
-                  valueStyle={{ color: '#52c41a', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #722ed1',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>总运行次数</span>}
-                  value={experiments.reduce((sum, e) => sum + e.run_count, 0)}
-                  valueStyle={{ color: '#722ed1', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                  prefix={<LoadingOutlined style={{ color: '#722ed1' }} />}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card
-                size="small"
-                styles={{ body: { padding: '14px 16px' } }}
-                style={{
-                  background: '#ffffff',
-                  borderLeft: '3px solid #fa8c16',
-                  borderRadius: 8,
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                }}
-              >
-                <Statistic
-                  title={<span style={{ color: '#6b7280', fontSize: 11 }}>平均运行数</span>}
-                  value={total > 0 ? Math.round(experiments.reduce((sum, e) => sum + e.run_count, 0) / total) : 0}
-                  suffix="/exp"
-                  valueStyle={{ color: '#fa8c16', fontFamily: "'SF Mono', 'Consolas', monospace", fontWeight: 700, fontSize: 22 }}
-                />
-              </Card>
-            </Col>
-          </Row>
+          <MetricCardGrid
+            style={{ marginBottom: 20 }}
+            items={[
+              {
+                key: 'total',
+                label: '总实验数',
+                value: total,
+                tone: 'primary',
+                icon: <ExperimentOutlined />,
+              },
+              {
+                key: 'active',
+                label: '活跃实验',
+                value: experiments.filter((e) => e.lifecycle_stage === 'active').length,
+                tone: 'success',
+                icon: <CheckCircleOutlined />,
+              },
+              {
+                key: 'runs',
+                label: '总运行次数',
+                value: experiments.reduce((sum, e) => sum + e.run_count, 0),
+                tone: 'primary',
+                icon: <LoadingOutlined />,
+              },
+              {
+                key: 'avg',
+                label: '平均运行数',
+                value: `${total > 0 ? Math.round(experiments.reduce((sum, e) => sum + e.run_count, 0) / total) : 0}/exp`,
+                tone: 'warning',
+              },
+            ]}
+          />
 
           <Input
             placeholder="搜索实验名称..."
