@@ -16,6 +16,7 @@ import {
 import PortfolioComboBuilder from './PortfolioComboBuilder'
 import RollingCorrelationChart from './RollingCorrelationChart'
 import PortfolioAnalyticsPanel from './PortfolioAnalyticsPanel'
+import KpiGrid from './KpiCard'
 import { useTheme } from '@/hooks/useTheme'
 
 const { Title, Text } = Typography
@@ -43,6 +44,29 @@ function computeDrawdown(cum: number[]): number[] {
     dd.push(base > 0 ? (1 + v) / base - 1 : 0)
   }
   return dd
+}
+
+/** 把后端 merged_metrics (snake_case) 转为 KpiGrid 的 (camelCase) 映射。
+ *  年化波动率前端从 std_daily_return 派生 (× sqrt(252))。 */
+const mergedMetricsToKpiValues = (
+  m?: Record<string, unknown>,
+): Record<string, number | null> => {
+  if (!m) return {}
+  const num = (k: string): number | null => {
+    const v = m[k]
+    return typeof v === 'number' && Number.isFinite(v) ? v : null
+  }
+  const std = num('std_daily_return')
+  return {
+    totalReturn: num('total_return'),
+    annualizedReturn: num('annualized_return'),
+    sharpe: num('sharpe_ratio'),
+    sortino: num('sortino_ratio'),
+    calmar: num('calmar_ratio'),
+    maxDrawdown: num('max_drawdown'),
+    annualVolatility: std !== null ? std * Math.sqrt(252) : null,
+    winRate: num('win_rate'),
+  }
 }
 
 function icStats(values: Array<number | null | undefined>): { meanIC: number; icir: number; count: number } {
@@ -404,6 +428,24 @@ const TrainingComparePage: React.FC = () => {
 
             <Col span={24}>
               <Card size="small" title="累计收益率（overlay）">
+                {/* 各单策略 KPI 网格（与组合 KPI 卡同款，无 vs-best 对比行） */}
+                {availableRecords.map((r, i) => (
+                  <KpiGrid
+                    key={r.id}
+                    title={
+                      <Space size={6}>
+                        <Tag color={PALETTE[i]} style={{ fontSize: 12 }}>
+                          {String.fromCharCode(65 + i)}
+                        </Tag>
+                        <Text strong>{r.name || `#${r.id}`}</Text>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          ID: {r.id}
+                        </Text>
+                      </Space>
+                    }
+                    values={mergedMetricsToKpiValues(r.merged_metrics ?? undefined)}
+                  />
+                ))}
                 <PortfolioComboBuilder
                   records={availableRecords}
                   combos={portfolios}
