@@ -938,7 +938,10 @@ async def snapshot_tick() -> None:
                 session.add(row)
                 written += 1
 
-        # retention cleanup
+        # retention cleanup — 注意排除 source_label='replay_settle'，
+        # 那是 vnpy 端写入的"按回放逻辑日"历史快照，不该被实时 retention 误删。
+        # 实时 wall-clock 心跳点 (account_equity / strategy_pnl / position_sum_pnl)
+        # 仍保留 retention_days 滚动窗口。
         from app.services.app_settings_service import get_runtime_setting
         retention_days = int(
             get_runtime_setting(
@@ -948,7 +951,9 @@ async def snapshot_tick() -> None:
         )
         cutoff = now - timedelta(days=retention_days)
         session.execute(
-            sa_delete(StrategyEquitySnapshot).where(StrategyEquitySnapshot.ts < cutoff)
+            sa_delete(StrategyEquitySnapshot)
+            .where(StrategyEquitySnapshot.ts < cutoff)
+            .where(StrategyEquitySnapshot.source_label != "replay_settle")
         )
         session.commit()
         if written:
