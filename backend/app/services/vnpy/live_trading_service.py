@@ -605,7 +605,7 @@ async def get_strategy_detail(
     node_id: str,
     engine: str,
     strategy_name: str,
-    window_days: int = 7,
+    window_days: int = 365,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     client = get_vnpy_client()
     if node_id not in client.node_ids:

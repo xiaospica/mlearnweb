@@ -67,7 +67,7 @@ async def get_strategy(
     node_id: str,
     engine: str,
     name: str,
-    window_days: int = Query(7, ge=1, le=90),
+    window_days: int = Query(365, ge=1, le=3650),
     db: Session = Depends(get_db_session),
 ) -> LiveTradingListResponse:
     detail, warning = await svc.get_strategy_detail(db, node_id, engine, name, window_days)

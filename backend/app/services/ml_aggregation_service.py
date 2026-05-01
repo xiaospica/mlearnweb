@@ -137,18 +137,29 @@ def get_prediction_by_date(
     strategy_name: str,
     trade_date_str: str,
 ) -> Optional[Dict[str, Any]]:
-    """按日期 YYYYMMDD 查询预测 summary."""
+    """按日期 YYYYMMDD 查询预测 summary。
+
+    db 存的 trade_date 在不同写入路径下时分秒不同：
+      - 回放路径 (vnpy mlearnweb_writer.write_replay_ml_metric_snapshot):
+        15:00:00 (A 股收盘时间)
+      - 实时 ml_snapshot_loop fallback: wall-clock now (00:00 / 任意时刻)
+    精确等于 datetime(YYYY,MM,DD) 只能匹配 00:00:00 的，会漏掉 15:00:00 的回放历史。
+    用 [td, td + 1day) 范围匹配整个交易日。
+    """
+    from datetime import timedelta as _td
     try:
         td = datetime.strptime(trade_date_str, "%Y%m%d")
     except ValueError:
         return None
+    td_next = td + _td(days=1)
     row = (
         db.query(MLPredictionDaily)
         .filter(
             MLPredictionDaily.node_id == node_id,
             MLPredictionDaily.engine == ML_ENGINE_NAME,
             MLPredictionDaily.strategy_name == strategy_name,
-            MLPredictionDaily.trade_date == td,
+            MLPredictionDaily.trade_date >= td,
+            MLPredictionDaily.trade_date < td_next,
         )
         .first()
     )
