@@ -42,8 +42,17 @@ def load_nodes() -> List[NodeConfig]:
     """
     path = settings.vnpy_nodes_config_path
     if not os.path.isabs(path):
-        # resolve relative to backend root (parent of app/)
-        backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # resolve relative to backend root (parent of app/).
+        # __file__ = backend/app/services/vnpy/registry.py
+        #   需 dirname × 4 → backend/  (之前用了 3 次，落在 backend/app，
+        #   导致 ./vnpy_nodes.yaml 解析成 backend/app/vnpy_nodes.yaml 找不到)
+        backend_root = os.path.dirname(
+            os.path.dirname(
+                os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))
+                )
+            )
+        )
         path = os.path.normpath(os.path.join(backend_root, path))
 
     if not os.path.exists(path):

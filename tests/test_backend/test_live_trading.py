@@ -375,6 +375,43 @@ nodes:
         nodes = load_nodes()
         assert nodes == []
 
+    def test_relative_path_resolves_to_backend_root(self, tmp_path, monkeypatch):
+        """关键回归：./vnpy_nodes.yaml 这种 .env 默认值必须解析到 backend/ 根目录,
+        不是 backend/app（之前 dirname×3 的 bug 会落到 backend/app）。
+        """
+        from app.core.config import settings
+        from app.services.vnpy.registry import load_nodes
+        import os as _os
+
+        # 在 backend 根目录写一个临时 yaml，然后用相对路径加载
+        backend_root = _os.path.dirname(_os.path.dirname(_os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__))
+        )))
+        # tests/test_backend/test_live_trading.py → tests/test_backend → tests → mlearnweb → mlearnweb/backend
+        # 需要 4 次 dirname 拿到 mlearnweb/，再 join backend
+        # 实际上 test 文件位置不同；改用 monkeypatch 直接覆盖 registry.__file__
+        from app.services.vnpy import registry as registry_mod
+
+        # 创建模拟的 backend/ 目录树并把 yaml 放在 backend 根
+        fake_backend = tmp_path / "backend"
+        fake_app = fake_backend / "app" / "services" / "vnpy"
+        fake_app.mkdir(parents=True)
+        fake_yaml = fake_backend / "vnpy_nodes.yaml"
+        fake_yaml.write_text(
+            "nodes:\n  - node_id: relpath_test\n    base_url: http://h:1\n    username: u\n    password: p\n    enabled: true\n",
+            encoding="utf-8",
+        )
+        fake_registry_py = fake_app / "registry.py"
+        fake_registry_py.write_text("# fake", encoding="utf-8")
+
+        monkeypatch.setattr(registry_mod, "__file__", str(fake_registry_py))
+        monkeypatch.setattr(settings, "vnpy_nodes_config_path", "./vnpy_nodes.yaml")
+
+        nodes = load_nodes()
+        assert [n.node_id for n in nodes] == ["relpath_test"], (
+            "相对路径应解析到 backend/ 根（dirname × 4），而不是 backend/app（dirname × 3）"
+        )
+
     def test_load_malformed_yaml_returns_empty(self, tmp_path, monkeypatch):
         from app.core.config import settings
         from app.services.vnpy.registry import load_nodes
