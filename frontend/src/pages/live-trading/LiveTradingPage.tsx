@@ -57,13 +57,13 @@ function valueColor(
   v: number | null | undefined,
   label: SourceLabel | null,
 ): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return '#8c8c8c'
-  // account_equity / strategy_pnl: absolute number, use neutral blue
-  if (label === 'account_equity') return '#1677ff'
-  // position_sum_pnl / strategy_pnl: signed value, red/green A-share convention
-  if (v > 0) return '#f5222d'
-  if (v < 0) return '#52c41a'
-  return '#1f2937'
+  if (v === null || v === undefined || Number.isNaN(v)) return 'var(--ap-text-muted)'
+  // account_equity / strategy_pnl: absolute number, use brand blue
+  if (label === 'account_equity') return 'var(--ap-info)'
+  // position_sum_pnl / strategy_pnl: signed value, A-share red-up / green-down convention
+  if (v > 0) return 'var(--ap-market-up)'
+  if (v < 0) return 'var(--ap-market-down)'
+  return 'var(--ap-text)'
 }
 
 interface StrategyCardProps {
@@ -78,10 +78,15 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
     isOffline ? 'error' : item.running ? 'processing' : item.inited ? 'warning' : 'default'
   const badgeText = isOffline ? '节点离线' : item.running ? '运行中' : item.inited ? '已初始化' : '未初始化'
 
-  // mode 视觉编码：实盘红色警示，模拟绿色，离线灰色
+  // mode 视觉编码：实盘红色警示，模拟绿色，离线灰色（走主题 token）
   const isLive = item.mode === 'live'
-  const modeColor = isOffline ? '#8c8c8c' : isLive ? '#cf1322' : '#389e0d'
-  const modeBg = isOffline ? '#f5f5f5' : isLive ? '#fff1f0' : '#f6ffed'
+  const modeColor = isOffline
+    ? 'var(--ap-text-dim)'
+    : isLive
+      ? 'var(--ap-danger)'
+      : 'var(--ap-success)'
+  // 透明 bg 配色边框 + 同色文字，dark/light 都清晰可读
+  const modeBg = 'transparent'
   const modeText = isOffline ? '离线' : isLive ? '实盘' : '模拟'
   const modeIcon = isOffline ? '🔌' : isLive ? '⚠' : '🧪'
 
@@ -101,7 +106,7 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
             style={{
               fontSize: 15,
               fontWeight: 600,
-              color: '#1f2937',
+              color: 'var(--ap-text)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -172,7 +177,7 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
             <Text type="secondary" style={{ fontSize: 11 }}>
               持仓 {item.positions_count}
             </Text>
-            <div style={{ fontSize: 11, color: '#8c8c8c' }}>
+            <div style={{ fontSize: 11, color: 'var(--ap-text-muted)' }}>
               {item.last_update_ts ? dayjs(item.last_update_ts).fromNow() : '-'}
             </div>
           </div>
@@ -198,7 +203,7 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
   )
 }
 
-type ModeFilter = 'all' | 'live' | 'sim'
+type ModeFilter = 'all' | 'live' | 'sim' | 'offline'
 
 const LiveTradingPage: React.FC = () => {
   const navigate = useNavigate()
@@ -268,11 +273,16 @@ const LiveTradingPage: React.FC = () => {
 
   const nodes = nodesQuery.data?.data || []
   const allStrategies = strategiesQuery.data?.data || []
+  // 离线策略 mode=null：在 live/sim filter 下也始终显示（用户原来是 live/sim
+  // 跑的策略，节点断联后仍想看到历史/删除记录）；'offline' 模式下只显示离线
   const strategies = modeFilter === 'all'
     ? allStrategies
-    : allStrategies.filter((s) => s.mode === modeFilter)
+    : modeFilter === 'offline'
+      ? allStrategies.filter((s) => s.node_offline)
+      : allStrategies.filter((s) => s.mode === modeFilter || s.node_offline)
   const liveCount = allStrategies.filter((s) => s.mode === 'live').length
   const simCount = allStrategies.filter((s) => s.mode === 'sim').length
+  const offlineCount = allStrategies.filter((s) => s.node_offline).length
   const warning = strategiesQuery.data?.warning || null
   const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
 
@@ -315,6 +325,9 @@ const LiveTradingPage: React.FC = () => {
             { label: `全部 (${allStrategies.length})`, value: 'all' },
             { label: `⚠ 实盘 (${liveCount})`, value: 'live' },
             { label: `🧪 模拟 (${simCount})`, value: 'sim' },
+            ...(offlineCount > 0
+              ? [{ label: `🔌 离线 (${offlineCount})` , value: 'offline' as const }]
+              : []),
           ]}
         />
       </div>
