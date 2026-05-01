@@ -26,6 +26,26 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.database import StrategyEquitySnapshot, engine as db_engine
 from app.models.ml_monitoring import MLMetricSnapshot
+from app.services.ml_aggregation_service import get_stock_name_map
+
+
+def _vt_symbol_to_ts_code(vt: str) -> Optional[str]:
+    """vt_symbol (000001.SZSE) → tushare ts_code (000001.SZ)。与 corp_actions_service 同源。"""
+    if not vt or "." not in vt:
+        return None
+    sym, ex = vt.rsplit(".", 1)
+    suffix = {"SSE": "SH", "SZSE": "SZ", "BSE": "BJ"}.get(ex.upper())
+    if suffix is None:
+        return None
+    return f"{sym}.{suffix}"
+
+
+def _resolve_stock_name(vt_symbol: str, name_map: Dict[str, str]) -> str:
+    """vt_symbol → 中文简称；查不到返空字符串（前端 fallback 显示 ts_code）。"""
+    ts = _vt_symbol_to_ts_code(vt_symbol)
+    if ts is None:
+        return ""
+    return name_map.get(ts, "")
 from app.services.vnpy.client import VnpyClientError, get_vnpy_client
 from app.services.vnpy.naming import classify_gateway
 
@@ -421,6 +441,57 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
         offline_rows = _list_offline_strategies_for_node(db, failed_node_id, reason)
         summaries.extend(offline_rows)
 
+    # **历史曾在线但当前 fanout 没返回**的策略也补进来（即使节点本身是 ok）
+    # 场景：
+    #   - 用户曾在 vnpy 节点上跑过 strategyA，停掉/移除了，但 mlearnweb.db 里仍有
+    #     历史快照
+    #   - 列表页应展示所有"曾经存在过"的策略，方便用户查历史/删记录
+    online_keys = {(s["node_id"], s["engine"], s["strategy_name"]) for s in summaries}
+    db_strategies = (
+        db.query(
+            StrategyEquitySnapshot.node_id,
+            StrategyEquitySnapshot.engine,
+            StrategyEquitySnapshot.strategy_name,
+        )
+        .distinct()
+        .all()
+    )
+    for (node_id, engine_name, strategy_name) in db_strategies:
+        if (node_id, engine_name, strategy_name) in online_keys:
+            continue
+        # 复用 _list_offline_strategies_for_node 单条拼装逻辑：取 last 行
+        last = (
+            db.query(StrategyEquitySnapshot)
+            .filter(
+                StrategyEquitySnapshot.node_id == node_id,
+                StrategyEquitySnapshot.engine == engine_name,
+                StrategyEquitySnapshot.strategy_name == strategy_name,
+            )
+            .order_by(StrategyEquitySnapshot.ts.desc())
+            .first()
+        )
+        if last is None:
+            continue
+        curve = _read_curve(db, node_id, engine_name, strategy_name, limit=60)
+        summaries.append({
+            "node_id": node_id,
+            "engine": engine_name,
+            "strategy_name": strategy_name,
+            "class_name": None, "vt_symbol": None, "author": None,
+            "inited": False, "trading": False, "running": False,
+            "strategy_value": last.strategy_value,
+            "source_label": last.source_label or "unavailable",
+            "account_equity": last.account_equity,
+            "positions_count": int(last.positions_count or 0),
+            "last_update_ts": int(last.ts.timestamp() * 1000),
+            "mini_curve": curve,
+            "capabilities": [],
+            "mode": None,
+            "gateway_name": None,
+            "node_offline": True,
+            "offline_reason": "策略当前未在节点上运行（仅展示历史）",
+        })
+
     return summaries, warning
 
 
@@ -644,20 +715,27 @@ async def get_strategy_detail(
         "curve": full_curve,
         "mode": mode,
         "gateway_name": gateway_name,
-        "positions": [
-            {
-                "vt_symbol": p.get("vt_symbol", ""),
-                "direction": str(p.get("direction", "")),
-                "volume": float(p.get("volume") or 0),
-                "price": p.get("price"),
-                "pnl": p.get("pnl"),
-                "yd_volume": p.get("yd_volume"),
-                "frozen": p.get("frozen"),
-            }
-            for p in positions
-        ],
+        "positions": _render_positions(positions),
     }
     return detail, warning
+
+
+def _render_positions(positions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """渲染 positions 列表，自动 enrich 股票中文简称。"""
+    name_map = get_stock_name_map()
+    return [
+        {
+            "vt_symbol": p.get("vt_symbol", ""),
+            "name": _resolve_stock_name(p.get("vt_symbol", ""), name_map),
+            "direction": str(p.get("direction", "")),
+            "volume": float(p.get("volume") or 0),
+            "price": p.get("price"),
+            "pnl": p.get("pnl"),
+            "yd_volume": p.get("yd_volume"),
+            "frozen": p.get("frozen"),
+        }
+        for p in positions
+    ]
 
 
 async def list_node_statuses() -> List[Dict[str, Any]]:
@@ -752,6 +830,7 @@ async def list_strategy_trades(
 
     rows: List[Dict[str, Any]] = []
     prefix = f"{strategy_name}:"
+    name_map = get_stock_name_map()
     for item in trades_fo:
         if item.get("node_id") != node_id:
             continue
@@ -763,8 +842,10 @@ async def list_strategy_trades(
             ref = orderid_ref.get(oid, "")
             if not ref.startswith(prefix):
                 continue
+            vt = t.get("vt_symbol") or ""
             rows.append({
-                "vt_symbol": t.get("vt_symbol") or "",
+                "vt_symbol": vt,
+                "name": _resolve_stock_name(vt, name_map),
                 "tradeid": t.get("tradeid") or "",
                 "orderid": oid,
                 "direction": t.get("direction") or "",

@@ -128,6 +128,23 @@ const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
         return <span style={{ color, fontWeight: 600 }}>{fmtAmount(net)}</span>
       },
     },
+    {
+      title: '涉及合约',
+      key: 'symbols',
+      render: (_: unknown, r: DailyAggregated) => {
+        // 用 name (中文简称) 优先, 没有则用 vt_symbol；按字母去重
+        const labels = Array.from(
+          new Set(r.trades.map((t) => t.name || t.vt_symbol)),
+        )
+        const shown = labels.slice(0, 5).join('、')
+        const more = labels.length > 5 ? ` +${labels.length - 5}` : ''
+        return (
+          <span style={{ fontSize: 12, color: 'var(--ap-text)' }} title={labels.join('、')}>
+            {shown}{more}
+          </span>
+        )
+      },
+    },
   ]
 
   const detailColumns: ResponsiveColumn<StrategyTrade>[] = [
@@ -139,7 +156,17 @@ const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
       mobileRole: 'title',
       render: (v: string) => v ? dayjs(v).format('MM-DD HH:mm:ss') : '-',
     },
-    { title: '合约', dataIndex: 'vt_symbol', key: 'vt_symbol', width: 140 },
+    {
+      title: '合约',
+      key: 'vt_symbol',
+      width: 200,
+      render: (_: unknown, r: StrategyTrade) => (
+        <span>
+          {r.name && <span style={{ marginRight: 6, color: 'var(--ap-text)' }}>{r.name}</span>}
+          <span style={{ color: 'var(--ap-text-muted)', fontSize: 12 }}>{r.vt_symbol}</span>
+        </span>
+      ),
+    },
     {
       title: '方向',
       dataIndex: 'direction',

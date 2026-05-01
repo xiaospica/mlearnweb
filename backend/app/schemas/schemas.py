@@ -250,6 +250,7 @@ class EquityPoint(BaseModel):
 
 class LivePosition(BaseModel):
     vt_symbol: str
+    name: Optional[str] = ""  # 股票中文简称（从 stock_list.parquet 查），查不到为空
     direction: str
     volume: float = 0
     price: Optional[float] = None  # avg cost

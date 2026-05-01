@@ -32,10 +32,17 @@ const PositionsTable: React.FC<Props> = ({ rows }) => {
   const columns: ResponsiveColumn<LivePosition>[] = [
     {
       title: '合约',
-      dataIndex: 'vt_symbol',
       key: 'vt_symbol',
-      width: 160,
+      width: 200,
       mobileRole: 'title',
+      render: (_: unknown, r: LivePosition) => (
+        <span>
+          {r.name && (
+            <span style={{ marginRight: 6, color: 'var(--ap-text)' }}>{r.name}</span>
+          )}
+          <span style={{ color: 'var(--ap-text-muted)', fontSize: 12 }}>{r.vt_symbol}</span>
+        </span>
+      ),
     },
     {
       title: '方向',

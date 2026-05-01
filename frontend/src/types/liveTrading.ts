@@ -26,6 +26,7 @@ export type SourceLabel =
 
 export interface LivePosition {
   vt_symbol: string
+  name?: string  // 股票中文简称
   direction: string
   volume: number
   price: number | null
@@ -41,6 +42,7 @@ export interface DeleteRecordsStats {
 
 export interface StrategyTrade {
   vt_symbol: string
+  name?: string  // 股票中文简称
   tradeid: string
   orderid: string
   direction: string
