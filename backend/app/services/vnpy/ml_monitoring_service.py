@@ -286,6 +286,17 @@ async def ml_snapshot_tick() -> None:
     finally:
         session.close()
 
+    # tick 末尾兜底回填 IC / score_histogram / pred_mean/std 等字段。
+    # vnpy vendor 的 batch run_inference 不写 metrics.json (cli/run_inference.py:206),
+    # 而 ml_snapshot_loop 拉的 metrics 字段是 None → db 没数据 → 前端图表全空。
+    # 这里每 tick 调一次自动 backfill (从 D:/ml_output predictions.parquet 算),
+    # 让用户每次清数据 + 重启 vnpy 后图表立即有数据 (无需手动跑 backfill 脚本)。
+    try:
+        from app.services.vnpy.ml_metrics_backfill_service import backfill_all_strategies
+        await asyncio.to_thread(backfill_all_strategies)
+    except Exception as e:
+        logger.warning(f"[ml_snapshot] backfill failed (non-fatal): {e}")
+
 
 async def ml_snapshot_loop() -> None:
     logger.info(

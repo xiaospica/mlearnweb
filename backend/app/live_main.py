@@ -75,6 +75,17 @@ async def deployment_sync_loop():
 async def lifespan(app: FastAPI):
     # eager-build the multi-node client so any yaml / network issue surfaces at startup
     get_vnpy_client()
+
+    # 启动立即 backfill 一次 — 让用户 reset_sim_state + 重启 vnpy 回放完成后,
+    # 即使 vnpy vendor batch 不写 metrics.json, mlearnweb 启动后图表也立即有数据。
+    # ml_snapshot_loop 后续每 tick 也会调 backfill 持续兜底。
+    try:
+        from app.services.vnpy.ml_metrics_backfill_service import backfill_all_strategies
+        result = await asyncio.to_thread(backfill_all_strategies)
+        logger.info(f"[live_main] startup backfill: {result}")
+    except Exception as e:
+        logger.warning(f"[live_main] startup backfill failed (non-fatal): {e}")
+
     equity_task = asyncio.create_task(snapshot_loop())
     ml_task = asyncio.create_task(ml_snapshot_loop())
     # 方案 §2.4.5 — 同步推理机回填的历史 IC 到 SQLite (5min 一次)
