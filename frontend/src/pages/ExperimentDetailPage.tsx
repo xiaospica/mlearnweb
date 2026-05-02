@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Tag, Button, Space, Typography, Card, Tabs, Timeline, Tooltip, Spin,
+  Tag, Button, Space, Typography, Tooltip, Spin,
   Modal, Input, Alert, message,
 } from 'antd'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
 import { useResponsiveModalProps } from '@/hooks/useResponsiveModalProps'
 import {
-  ArrowLeftOutlined, UnorderedListOutlined, FieldTimeOutlined,
+  ArrowLeftOutlined,
   DeleteOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -258,73 +258,23 @@ const ExperimentDetailPage: React.FC = () => {
         </Button>
       }
     >
-      <Tabs
-        defaultActiveKey="all-runs"
-        items={[
-          {
-            key: 'all-runs',
-            label: (
-              <span><UnorderedListOutlined /> 全部运行 ({totalRuns})</span>
-            ),
-            children: (
-              <ResponsiveTable<RunListItem>
-                columns={columns}
-                dataSource={runs}
-                rowKey="run_id"
-                loading={runsLoading}
-                scrollX={870}
-                pagination={{
-                  current: page,
-                  pageSize,
-                  total: totalRuns,
-                  onChange: setPage,
-                  showSizeChanger: false,
-                  showTotal: (t) => `共 ${t} 条`,
-                }}
-                onRowClick={(record) => navigate(`/report/${expId}/${record.run_id}`)}
-                size="middle"
-              />
-            ),
-          },
-          {
-            key: 'timeline',
-            label: (
-              <span><FieldTimeOutlined /> 时间线</span>
-            ),
-            children: (
-              <Card>
-                <Timeline
-                  mode="left"
-                  items={runs.slice(0, 30).map((run: RunListItem) => ({
-                    color: STATUS_MAP[run.status]?.color || '#d9d9d9',
-                    children: (
-                      <div
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => navigate(`/report/${expId}/${run.run_id}`)}
-                      >
-                        <Text strong style={{ color: '#1f2937' }}>
-                          {run.run_name || run.run_id.slice(0, 12)}
-                        </Text>
-                        <br />
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {run.start_time ? dayjs(run.start_time).format('YYYY-MM-DD') : '-'}
-                        </Text>
-                        <Tag color={STATUS_MAP[run.status]?.color} style={{ marginLeft: 8, fontSize: 10 }}>
-                          {STATUS_MAP[run.status]?.label || run.status}
-                        </Tag>
-                      </div>
-                    ),
-                  }))}
-                />
-                {totalRuns > 30 && (
-                  <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 16 }}>
-                    仅显示最近 30 条记录，查看完整列表请切换到「全部运行」标签
-                  </Text>
-                )}
-              </Card>
-            ),
-          },
-        ]}
+      {/* 唯一的 run 列表（之前 Tabs 的「时间线」与全部运行字段重复，已移除） */}
+      <ResponsiveTable<RunListItem>
+        columns={columns}
+        dataSource={runs}
+        rowKey="run_id"
+        loading={runsLoading}
+        scrollX={870}
+        pagination={{
+          current: page,
+          pageSize,
+          total: totalRuns,
+          onChange: setPage,
+          showSizeChanger: false,
+          showTotal: (t) => `共 ${t} 条`,
+        }}
+        onRowClick={(record) => navigate(`/report/${expId}/${record.run_id}`)}
+        size="middle"
       />
 
       <Modal
