@@ -2,7 +2,7 @@ import React, { useState, useEffect, Suspense } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, Descriptions, Table, Tag, Button, Space, Typography, Spin, Empty, Row, Col, Statistic, Tooltip, Badge, Tabs, Input, message, Modal } from 'antd'
 import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined, EditOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
 import DeploymentBadges from '@/components/DeploymentBadges'
@@ -170,11 +170,18 @@ const TrainingDetailPage: React.FC = () => {
       width: 140,
       ellipsis: true,
       mobileRole: 'subtitle',
+      // 主键列改 <Link>：右键弹「在新标签页打开」
       render: (rid: string) => (
         <Tooltip title={rid}>
-          <Text code style={{ color: 'var(--ap-text-muted)', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
-            {rid.slice(0, 12)}...
-          </Text>
+          <Link
+            to={`/report/${record.experiment_id}/${rid}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{ color: 'var(--ap-text-muted)' }}
+          >
+            <Text code style={{ color: 'inherit', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 11 }}>
+              {rid.slice(0, 12)}...
+            </Text>
+          </Link>
         </Tooltip>
       ),
     },
@@ -184,17 +191,13 @@ const TrainingDetailPage: React.FC = () => {
       width: 90,
       mobileRole: 'hidden',
       render: (_: unknown, rec: any) => (
-        <Button
-          type="link"
-          size="small"
-          style={{ color: 'var(--ap-brand-primary)', paddingLeft: 0 }}
-          onClick={(e) => {
-            e.stopPropagation()
-            navigate(`/report/${record.experiment_id}/${rec.run_id}`)
-          }}
+        <Link
+          to={`/report/${record.experiment_id}/${rec.run_id}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ color: 'var(--ap-brand-primary)', fontSize: 14 }}
         >
           查看报告
-        </Button>
+        </Link>
       ),
     },
   ]
@@ -212,13 +215,13 @@ const TrainingDetailPage: React.FC = () => {
           size="middle"
           scrollX={760}
           cardActions={(rec: any) => (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => navigate(`/report/${record.experiment_id}/${rec.run_id}`)}
+            <Link
+              to={`/report/${record.experiment_id}/${rec.run_id}`}
+              onClick={(e) => e.stopPropagation()}
+              style={{ color: 'var(--ap-brand-primary)', fontSize: 14 }}
             >
               查看报告
-            </Button>
+            </Link>
           )}
         />
       ) : (
@@ -408,13 +411,11 @@ const TrainingDetailPage: React.FC = () => {
                   key: 'experiment',
                   label: '实验',
                   value: (
-                    <Text
-                      code
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => navigate(`/experiments/${record.experiment_id}`)}
-                    >
-                      {record.experiment_name || record.experiment_id}
-                    </Text>
+                    <Link to={`/experiments/${record.experiment_id}`}>
+                      <Text code style={{ color: 'var(--ap-brand-primary)' }}>
+                        {record.experiment_name || record.experiment_id}
+                      </Text>
+                    </Link>
                   ),
                 },
                 {

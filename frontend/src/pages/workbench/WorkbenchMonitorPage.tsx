@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
@@ -212,13 +212,13 @@ const buildTrialColumns = (
     render: (run_id: string | null) =>
       run_id ? (
         <Tooltip title={`mlflow run_id: ${run_id}`}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => navigate(`/report/${experimentId}/${run_id}`)}
+          <Link
+            to={`/report/${experimentId}/${run_id}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{ fontSize: 14 }}
           >
             查看报告
-          </Button>
+          </Link>
         </Tooltip>
       ) : (
         <Text type="secondary">—</Text>
@@ -354,7 +354,7 @@ const WorkbenchMonitorPage: React.FC = () => {
           content: (
             <span>
               已关联到训练记录 #{recordId}{' '}
-              <a onClick={() => navigate(`/training/${recordId}`)}>跳转查看</a>
+              <Link to={`/training/${recordId}`}>跳转查看</Link>
             </span>
           ),
           duration: 6,
@@ -480,9 +480,9 @@ const WorkbenchMonitorPage: React.FC = () => {
           message={
             <span>
               这是<Text strong>衍生验证 job</Text> — 基于源 job{' '}
-              <a onClick={() => navigate(`/workbench/jobs/${job.parent_job_id}`)}>
+              <Link to={`/workbench/jobs/${job.parent_job_id}`}>
                 #{job.parent_job_id}
-              </a>{' '}
+              </Link>{' '}
               的{' '}
               <Text code>
                 {job.derived_trial_numbers && job.derived_trial_numbers.length > 0
@@ -691,9 +691,9 @@ const WorkbenchMonitorPage: React.FC = () => {
             <Text type="secondary" style={{ fontSize: 12 }}>finalized</Text>
             <div>
               {job.finalized_training_record_id ? (
-                <a onClick={() => navigate(`/training/${job.finalized_training_record_id}`)}>
+                <Link to={`/training/${job.finalized_training_record_id}`}>
                   Training Record #{job.finalized_training_record_id}
-                </a>
+                </Link>
               ) : (
                 <Text type="secondary">未 finalize</Text>
               )}
@@ -1568,14 +1568,14 @@ const DerivedJobsPanel: React.FC<{
               dataIndex: 'id',
               width: 70,
               render: (v: number) => (
-                <a onClick={() => navigate(`/workbench/jobs/${v}`)}>#{v}</a>
+                <Link to={`/workbench/jobs/${v}`}>#{v}</Link>
               ),
             },
             {
               title: '名称',
               dataIndex: 'name',
               render: (name: string, r: TuningJob) => (
-                <a onClick={() => navigate(`/workbench/jobs/${r.id}`)}>{name}</a>
+                <Link to={`/workbench/jobs/${r.id}`}>{name}</Link>
               ),
             },
             {
@@ -1951,13 +1951,13 @@ const WalkForwardPanel: React.FC<{
                         key: 'report',
                         width: 100,
                         render: (_, row) => (
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={() => navigate(`/report/${experimentId}/${row.run_id}`)}
+                          <Link
+                            to={`/report/${experimentId}/${row.run_id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ fontSize: 14 }}
                           >
                             查看
-                          </Button>
+                          </Link>
                         ),
                       },
                     ]}

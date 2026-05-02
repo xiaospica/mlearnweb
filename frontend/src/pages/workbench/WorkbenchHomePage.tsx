@@ -1,5 +1,5 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   App,
@@ -152,7 +152,7 @@ const WorkbenchHomePage: React.FC = () => {
       key: 'name',
       render: (name: string, record: TuningJob) => (
         <Space size={4}>
-          <a onClick={() => navigate(`/workbench/jobs/${record.id}`)}>{name}</a>
+          <Link to={`/workbench/jobs/${record.id}`}>{name}</Link>
           {record.parent_job_id != null && (
             <Tag color="purple" style={{ fontSize: 10, padding: '0 4px', cursor: 'pointer' }}
                  onClick={(e) => { e.stopPropagation(); navigate(`/workbench/jobs/${record.parent_job_id}`) }}>
@@ -257,13 +257,13 @@ const WorkbenchHomePage: React.FC = () => {
           record.queue_position == null && record.status === 'created'
         return (
           <Space size="small">
-            <Button
-              size="small"
-              type="link"
-              onClick={() => navigate(`/workbench/jobs/${record.id}`)}
+            <Link
+              to={`/workbench/jobs/${record.id}`}
+              onClick={(e) => e.stopPropagation()}
+              style={{ fontSize: 14 }}
             >
               查看
-            </Button>
+            </Link>
             {canEnqueue && (
               <Button
                 size="small"
@@ -394,9 +394,9 @@ const WorkbenchHomePage: React.FC = () => {
               {runnerBusy ? (
                 <Space>
                   <Tag color="processing">运行中</Tag>
-                  <a onClick={() => navigate(`/workbench/jobs/${runnerBusy.id}`)}>
+                  <Link to={`/workbench/jobs/${runnerBusy.id}`}>
                     #{runnerBusy.id} {runnerBusy.name}
-                  </a>
+                  </Link>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {runnerBusy.n_trials_done}/{runnerBusy.n_trials_target} trial
                   </Text>

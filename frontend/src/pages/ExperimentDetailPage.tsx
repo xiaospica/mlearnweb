@@ -11,7 +11,7 @@ import {
   ArrowLeftOutlined,
   DeleteOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
 import { runService } from '@/services/runService'
@@ -154,10 +154,18 @@ const ExperimentDetailPage: React.FC = () => {
       dataIndex: 'run_id',
       key: 'run_id',
       mobileRole: 'subtitle',
-      render: (id: string) => (
-        <Text code style={{ color: 'var(--ap-brand-primary)', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
-          {id.slice(0, 12)}...
-        </Text>
+      // 主键列改 <Link>：右键能弹「在新标签页打开」（<tr> 不能包 <a>，
+      // 所以让用户至少在 ID 列上能拿到右键菜单）
+      render: (id: string, record: RunListItem) => (
+        <Link
+          to={`/report/${expId}/${record.run_id}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ color: 'var(--ap-brand-primary)' }}
+        >
+          <Text code style={{ color: 'inherit', fontFamily: "'SF Mono', 'Consolas', monospace", fontSize: 12 }}>
+            {id.slice(0, 12)}...
+          </Text>
+        </Link>
       ),
       width: 140,
     },
@@ -210,17 +218,17 @@ const ExperimentDetailPage: React.FC = () => {
       width: 90,
       mobileRole: 'hidden',
       render: (_: unknown, record: RunListItem) => (
-        <Button
-          type="link"
-          size="small"
-          style={{ color: 'var(--ap-brand-primary)', paddingLeft: 0 }}
-          onClick={(e) => { e.stopPropagation(); navigate(`/report/${expId}/${record.run_id}`) }}
+        // 用 <Link> 替代 Button onClick，让右键支持在新标签页打开
+        <Link
+          to={`/report/${expId}/${record.run_id}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ color: 'var(--ap-brand-primary)', fontSize: 14 }}
         >
           查看报告
-        </Button>
+        </Link>
       ),
     },
-  ], [expId, navigate])
+  ], [expId])
 
   const responsiveModalProps = useResponsiveModalProps()
 
