@@ -234,8 +234,18 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gateway
   const rollingData: RollingSummary | null = rolling.data?.success ? rolling.data.data : null
   const predictionData = latestPrediction.data?.success ? latestPrediction.data.data : null
 
-  const latestMetric: MetricSnapshot | null =
-    historyData.length > 0 ? historyData[historyData.length - 1] : null
+  // KPI 用"最近一个 IC 非空"的 trade_date — IC 需要 forward 11d label 才能算,
+  // 最新几天 (4 月底到当日) IC 仍是 None 等待回填。直接拿 historyData 最后一行
+  // 会让"最新 IC" 显示空白。fallback 到含值的那行更直观。
+  const latestMetric: MetricSnapshot | null = (() => {
+    if (!historyData.length) return null
+    for (let i = historyData.length - 1; i >= 0; i--) {
+      if (historyData[i].ic !== null && historyData[i].ic !== undefined) {
+        return historyData[i]
+      }
+    }
+    return historyData[historyData.length - 1]
+  })()
 
   const icOption = useMemo(
     () => buildTimeseriesOption(historyData, 'ic'),
