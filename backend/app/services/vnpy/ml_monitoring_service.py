@@ -89,20 +89,32 @@ def _upsert_metric(
         )
         session.add(row)
 
-    row.ic = metrics.get("ic")
-    row.rank_ic = metrics.get("rank_ic")
-    row.psi_mean = metrics.get("psi_mean")
-    row.psi_max = metrics.get("psi_max")
-    row.psi_n_over_0_25 = metrics.get("psi_n_over_0_25")
-    row.psi_by_feature_json = _truncate_json_field(metrics.get("psi_by_feature"))
-    row.ks_by_feature_json = _truncate_json_field(metrics.get("ks_by_feature"))
-    row.pred_mean = metrics.get("pred_mean")
-    row.pred_std = metrics.get("pred_std")
-    row.pred_zero_ratio = metrics.get("pred_zero_ratio")
-    row.n_predictions = metrics.get("n_predictions")
-    row.feat_missing_json = _truncate_json_field(metrics.get("feat_missing"))
-    row.model_run_id = metrics.get("model_run_id")
-    row.core_version = metrics.get("core_version")
+    # 关键：仅在 metrics 实际带值时才覆盖 ic / rank_ic / psi 等"延迟回填型"字段。
+    # vnpy MetricsCache 在推理时不算 IC (forward 11d label 还不知道), metrics dict
+    # 里这些字段是 None。如果无脑 row.ic = metrics.get("ic") 会把 None 写回，覆盖
+    # 了 backfill_ml_metrics_ic.py / historical_metrics_sync 之前补的真值。
+    # historical_metrics_sync_service.py:106 的 "仅本地 null 时才覆盖" 是同一思路。
+    def _set_if_not_none(attr: str, value: Any) -> None:
+        if value is not None:
+            setattr(row, attr, value)
+
+    _set_if_not_none("ic", metrics.get("ic"))
+    _set_if_not_none("rank_ic", metrics.get("rank_ic"))
+    _set_if_not_none("psi_mean", metrics.get("psi_mean"))
+    _set_if_not_none("psi_max", metrics.get("psi_max"))
+    _set_if_not_none("psi_n_over_0_25", metrics.get("psi_n_over_0_25"))
+    if metrics.get("psi_by_feature"):
+        row.psi_by_feature_json = _truncate_json_field(metrics.get("psi_by_feature"))
+    if metrics.get("ks_by_feature"):
+        row.ks_by_feature_json = _truncate_json_field(metrics.get("ks_by_feature"))
+    _set_if_not_none("pred_mean", metrics.get("pred_mean"))
+    _set_if_not_none("pred_std", metrics.get("pred_std"))
+    _set_if_not_none("pred_zero_ratio", metrics.get("pred_zero_ratio"))
+    _set_if_not_none("n_predictions", metrics.get("n_predictions"))
+    if metrics.get("feat_missing"):
+        row.feat_missing_json = _truncate_json_field(metrics.get("feat_missing"))
+    _set_if_not_none("model_run_id", metrics.get("model_run_id"))
+    _set_if_not_none("core_version", metrics.get("core_version"))
     row.status = status
 
 
@@ -260,21 +272,11 @@ async def ml_snapshot_tick() -> None:
                         status=status,
                     )
 
-        # retention cleanup — reuse vnpy_snapshot_retention_days
-        from app.services.app_settings_service import get_runtime_setting
-        retention_days = int(
-            get_runtime_setting(
-                "vnpy_snapshot_retention_days",
-                default=settings.vnpy_snapshot_retention_days,
-            )
-        )
-        cutoff = now - timedelta(days=retention_days)
-        session.execute(
-            sa_delete(MLMetricSnapshot).where(MLMetricSnapshot.trade_date < cutoff)
-        )
-        session.execute(
-            sa_delete(MLPredictionDaily).where(MLPredictionDaily.trade_date < cutoff)
-        )
+        # ml_metric_snapshots / ml_prediction_daily 不做 retention：
+        # 这两张表每个 (策略, trade_date) 一行，回放/历史档案体量小（10 年 ~8K 行），
+        # 但语义上是"按交易日的历史记录"，按 trade_date < cutoff 裁剪会把回放写入
+        # 的 2026-01-01 ~ today-1 的历史曲线点立刻删光（trade_date 是逻辑日，不是
+        # wall-clock 时间）→ 前端 Tab2 策略监控/历史预测回溯只剩近 30 天可见。
         session.commit()
         if written:
             logger.debug("[ml_snapshot] ml_snapshot_tick wrote %d rows", written)

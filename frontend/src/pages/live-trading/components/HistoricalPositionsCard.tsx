@@ -9,7 +9,7 @@
  *   - 当前持仓: 实时 fanout vnpy 节点 (StrategyDetail.positions)
  *   - 本卡片: 任意历史日期, 通过日期选择器查询
  */
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Card, DatePicker, Empty, Spin, Alert } from 'antd'
 import type { Dayjs } from 'dayjs'
@@ -24,6 +24,8 @@ interface Props {
   strategyName: string
   /** 多 gateway 沙盒下显式传入；否则后端按命名约定 fallback */
   gatewayName?: string
+  /** 有数据的交易日列表 (YYYY-MM-DD)；DatePicker 用此 disable 无数据日期 */
+  historyDates?: string[]
 }
 
 function fmt(v: number | null | undefined, digits = 2): string {
@@ -82,10 +84,18 @@ const columns: ResponsiveColumn<HistoricalPosition>[] = [
   },
 ]
 
-const HistoricalPositionsCard: React.FC<Props> = ({ nodeId, engine, strategyName, gatewayName }) => {
-  // 默认昨日（今日 EOD 还没结算）
-  const [selected, setSelected] = useState<Dayjs>(() => dayjs().subtract(1, 'day'))
+const HistoricalPositionsCard: React.FC<Props> = ({
+  nodeId, engine, strategyName, gatewayName, historyDates = [],
+}) => {
+  // 默认最近一个有数据的日期；historyDates 为空则 fallback 昨日
+  const latestDate = historyDates.length > 0 ? historyDates[historyDates.length - 1] : null
+  const [selected, setSelected] = useState<Dayjs>(() =>
+    latestDate ? dayjs(latestDate) : dayjs().subtract(1, 'day')
+  )
   const yyyymmdd = selected.format('YYYYMMDD')
+
+  // DatePicker disabledDate: 无 historyDates 时不限制 (兼容老调用)
+  const availableDatesSet = useMemo(() => new Set(historyDates), [historyDates])
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['historical-positions', nodeId, engine, strategyName, yyyymmdd, gatewayName ?? ''],
@@ -111,6 +121,11 @@ const HistoricalPositionsCard: React.FC<Props> = ({ nodeId, engine, strategyName
             format="YYYY-MM-DD"
             allowClear={false}
             size="small"
+            disabledDate={
+              availableDatesSet.size > 0
+                ? (d) => !availableDatesSet.has(d.format('YYYY-MM-DD'))
+                : undefined
+            }
           />
           {totalMV > 0 && (
             <span style={{ fontSize: 12, color: 'var(--ap-text-muted)' }}>

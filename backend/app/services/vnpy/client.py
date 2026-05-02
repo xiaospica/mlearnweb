@@ -145,6 +145,17 @@ class _PerNodeClient:
     async def get_positions(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/position") or []
 
+    async def get_strategy_positions_history(
+        self, strategy_name: str, yyyymmdd: str, gateway_name: str = "",
+    ) -> List[Dict[str, Any]]:
+        """跨机部署: 跨节点拉指定策略历史日 EOD 持仓快照。"""
+        params = {"gateway_name": gateway_name} if gateway_name else None
+        return await self._request(
+            "GET",
+            f"/api/v1/position/history/{strategy_name}/{yyyymmdd}",
+            params=params,
+        ) or []
+
     async def get_trades(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/trade") or []
 

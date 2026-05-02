@@ -44,16 +44,18 @@ interface Props {
 }
 
 const topkColumns: ColumnsType<TopkEntry> = [
-  { title: '#', dataIndex: 'rank', key: 'rank', width: 48, align: 'center' },
-  { title: '代码', dataIndex: 'instrument', key: 'instrument', width: 110 },
   {
-    title: '名称',
-    dataIndex: 'name',
-    key: 'name',
-    width: 100,
-    render: (v: string | null | undefined, r: TopkEntry) =>
-      v || r.instrument || '—',
+    title: '合约',
+    key: 'instrument',
+    width: 200,
+    render: (_: unknown, r: TopkEntry) => (
+      <span>
+        {r.name && <span style={{ marginRight: 6, color: 'var(--ap-text)' }}>{r.name}</span>}
+        <span style={{ color: 'var(--ap-text-muted)', fontSize: 12 }}>{r.instrument}</span>
+      </span>
+    ),
   },
+  { title: '排名', dataIndex: 'rank', key: 'rank', width: 64, align: 'center', render: (v: number | null) => (v == null ? '—' : `#${v}`) },
   {
     title: '预测分数',
     dataIndex: 'score',
@@ -76,20 +78,24 @@ const topkColumns: ColumnsType<TopkEntry> = [
 
 const allColumns: ColumnsType<AllPredictionEntry> = [
   {
-    title: '#',
+    title: '合约',
+    key: 'instrument',
+    width: 200,
+    render: (_: unknown, r: AllPredictionEntry) => (
+      <span>
+        {r.name && <span style={{ marginRight: 6, color: 'var(--ap-text)' }}>{r.name}</span>}
+        <span style={{ color: 'var(--ap-text-muted)', fontSize: 12 }}>{r.instrument}</span>
+      </span>
+    ),
+  },
+  {
+    title: '排名',
     dataIndex: 'rank',
     key: 'rank',
     width: 64,
     align: 'center',
     sorter: (a, b) => a.rank - b.rank,
-  },
-  { title: '代码', dataIndex: 'instrument', key: 'instrument', width: 110 },
-  {
-    title: '名称',
-    dataIndex: 'name',
-    key: 'name',
-    width: 120,
-    render: (v: string | null, r: AllPredictionEntry) => v || r.instrument,
+    render: (v: number | null) => (v == null ? '—' : `#${v}`),
   },
   {
     title: '预测分数',

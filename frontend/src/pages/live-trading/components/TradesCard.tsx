@@ -229,7 +229,7 @@ const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
           rowKey="date"
           dataSource={aggregated}
           columns={dailyColumns}
-          pagination={false}
+          pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'] }}
           scrollX={650}
         />
       ) : (
@@ -238,7 +238,7 @@ const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
           rowKey={(r) => `${r.tradeid}-${r.vt_symbol}`}
           dataSource={trades}
           columns={detailColumns}
-          pagination={{ pageSize: 50, size: 'small' }}
+          pagination={{ pageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'] }}
           scrollX={680}
         />
       )}

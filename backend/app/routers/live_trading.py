@@ -94,7 +94,7 @@ async def list_strategy_trades(
     "/strategies/{node_id}/{engine}/{name}/positions/{yyyymmdd}",
     response_model=LiveTradingListResponse,
 )
-def get_strategy_positions_on_date(
+async def get_strategy_positions_on_date(
     node_id: str,
     engine: str,
     name: str,
@@ -103,18 +103,30 @@ def get_strategy_positions_on_date(
 ) -> LiveTradingListResponse:
     """重建指定策略在 ``yyyymmdd`` 日 EOD 的持仓快照（含 amount/金额/仓位占比）。
 
-    数据源：vnpy_qmt_sim 的 sim_<account_id>.db 中 sim_trades + daily_merged_all_new.parquet
-    pct_chg 累乘。同机部署假设；跨机部署需后续升级到 vnpy_webtrader endpoint + fanout。
+    路径优先级:
+      1. vnpy webtrader RPC endpoint (跨机部署正确路径)
+      2. fallback 同机直读 sim db (mlearnweb 与 vnpy 同机时的快路径)
     """
     from app.services.vnpy.historical_positions_service import (
         get_strategy_positions_on_date as svc_fn,
+        get_strategy_positions_on_date_via_rpc,
     )
-    rows, warning = svc_fn(name, yyyymmdd, gateway_name=gateway_name)
+    # 1. 优先 RPC (跨机部署正确路径)
+    rows, warning = await get_strategy_positions_on_date_via_rpc(
+        node_id, name, yyyymmdd, gateway_name=gateway_name,
+    )
+    if rows is not None:
+        return _ok(rows, warning=warning)
+
+    # 2. fallback 同机直读
+    rows, warning2 = svc_fn(name, yyyymmdd, gateway_name=gateway_name)
     if rows is None:
         return LiveTradingListResponse(
-            success=False, data=None, warning=warning, message=warning or "",
+            success=False, data=None,
+            warning=warning2 or warning,
+            message=warning2 or warning or "",
         )
-    return _ok(rows, warning=warning)
+    return _ok(rows, warning=warning2)
 
 
 @router.get("/corp-actions", response_model=LiveTradingListResponse)

@@ -21,21 +21,24 @@ interface Props {
 
 const columns: ColumnsType<TopkEntry> = [
   {
+    // 合约列与"持仓表"PositionsTable 风格一致 (名称 + 灰色 vt_symbol 单元格内合并)
+    title: '合约',
+    key: 'instrument',
+    width: 200,
+    render: (_: unknown, r: TopkEntry) => (
+      <span>
+        {r.name && <span style={{ marginRight: 6, color: 'var(--ap-text)' }}>{r.name}</span>}
+        <span style={{ color: 'var(--ap-text-muted)', fontSize: 12 }}>{r.instrument}</span>
+      </span>
+    ),
+  },
+  {
     title: '推理排名',
     dataIndex: 'rank',
     key: 'rank',
     width: 80,
     align: 'center',
     render: (v: number | null | undefined) => (v == null ? '—' : `#${v}`),
-  },
-  { title: '代码', dataIndex: 'instrument', key: 'instrument', width: 110 },
-  {
-    title: '名称',
-    dataIndex: 'name',
-    key: 'name',
-    width: 100,
-    render: (v: string | null | undefined, r: TopkEntry) =>
-      v || r.instrument || '—',
   },
   {
     title: '预测分数',

@@ -25,7 +25,6 @@ import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
 import CorpActionsCard from './components/CorpActionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
-import HistoricalPositionsCard from './components/HistoricalPositionsCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
 import StrategyActions from './components/StrategyActions'
@@ -240,12 +239,6 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                   >
                     <PositionsTable rows={detail.positions} />
                   </Card>
-                  <HistoricalPositionsCard
-                    nodeId={nodeId}
-                    engine={engine}
-                    strategyName={name}
-                    gatewayName={detail.gateway_name || undefined}
-                  />
                   {engine === 'MlStrategy' && (
                     <LatestTopkCard nodeId={nodeId} strategyName={name} />
                   )}
@@ -297,7 +290,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
               key: 'monitor',
               label: '策略监控',
               children: (
-                <MlMonitorPanel nodeId={nodeId} strategyName={name} />
+                <MlMonitorPanel
+                  nodeId={nodeId}
+                  engine={engine}
+                  strategyName={name}
+                  gatewayName={detail.gateway_name || undefined}
+                />
               ),
             },
           ]}

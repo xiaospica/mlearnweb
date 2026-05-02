@@ -1,20 +1,14 @@
-"""历史持仓浏览 service — 从 vnpy_qmt_sim sim db 重建任意日期 EOD 持仓.
+"""历史持仓浏览 service — 重建任意日期 EOD 持仓.
 
-输入:
-  - strategy_name (映射到 sim_<account_id>.db, account_id 通常 == gateway_name)
-  - target_date (YYYYMMDD)
-输出:
-  - List[{vt_symbol, name, volume, cost_price, market_value, weight}]
+跨机部署支持 (优先 RPC, fallback 同机直读):
+  1. 优先调 vnpy webtrader endpoint /api/v1/position/history/{strategy}/{yyyymmdd}
+     节点端用本地 sim db 重建。这是跨机部署的正确路径。
+  2. fallback 同机直读 sim db 文件 (mlearnweb 与 vnpy 同机时的快路径)。
 
 重建算法 (与 vnpy_qmt_sim settle 模型同源, 见 td.py:602 settle_end_of_day):
   1. 按 datetime 升序遍历 sim_trades 累计 (volume, cost) 到 target_date EOD
-     - LONG: vol += v, cost = (old_v×old_c + v×p) / new_v
-     - SHORT: vol -= v (cost 不变, 平仓不影响成本)
   2. 每个交易日结束 cost *= (1 + pct_chg_today/100), 模拟 settle mark-to-market
   3. 输出 EOD (volume>0) 持仓 + market_value (vol×cost) + weight (持仓内部 sum=1)
-
-跨机部署不可用 — 需 vnpy_webtrader 暴露 /history endpoint 后 fanout, 当前
-单机直读 sim db 文件; 不存在 sim db 时返空 + warning.
 """
 from __future__ import annotations
 
@@ -28,9 +22,52 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from app.core.config import settings
+from app.services.vnpy.client import get_vnpy_client, VnpyClientError
 from app.services.vnpy.live_trading_service import _resolve_stock_name, get_stock_name_map
 
 logger = logging.getLogger(__name__)
+
+
+async def get_strategy_positions_on_date_via_rpc(
+    node_id: str,
+    strategy_name: str,
+    target_date_str: str,
+    gateway_name: Optional[str] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """跨机部署优先路径: 通过 vnpy webtrader endpoint 拉历史持仓.
+
+    Returns (positions_list, warning). None list = RPC 失败/不可用,
+    上层应回退到同机直读 sim db 路径。
+    """
+    client = get_vnpy_client()
+    if node_id not in client.node_ids:
+        return None, f"未知节点: {node_id}"
+    per_node = client.get_per_node(node_id) if hasattr(client, "get_per_node") else None
+    if per_node is None:
+        # 通过 _PerNodeClient 调用; client 的 get_strategy_positions_history 是 per-node 单跑
+        for n in getattr(client, "nodes", []):
+            if n.node_id == node_id:
+                # 复用 client 内部的 _PerNodeClient (通过 fanout 拿单节点)
+                # 简化: 直接用 _request 风格调用
+                try:
+                    sub = client._clients[node_id] if hasattr(client, "_clients") else None
+                    if sub is None:
+                        return None, "vnpy client 未暴露单节点入口"
+                    rows = await sub.get_strategy_positions_history(
+                        strategy_name, target_date_str, gateway_name=gateway_name or "",
+                    )
+                    # 节点端不做 enrichment, 这里补上中文名
+                    name_map = get_stock_name_map()
+                    for r in rows:
+                        r.setdefault("name", _resolve_stock_name(r.get("vt_symbol", ""), name_map))
+                    return rows, None
+                except VnpyClientError as e:
+                    return None, f"RPC 失败: {e}"
+                except Exception as e:
+                    logger.warning(f"[history_positions] RPC err: {e}")
+                    return None, f"RPC 异常: {e}"
+        return None, f"node_id={node_id} 不在 client.nodes"
+    return None, "RPC 不支持"
 
 
 def _vt_to_ts(vt: str) -> str:

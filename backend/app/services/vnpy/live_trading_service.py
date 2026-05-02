@@ -926,6 +926,15 @@ async def snapshot_tick() -> None:
                 # only record while strategy is active (either inited or trading)
                 if not (s.get("inited") or s.get("trading")):
                     continue
+                # 回放进行中跳过 wall-clock 心跳写入 — 避免污染曲线:
+                # vnpy 启动后 OmsEngine 状态从 init_cash 1M 异步演化到回放完成的真实值，
+                # 这段过渡期 mlearnweb 写入 db 会让前端曲线在切换点出现 1M→真实值的跳变。
+                # 只在 replay_status="completed" (或 strategy 没有该字段, 即非 ML 策略)
+                # 时才记录 account_equity 心跳, 历史曲线由 vnpy 端 replay_settle 直写。
+                _vars = s.get("variables") or {}
+                _replay_status = _vars.get("replay_status")
+                if _replay_status is not None and _replay_status != "completed":
+                    continue
                 engine_name = s.get("engine", "")
                 name = s.get("name", "")
                 _, gateway_name = _infer_strategy_mode(s, node_mode)
