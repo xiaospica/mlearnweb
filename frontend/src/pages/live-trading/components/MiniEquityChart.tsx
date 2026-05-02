@@ -49,7 +49,7 @@ const MiniEquityChart: React.FC<Props> = ({ points, height = 32 }) => {
             type: 'line',
             data: values,
             showSymbol: false,
-            smooth: true,
+            smooth: false,
             lineStyle: { width: 1.5, color },
             areaStyle: {
               color: {

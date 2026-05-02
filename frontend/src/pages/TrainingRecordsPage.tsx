@@ -49,7 +49,7 @@ const MiniReturnChart: React.FC<{ data?: { values: number[]; final_return: numbe
             type: 'line',
             data: values,
             showSymbol: false,
-            smooth: true,
+            smooth: false,
             lineStyle: { width: 1.5, color: isPositive ? '#52c41a' : '#ff4d4f' },
             areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: isPositive ? 'rgba(82,196,26,0.2)' : 'rgba(255,77,79,0.2)' }, { offset: 1, color: 'rgba(0,0,0,0)' }] } },
           }],
