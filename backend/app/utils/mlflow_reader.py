@@ -102,6 +102,41 @@ class MLFlowReader:
                 })
         return sorted(experiments, key=lambda x: x.get("creation_time", 0), reverse=True)
 
+    def find_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """跨 experiment 扫描查找 run_id，返回所属 experiment_id + 基本元信息。
+
+        mlruns 目录结构是 ``{mlruns_dir}/{experiment_id}/{run_id}/meta.yaml``，
+        所以只需要遍历每个实验目录看是否有匹配 run_id 的子目录。命中即返回，
+        未命中返回 None。
+
+        前端「实验浏览」的「按 run_id 跳转报告」功能消费此接口。
+        """
+        if not self.mlruns_dir.exists():
+            return None
+        for exp_dir in self.mlruns_dir.iterdir():
+            if not exp_dir.is_dir():
+                continue
+            exp_meta_path = exp_dir / "meta.yaml"
+            if not exp_meta_path.exists():
+                continue
+            run_dir = exp_dir / run_id
+            run_meta_path = run_dir / "meta.yaml"
+            if not run_dir.is_dir() or not run_meta_path.exists():
+                continue
+            exp_meta = self._load_yaml(exp_meta_path)
+            run_meta = self._load_yaml(run_meta_path)
+            return {
+                "experiment_id": exp_meta.get("experiment_id", exp_dir.name),
+                "experiment_name": exp_meta.get("name", exp_dir.name),
+                "run_id": run_id,
+                "run_name": run_meta.get("run_name", ""),
+                "status": self.STATUS_MAP.get(run_meta.get("status", -1), "UNKNOWN"),
+                "start_time": run_meta.get("start_time"),
+                "end_time": run_meta.get("end_time"),
+                "lifecycle_stage": run_meta.get("lifecycle_stage", "active"),
+            }
+        return None
+
     def get_experiment(self, experiment_id: str) -> Optional[Dict[str, Any]]:
         exp_dir = self.mlruns_dir / experiment_id
         meta_path = exp_dir / "meta.yaml"

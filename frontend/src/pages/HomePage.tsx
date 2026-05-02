@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Tooltip, Alert, Button, Divider, Select } from 'antd'
-import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ReloadOutlined, CodeOutlined, DatabaseOutlined, ThunderboltOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { App as AntApp, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Tooltip, Alert, Button, Divider, Select } from 'antd'
+import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ReloadOutlined, CodeOutlined, DatabaseOutlined, ThunderboltOutlined, UnorderedListOutlined, FileSearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
+import { runService } from '@/services/runService'
 import type { Experiment } from '@/types'
 import PageContainer from '@/components/layout/PageContainer'
 import MetricCardGrid from '@/components/responsive/MetricCardGrid'
@@ -15,6 +16,12 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = 
   active: { color: '#52c41a', icon: <CheckCircleOutlined /> },
   deleted: { color: '#ff4d4f', icon: <CloseCircleOutlined /> },
 }
+
+/** MLflow run_id 是 32 位 hex；这里允许 ≥16 hex 以兼容截断粘贴。 */
+const RUN_ID_RE = /^[a-f0-9]{16,}$/i
+
+const isRunIdLike = (value: string): boolean =>
+  RUN_ID_RE.test(value.trim())
 
 const UsageGuide: React.FC = () => (
   <Card
@@ -114,18 +121,50 @@ const UsageGuide: React.FC = () => (
 
 const HomePage: React.FC = () => {
   const [search, setSearch] = useState('')
+  const [runIdLooking, setRunIdLooking] = useState(false)
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
+  const { message } = AntApp.useApp()
+
+  /** 跨实验按 run_id 查找 → 直接跳报告页；失败则 toast 提示。 */
+  const handleRunIdSearch = async (rawValue: string) => {
+    const rid = rawValue.trim()
+    if (!rid) return
+    if (rid.length < 8) {
+      message.warning('run_id 至少 8 位字符')
+      return
+    }
+    setRunIdLooking(true)
+    try {
+      const res = await runService.findById(rid)
+      if (res.success && res.data) {
+        navigate(`/report/${res.data.experiment_id}/${res.data.run_id}`)
+      } else {
+        message.error(res.message || `未找到 run_id=${rid}`)
+      }
+    } catch (e) {
+      message.error(`查找失败：${(e as Error)?.message || e}`)
+    } finally {
+      setRunIdLooking(false)
+    }
+  }
+
+  // 输入是 run_id 时不要发实验列表查询：(1) 后端按名字 like 搜，hex 串大概率
+  // 0 命中，会让搜索框 + 数据卡片消失；(2) run_id 走专门的 lookup 端点。
+  const treatAsRunId = isRunIdLike(search)
+  const expSearchTerm = treatAsRunId ? '' : search
 
   const { data: expData, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['experiments', search],
-    queryFn: () => experimentService.list(search),
+    queryKey: ['experiments', expSearchTerm],
+    queryFn: () => experimentService.list(expSearchTerm),
     retry: 1,
     refetchOnWindowFocus: true,
   })
 
   const experiments = expData?.data?.items || []
   const total = expData?.data?.total || 0
+  // 是否处于「真没数据」状态（首次/全量为空），与「搜不到」区分
+  const reallyEmpty = !isLoading && !isError && experiments.length === 0 && expSearchTerm === ''
+  const noMatch = !isLoading && !isError && experiments.length === 0 && expSearchTerm !== ''
 
   return (
     <PageContainer
@@ -167,61 +206,78 @@ const HomePage: React.FC = () => {
         />
       ) : null}
 
-      {experiments.length > 0 && !isError && (
-        <>
-          <MetricCardGrid
-            style={{ marginBottom: 20 }}
-            items={[
-              {
-                key: 'total',
-                label: '总实验数',
-                value: total,
-                tone: 'primary',
-                icon: <ExperimentOutlined />,
-              },
-              {
-                key: 'active',
-                label: '活跃实验',
-                value: experiments.filter((e) => e.lifecycle_stage === 'active').length,
-                tone: 'success',
-                icon: <CheckCircleOutlined />,
-              },
-              {
-                key: 'runs',
-                label: '总运行次数',
-                value: experiments.reduce((sum, e) => sum + e.run_count, 0),
-                tone: 'primary',
-                icon: <LoadingOutlined />,
-              },
-              {
-                key: 'avg',
-                label: '平均运行数',
-                value: `${total > 0 ? Math.round(experiments.reduce((sum, e) => sum + e.run_count, 0) / total) : 0}/exp`,
-                tone: 'warning',
-              },
-            ]}
-          />
+      {/* 搜索框始终显示（即使 0 实验也要让用户能粘贴 run_id 跳转）。
+          输入命中 run_id 格式时前缀图标变蓝、右侧出现「跳转」按钮。 */}
+      {!isError && (
+        <Input.Search
+          placeholder="搜索实验名 / 粘贴 run_id 跳转报告"
+          prefix={
+            treatAsRunId
+              ? <FileSearchOutlined style={{ color: 'var(--ap-brand-primary)' }} />
+              : <SearchOutlined style={{ color: '#9ca3af' }} />
+          }
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onSearch={(value) => {
+            if (isRunIdLike(value)) handleRunIdSearch(value)
+          }}
+          enterButton={treatAsRunId ? '跳转' : false}
+          loading={runIdLooking}
+          allowClear
+          style={{ width: '100%', maxWidth: 480, marginBottom: 20 }}
+        />
+      )}
 
-          <Input
-            placeholder="搜索实验名称..."
-            prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            allowClear
-            style={{
-              maxWidth: 400,
-              marginBottom: 20,
-            }}
-          />
-        </>
+      {experiments.length > 0 && !isError && (
+        <MetricCardGrid
+          style={{ marginBottom: 20 }}
+          items={[
+            {
+              key: 'total',
+              label: '总实验数',
+              value: total,
+              tone: 'primary',
+              icon: <ExperimentOutlined />,
+            },
+            {
+              key: 'active',
+              label: '活跃实验',
+              value: experiments.filter((e) => e.lifecycle_stage === 'active').length,
+              tone: 'success',
+              icon: <CheckCircleOutlined />,
+            },
+            {
+              key: 'runs',
+              label: '总运行次数',
+              value: experiments.reduce((sum, e) => sum + e.run_count, 0),
+              tone: 'primary',
+              icon: <LoadingOutlined />,
+            },
+            {
+              key: 'avg',
+              label: '平均运行数',
+              value: `${total > 0 ? Math.round(experiments.reduce((sum, e) => sum + e.run_count, 0) / total) : 0}/exp`,
+              tone: 'warning',
+            },
+          ]}
+        />
       )}
 
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 80 }}>
           <Spin size="large" />
         </div>
-      ) : isError ? null : experiments.length === 0 ? (
+      ) : isError ? null : reallyEmpty ? (
         <UsageGuide />
+      ) : noMatch ? (
+        <Empty
+          description={
+            treatAsRunId
+              ? `按回车或点击「跳转」查找 run_id ${search.slice(0, 12)}…`
+              : `没有名称匹配「${search}」的实验`
+          }
+          style={{ padding: 60 }}
+        />
       ) : (
         <Row gutter={[20, 20]}>
           {experiments.map((exp: Experiment) => (

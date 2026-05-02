@@ -63,6 +63,23 @@ def list_runs(
     )
 
 
+@router.get("/lookup", response_model=ApiResponse)
+def lookup_run(
+    run_id: str = Query(..., description="run_id（不需要 exp_id）"),
+):
+    """跨 experiment 查找 run_id → 返回 experiment_id + 基本元信息。
+
+    注意：本路由必须**声明在 ``/{run_id}`` 之前**，否则 ``/lookup`` 会被
+    匹配为 ``run_id="lookup"`` 走通用详情路由（且会因为缺 exp_id 报 422）。
+
+    前端「实验浏览」的「按 run_id 跳转报告」功能消费此接口。
+    """
+    found = mlflow_reader.find_run_by_id(run_id.strip())
+    if not found:
+        return ApiResponse(success=False, message=f"未找到 run_id={run_id}", data=None)
+    return ApiResponse(success=True, data=found)
+
+
 @router.get("/{run_id}", response_model=ApiResponse)
 def get_run_detail(
     run_id: str,
