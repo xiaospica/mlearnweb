@@ -16,7 +16,7 @@ import {
   Typography,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { tuningService } from '@/services/tuningService'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -69,9 +69,12 @@ function valueColor(
 interface StrategyCardProps {
   item: StrategySummary
   onClick: () => void
+  /** 用于支持右键「新标签页打开」的 SPA URL —— 卡内 strategy_name 标题
+      会渲染成 <Link to={detailHref}>，浏览器接管右键菜单。 */
+  detailHref: string
 }
 
-const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
+const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick, detailHref }) => {
   const label = (item.source_label || 'unavailable') as SourceLabel
   const isOffline = Boolean(item.node_offline)
   const badgeStatus: 'processing' | 'default' | 'warning' | 'error' =
@@ -130,7 +133,14 @@ const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick }) => {
             >
               {modeIcon} {modeText}
             </span>
-            {item.strategy_name}
+            {/* 标题渲染为 SPA Link，使浏览器右键菜单能识别这个路径 */}
+            <Link
+              to={detailHref}
+              onClick={(e) => e.stopPropagation()}
+              style={{ color: 'inherit', textDecoration: 'none' }}
+            >
+              {item.strategy_name}
+            </Link>
           </div>
           <Space size={4} style={{ marginTop: 4 }}>
             <Tag color="geekblue" style={{ margin: 0 }}>
@@ -362,18 +372,18 @@ const LiveTradingPage: React.FC = () => {
         </Card>
       ) : (
         <Row gutter={[16, 16]}>
-          {strategies.map((s) => (
-            <Col key={`${s.node_id}-${s.engine}-${s.strategy_name}`} xs={24} md={12} xl={8}>
-              <StrategyCard
-                item={s}
-                onClick={() =>
-                  navigate(
-                    `/live-trading/${encodeURIComponent(s.node_id)}/${encodeURIComponent(s.engine)}/${encodeURIComponent(s.strategy_name)}`,
-                  )
-                }
-              />
-            </Col>
-          ))}
+          {strategies.map((s) => {
+            const detailHref = `/live-trading/${encodeURIComponent(s.node_id)}/${encodeURIComponent(s.engine)}/${encodeURIComponent(s.strategy_name)}`
+            return (
+              <Col key={`${s.node_id}-${s.engine}-${s.strategy_name}`} xs={24} md={12} xl={8}>
+                <StrategyCard
+                  item={s}
+                  detailHref={detailHref}
+                  onClick={() => navigate(detailHref)}
+                />
+              </Col>
+            )
+          })}
         </Row>
       )}
 

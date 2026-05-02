@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { App as AntApp, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Tooltip, Alert, Button, Divider, Select } from 'antd'
 import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ReloadOutlined, CodeOutlined, DatabaseOutlined, ThunderboltOutlined, UnorderedListOutlined, FileSearchOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { experimentService } from '@/services/experimentService'
 import { runService } from '@/services/runService'
@@ -282,9 +282,15 @@ const HomePage: React.FC = () => {
         <Row gutter={[20, 20]}>
           {experiments.map((exp: Experiment) => (
             <Col xs={24} sm={12} lg={8} xl={6} key={exp.experiment_id}>
+              {/* 用 <Link> 包裹卡片：普通点击仍走 SPA 路由（不刷整页），
+                  右键 / Ctrl+点击 / 中键点击让浏览器接管打开新标签页。
+                  color:inherit 防止 a 默认蓝色把卡片内文字染色。 */}
+              <Link
+                to={`/experiments/${exp.experiment_id}`}
+                style={{ color: 'inherit', textDecoration: 'none', display: 'block', height: '100%' }}
+              >
               <Card
                 hoverable
-                onClick={() => navigate(`/experiments/${exp.experiment_id}`)}
                 style={{
                   height: '100%',
                   background: 'var(--ap-panel)',
@@ -352,6 +358,7 @@ const HomePage: React.FC = () => {
                   </div>
                 </Space>
               </Card>
+              </Link>
             </Col>
           ))}
         </Row>

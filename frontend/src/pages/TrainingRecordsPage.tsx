@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { App, Card, Input, Row, Col, Typography, Tag, Space, Spin, Empty, Statistic, Badge, Button, Select, Tooltip, Alert, Modal, Popconfirm, Segmented, Collapse, Dropdown, Menu, Pagination } from 'antd'
 import { SearchOutlined, ExperimentOutlined, ClockCircleOutlined, CheckCircleOutlined, ReloadOutlined, ThunderboltOutlined, DatabaseOutlined, UnorderedListOutlined, AppstoreOutlined, DeleteOutlined, ExclamationCircleOutlined, FilterOutlined, FundOutlined, SyncOutlined, RocketOutlined, EditOutlined, FileTextOutlined, SaveOutlined, StarOutlined, StarFilled, FolderOutlined, FolderAddOutlined, FormOutlined, PlusOutlined, CheckSquareFilled, BorderOutlined, MoreOutlined, FolderOpenOutlined, BarChartOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import ReactECharts from 'echarts-for-react'
 import { trainingService } from '@/services/trainingService'
@@ -490,9 +490,14 @@ const TrainingRecordsPage: React.FC = () => {
       render: (name: string, record: TrainingRecord) => (
         <Space size={4}>
           {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 12 }} />}
-          <a onClick={() => navigate(`/training/${record.id}`)} style={{ color: '#1677ff', fontWeight: 500, fontSize: 13 }}>
+          {/* 用 Link 而非 onClick，让浏览器接管右键菜单 */}
+          <Link
+            to={`/training/${record.id}`}
+            onClick={(e) => e.stopPropagation()}
+            style={{ color: '#1677ff', fontWeight: 500, fontSize: 13 }}
+          >
             {name}
-          </a>
+          </Link>
           {!record.is_favorite && (
             <Tooltip title="收藏">
               <StarOutlined
@@ -1001,7 +1006,13 @@ const TrainingRecordsPage: React.FC = () => {
                             <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />
                             <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                             <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {record.name}
+                              <Link
+                                to={`/training/${record.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ color: 'inherit', textDecoration: 'none' }}
+                              >
+                                {record.name}
+                              </Link>
                             </Title>
                             <Tooltip title="取消收藏">
                               <StarFilled
@@ -1191,7 +1202,13 @@ const TrainingRecordsPage: React.FC = () => {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                   <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                                   <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {record.name}
+                                    <Link
+                                      to={`/training/${record.id}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      style={{ color: 'inherit', textDecoration: 'none' }}
+                                    >
+                                      {record.name}
+                                    </Link>
                                   </Title>
                                   {!record.is_favorite && (
                                     <Tooltip title="收藏">
@@ -1373,7 +1390,13 @@ const TrainingRecordsPage: React.FC = () => {
                             {record.is_favorite && <StarFilled style={{ color: '#faad14', fontSize: 14, flexShrink: 0 }} />}
                             <Text type="secondary" style={{ fontSize: 11, fontFamily: "'SF Mono', 'Consolas', monospace", flexShrink: 0 }}>#{record.id}</Text>
                             <Title level={5} style={{ color: 'var(--ap-text)', margin: 0, lineHeight: 1.3, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {record.name}
+                              <Link
+                                to={`/training/${record.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ color: 'inherit', textDecoration: 'none' }}
+                              >
+                                {record.name}
+                              </Link>
                             </Title>
                             {!record.is_favorite && (
                               <Tooltip title="收藏">
