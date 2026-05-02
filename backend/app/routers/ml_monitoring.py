@@ -230,17 +230,28 @@ async def prediction_latest_summary(
 ) -> LiveTradingListResponse:
     """优先穿透到 vnpy 节点拿实时; 失败则退化用 SQLite 最新缓存.
 
-    这让 UI 在 trader 未运行(只有 SQLite 历史数据)时也能拿到 topk.
+    字段级 merge: vnpy MetricsCache 的 score_histogram 在 batch 回放模式下
+    是空 [] (vendor batch 不写 metrics.json), 但 mlearnweb db 已通过自动
+    backfill 补齐 (ml_metrics_backfill_service)。这里 vnpy 字段为空时从
+    db 兜底补, 保证前端"预测分数直方图（最新）"等卡片有数据。
     """
     client = get_vnpy_client()
+    cached = agg_svc.get_latest_prediction(db, node_id, strategy_name)
     try:
         data = await client.get_ml_prediction_summary(node_id, strategy_name)
-        return _ok(data)
     except VnpyClientError as e:
-        cached = agg_svc.get_latest_prediction(db, node_id, strategy_name)
         if cached is not None:
             return _ok(cached, warning=f"vnpy 穿透失败({e}), 已退化到 SQLite 最新记录")
         raise _fail(str(e))
+
+    # 字段级 fallback: vnpy data 字段空 → 用 db cached 同名字段补
+    if cached and isinstance(data, dict):
+        for field in ("score_histogram", "topk", "pred_mean", "pred_std", "n_symbols", "model_run_id"):
+            v = data.get(field)
+            empty = v is None or v == [] or v == "" or (field == "n_symbols" and v == 0)
+            if empty and cached.get(field):
+                data[field] = cached[field]
+    return _ok(data)
 
 
 # ---------------------------------------------------------------------------
