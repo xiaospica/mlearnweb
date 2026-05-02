@@ -54,12 +54,23 @@ def _metric_row_to_dict(row: MLMetricSnapshot) -> Dict[str, Any]:
 
 
 def _prediction_row_to_dict(row: MLPredictionDaily) -> Dict[str, Any]:
+    # vnpy 端 _persist_replay_ml_snapshot 写入 topk_list 时只填 (rank, instrument, score),
+    # 没填 name → 前端 LatestTopkCard / 历史预测回溯的合约列只显示代码不显示名称。
+    # 这里读出后用 stock_list.parquet 反查名称, 与 /prediction/all/ 的 enrichment 一致。
+    topk_raw = _safe_json(row.topk_json) or []
+    if topk_raw:
+        name_map = get_stock_name_map()
+        for entry in topk_raw:
+            if isinstance(entry, dict) and not entry.get("name"):
+                ts = str(entry.get("instrument", ""))
+                if ts and ts in name_map:
+                    entry["name"] = name_map[ts]
     return {
         "node_id": row.node_id,
         "engine": row.engine,
         "strategy_name": row.strategy_name,
         "trade_date": row.trade_date.strftime("%Y-%m-%d") if row.trade_date else None,
-        "topk": _safe_json(row.topk_json) or [],
+        "topk": topk_raw,
         "score_histogram": _safe_json(row.score_histogram_json) or [],
         "n_symbols": row.n_symbols,
         "coverage_ratio": row.coverage_ratio,
