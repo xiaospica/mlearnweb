@@ -107,7 +107,12 @@ def _backfill_one_strategy(
     close_map: Dict[Tuple[str, pd.Timestamp], float],
     trade_dates: List[pd.Timestamp],
 ) -> Dict[str, int]:
-    """对单只策略做 backfill, 返 (n_metric_updated, n_pred_updated)."""
+    """对单只策略做 backfill, 返 (n_metric_updated, n_pred_updated).
+
+    优先级:
+      1. 读 metrics.json (vnpy batch 现已写完整 metrics — 含 IC/PSI/直方图等)
+      2. fallback 从 predictions.parquet 算 (兼容旧 batch 产物没 metrics.json)
+    """
     base = output_root / strategy_name
     if not base.exists():
         return {"metric": 0, "prediction": 0}
@@ -126,6 +131,16 @@ def _backfill_one_strategy(
             day_end = day_start + timedelta(days=1)
         except Exception:
             continue
+
+        # 1. 优先读 metrics.json (新 batch 模式产物)
+        metrics_path = day_dir / "metrics.json"
+        metrics_json: Dict[str, Any] = {}
+        if metrics_path.exists():
+            try:
+                metrics_json = json.loads(metrics_path.read_text(encoding="utf-8"))
+            except Exception:
+                metrics_json = {}
+
         try:
             pred = pd.read_parquet(pred_path)
         except Exception:
@@ -136,11 +151,21 @@ def _backfill_one_strategy(
         scores = pred["score"] if "score" in pred.columns else pred.iloc[:, 0]
         stats = _compute_pred_stats(scores)
         histogram_json = json.dumps(_compute_score_histogram(scores), ensure_ascii=False)
+        # metrics.json 优先 (含 PSI / KS / IC 等 backfill 算不到的)
+        psi_mean = metrics_json.get("psi_mean")
+        psi_max = metrics_json.get("psi_max")
+        psi_n = metrics_json.get("psi_n_over_0_25")
+        psi_by_feature_str = json.dumps(metrics_json.get("psi_by_feature") or {}, ensure_ascii=False) if metrics_json.get("psi_by_feature") else None
+        ks_by_feature_str = json.dumps(metrics_json.get("ks_by_feature") or {}, ensure_ascii=False) if metrics_json.get("ks_by_feature") else None
+        feat_missing_str = json.dumps(metrics_json.get("feat_missing") or {}, ensure_ascii=False) if metrics_json.get("feat_missing") else None
+        ic_from_metrics = metrics_json.get("ic")
+        rank_ic_from_metrics = metrics_json.get("rank_ic")
 
-        # IC 计算: 需要 forward 11d return
-        ic_val: Optional[float] = None
-        rank_ic_val: Optional[float] = None
-        if close_map and trade_dates:
+        # IC 计算: 优先 metrics.json (vnpy 端用 dataset.label 算的更准),
+        # 没有再 fallback 自己算 forward 11d return
+        ic_val: Optional[float] = ic_from_metrics
+        rank_ic_val: Optional[float] = rank_ic_from_metrics
+        if (ic_val is None or rank_ic_val is None) and close_map and trade_dates:
             day_ts = pd.Timestamp(day)
             t1 = _next_trade_day(trade_dates, day_ts, 1)
             t12 = _next_trade_day(trade_dates, day_ts, _FORWARD_DAYS + 1)
@@ -170,6 +195,7 @@ def _backfill_one_strategy(
                         rank_ic_val = rank_ic
 
         # UPDATE ml_metric_snapshots: 仅在原值为 NULL 时填充 (幂等)
+        # 含 PSI / KS / feat_missing — metrics.json 提供时一并填
         cur = session.connection().connection.cursor()
         n = cur.execute(
             """UPDATE ml_metric_snapshots SET
@@ -178,10 +204,28 @@ def _backfill_one_strategy(
                    pred_zero_ratio = COALESCE(pred_zero_ratio, ?),
                    n_predictions = COALESCE(NULLIF(n_predictions, 0), ?),
                    ic = COALESCE(ic, ?),
-                   rank_ic = COALESCE(rank_ic, ?)
+                   rank_ic = COALESCE(rank_ic, ?),
+                   psi_mean = COALESCE(psi_mean, ?),
+                   psi_max = COALESCE(psi_max, ?),
+                   psi_n_over_0_25 = COALESCE(psi_n_over_0_25, ?),
+                   psi_by_feature_json = CASE
+                       WHEN psi_by_feature_json IS NULL OR psi_by_feature_json = '{}' THEN COALESCE(?, psi_by_feature_json)
+                       ELSE psi_by_feature_json
+                   END,
+                   ks_by_feature_json = CASE
+                       WHEN ks_by_feature_json IS NULL OR ks_by_feature_json = '{}' THEN COALESCE(?, ks_by_feature_json)
+                       ELSE ks_by_feature_json
+                   END,
+                   feat_missing_json = CASE
+                       WHEN feat_missing_json IS NULL OR feat_missing_json = '{}' THEN COALESCE(?, feat_missing_json)
+                       ELSE feat_missing_json
+                   END
                WHERE strategy_name = ? AND trade_date >= ? AND trade_date < ?""",
             (stats["pred_mean"], stats["pred_std"], stats["pred_zero_ratio"], stats["n_predictions"],
-             ic_val, rank_ic_val, strategy_name, day_start, day_end),
+             ic_val, rank_ic_val,
+             psi_mean, psi_max, psi_n,
+             psi_by_feature_str, ks_by_feature_str, feat_missing_str,
+             strategy_name, day_start, day_end),
         ).rowcount
         n_metric += n
 
