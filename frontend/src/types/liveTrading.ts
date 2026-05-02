@@ -33,6 +33,18 @@ export interface LivePosition {
   pnl: number | null
   yd_volume?: number | null
   frozen?: number | null
+  market_value?: number  // 后端算: volume × cost_price + pnl
+  weight?: number        // 后端算: market_value / total_market_value (持仓占比)
+}
+
+/** 历史持仓快照 (从 sim_trades 重建任意 yyyymmdd EOD 持仓) */
+export interface HistoricalPosition {
+  vt_symbol: string
+  name?: string | null
+  volume: number
+  cost_price: number  // 含 settle 阶段 pct_chg 累乘的 mark price
+  market_value: number  // volume × cost_price
+  weight: number  // 持仓内部 sum=1
 }
 
 export interface DeleteRecordsStats {

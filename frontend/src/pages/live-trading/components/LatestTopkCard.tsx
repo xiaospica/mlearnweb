@@ -20,7 +20,14 @@ interface Props {
 }
 
 const columns: ColumnsType<TopkEntry> = [
-  { title: '#', dataIndex: 'rank', key: 'rank', width: 48, align: 'center' },
+  {
+    title: '推理排名',
+    dataIndex: 'rank',
+    key: 'rank',
+    width: 80,
+    align: 'center',
+    render: (v: number | null | undefined) => (v == null ? '—' : `#${v}`),
+  },
   { title: '代码', dataIndex: 'instrument', key: 'instrument', width: 110 },
   {
     title: '名称',

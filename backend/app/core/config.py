@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     # 单机部署时通常与 vnpy_qmt_sim 共用同一目录。
     daily_merged_root: str = r"D:\vnpy_data\snapshots\merged"
 
+    # vnpy_qmt_sim trading_state 目录（含 sim_<account_id>.db）。
+    # 历史持仓浏览 endpoint 直读此处的 sim_trades 重建任意日期 EOD 持仓。
+    # 同机部署假设：mlearnweb backend 与 vnpy 同机；跨机部署需后续升级到
+    # vnpy_webtrader 暴露 /api/v1/positions/history 接口 + mlearnweb fanout。
+    vnpy_sim_db_root: str = r"F:\Quant\vnpy\vnpy_strategy_dev\vnpy_qmt_sim\.trading_state"
+
+    # 历史持仓重建用的活动 daily_merged_all_new.parquet (含 pct_chg / close)
+    daily_merged_all_path: str = r"D:\vnpy_data\stock_data\daily_merged_all_new.parquet"
+
     # Phase 3B: deployment 同步周期（秒）。10 分钟扫描一次 vnpy 节点策略并
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
     deployment_sync_interval_seconds: int = 600

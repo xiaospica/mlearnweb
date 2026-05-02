@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -87,6 +87,33 @@ async def list_strategy_trades(
 ) -> LiveTradingListResponse:
     """指定策略的成交记录（当前会话内，按 datetime 倒序）。"""
     rows, warning = await svc.list_strategy_trades(node_id, engine, name)
+    return _ok(rows, warning=warning)
+
+
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/positions/{yyyymmdd}",
+    response_model=LiveTradingListResponse,
+)
+def get_strategy_positions_on_date(
+    node_id: str,
+    engine: str,
+    name: str,
+    yyyymmdd: str,
+    gateway_name: Optional[str] = Query(None, description="多 gateway 沙盒下指定 gateway"),
+) -> LiveTradingListResponse:
+    """重建指定策略在 ``yyyymmdd`` 日 EOD 的持仓快照（含 amount/金额/仓位占比）。
+
+    数据源：vnpy_qmt_sim 的 sim_<account_id>.db 中 sim_trades + daily_merged_all_new.parquet
+    pct_chg 累乘。同机部署假设；跨机部署需后续升级到 vnpy_webtrader endpoint + fanout。
+    """
+    from app.services.vnpy.historical_positions_service import (
+        get_strategy_positions_on_date as svc_fn,
+    )
+    rows, warning = svc_fn(name, yyyymmdd, gateway_name=gateway_name)
+    if rows is None:
+        return LiveTradingListResponse(
+            success=False, data=None, warning=warning, message=warning or "",
+        )
     return _ok(rows, warning=warning)
 
 

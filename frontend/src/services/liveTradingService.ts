@@ -3,6 +3,7 @@ import apiClient from './apiClient'
 import type {
   CorpActionEvent,
   DeleteRecordsStats,
+  HistoricalPosition,
   LiveTradingResponse,
   NodeStatus,
   StrategyCreatePayload,
@@ -72,7 +73,7 @@ export const liveTradingService = {
     nodeId: string,
     engine: string,
     name: string,
-    windowDays = 7,
+    windowDays = 365,
   ): Promise<LiveTradingResponse<StrategyDetail>> {
     return apiClient
       .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}`, {
@@ -88,6 +89,21 @@ export const liveTradingService = {
   ): Promise<LiveTradingResponse<StrategyTrade[]>> {
     return apiClient
       .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/trades`)
+      .then((r) => r.data)
+  },
+
+  /** 历史持仓浏览：重建指定 yyyymmdd 日 EOD 持仓快照 */
+  getStrategyPositionsOnDate(
+    nodeId: string,
+    engine: string,
+    name: string,
+    yyyymmdd: string,
+    gatewayName?: string,
+  ): Promise<LiveTradingResponse<HistoricalPosition[]>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/positions/${yyyymmdd}`, {
+        params: gatewayName ? { gateway_name: gatewayName } : {},
+      })
       .then((r) => r.data)
   },
 

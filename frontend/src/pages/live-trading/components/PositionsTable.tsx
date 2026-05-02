@@ -29,6 +29,9 @@ const PositionsTable: React.FC<Props> = ({ rows }) => {
     return <Empty description="当前无持仓" />
   }
 
+  // 持仓市值占比 weight 由后端 _render_positions 计算（_resolve_strategy_value
+  // 同源公式: volume × cost_price + pnl, 含 settle 阶段 pct_chg 累乘调整）。
+  // 前端只展示，不参与业务计算。
   const columns: ResponsiveColumn<LivePosition>[] = [
     {
       title: '合约',
@@ -83,6 +86,16 @@ const PositionsTable: React.FC<Props> = ({ rows }) => {
       render: (v: number | null) => (
         <span style={{ color: pnlColor(v), fontWeight: 600 }}>{fmt(v)}</span>
       ),
+    },
+    {
+      title: '持仓占比',
+      dataIndex: 'weight',
+      key: 'weight',
+      width: 100,
+      align: 'right' as const,
+      mobileRole: 'metric',
+      render: (v: number | null | undefined) =>
+        (v == null || v <= 0) ? '-' : `${(v * 100).toFixed(2)}%`,
     },
     {
       title: '冻结',

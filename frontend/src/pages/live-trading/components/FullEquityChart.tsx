@@ -128,21 +128,9 @@ const FullEquityChart: React.FC<Props> = ({ data, sourceLabel, height = DEFAULT_
             yAxisIndex: 0,
             data: pctData,
             showSymbol: false,
-            smooth: true,
+            smooth: false,
             lineStyle: { width: 2, color: '#3B82F6' },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [
-                  { offset: 0, color: 'rgba(59,130,246,0.25)' },
-                  { offset: 1, color: 'rgba(59,130,246,0.02)' },
-                ],
-              },
-            },
+            // 不再用 areaStyle 渐变填充，纯折线展示更清晰
           },
           {
             // 总资产 series（右轴），仅作 tooltip 联动 + 刻度参考；不画 line

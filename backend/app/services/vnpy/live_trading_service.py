@@ -721,21 +721,42 @@ async def get_strategy_detail(
 
 
 def _render_positions(positions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """渲染 positions 列表，自动 enrich 股票中文简称。"""
+    """渲染 positions 列表，自动 enrich 股票中文简称 + 持仓市值占比。
+
+    持仓市值占比 weight = market_value(单只) / total_market_value
+      market_value(单只) = volume × cost_price + pnl
+      (cost_price 含 vnpy_qmt_sim settle 阶段的 pct_chg 累乘调整，等价于 hfq；
+       pnl 由 vnpy_qmt_sim 用当日 mark price 算出 → cost+pnl ≈ 当日实际市值)
+
+    与 qlib backtest 的 positions_normal_1day.pkl 中 weight 字段同义：
+      qlib weight = amount × hfq_close / now_account_value
+    数学上两边都是"占总市值比"，只在 raw_open vs hfq_close 撮合价差 +
+    整百取整误差范围内有偏差（典型 1-5%）。
+    """
     name_map = get_stock_name_map()
-    return [
-        {
+    rendered: List[Dict[str, Any]] = []
+    market_values: List[float] = []
+    for p in positions:
+        vol = float(p.get("volume") or 0)
+        cost = float(p.get("price") or 0)
+        pnl = float(p.get("pnl") or 0)
+        mv = vol * cost + pnl if vol > 0 else 0.0
+        rendered.append({
             "vt_symbol": p.get("vt_symbol", ""),
             "name": _resolve_stock_name(p.get("vt_symbol", ""), name_map),
             "direction": str(p.get("direction", "")),
-            "volume": float(p.get("volume") or 0),
+            "volume": vol,
             "price": p.get("price"),
             "pnl": p.get("pnl"),
             "yd_volume": p.get("yd_volume"),
             "frozen": p.get("frozen"),
-        }
-        for p in positions
-    ]
+            "market_value": mv,
+        })
+        market_values.append(mv)
+    total_mv = sum(mv for mv in market_values if mv > 0)
+    for row, mv in zip(rendered, market_values):
+        row["weight"] = (mv / total_mv) if (total_mv > 0 and mv > 0) else 0.0
+    return rendered
 
 
 async def list_node_statuses() -> List[Dict[str, Any]]:
