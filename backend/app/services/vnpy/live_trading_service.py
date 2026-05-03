@@ -818,8 +818,13 @@ async def list_strategy_trades(
 
     过滤思路：vnpy ``TradeData`` **不带 reference 字段**（dataclass 无此 field），
     但 ``OrderData`` 有 reference 且 vnpy_qmt_sim 在 send_order 写入
-    ``{strategy_name}:{seq}`` 格式。所以同时拉 orders + trades，按 orderid 关联，
-    再用 order.reference 过滤本策略成交。
+    ``{strategy_name}:{seq}`` 格式。所以同时拉 orders + trades，按 ``vt_orderid``
+    (gateway 前缀 + orderid，跨 gateway 唯一) 关联，再用 order.reference 过滤本策略成交。
+
+    **关键 bug 修复**: 多 gateway 沙盒下不同 gateway 的 orderid 序列各自从 1 开始
+    (e.g. ``QMT_SIM_csi300.1`` 与 ``QMT_SIM_csi300_2.1`` 同 orderid='1'),
+    若用 ``orderid`` 作 dict key 会被后写覆盖前写,trades 全部归到一个策略,
+    另一策略页面显示 0 trades. 必须用 ``vt_orderid`` (含 gateway 前缀) 作 key.
     """
     client = get_vnpy_client()
     if node_id not in client.node_ids:
@@ -834,8 +839,9 @@ async def list_strategy_trades(
         logger.warning("[live_trading] list_strategy_trades fetch failed: %s", e)
         return [], f"拉取 trades/orders 失败: {e}"
 
-    # 构造 orderid → reference map（节点本地视图）
-    orderid_ref: Dict[str, str] = {}
+    # 构造 vt_orderid → reference map (节点本地视图; vt_orderid 跨 gateway 唯一,
+    # 不能用 orderid — 多 gateway 下 orderid 重复会被后写覆盖)
+    vt_orderid_ref: Dict[str, str] = {}
     warning: Optional[str] = None
     for item in orders_fo:
         if item.get("node_id") != node_id:
@@ -844,10 +850,10 @@ async def list_strategy_trades(
             warning = f"节点 {node_id} orders: {item.get('error')}"
             break
         for o in item.get("data") or []:
-            oid = str(o.get("orderid") or "")
+            vt_oid = str(o.get("vt_orderid") or "")
             ref = str(o.get("reference") or "")
-            if oid:
-                orderid_ref[oid] = ref
+            if vt_oid:
+                vt_orderid_ref[vt_oid] = ref
 
     rows: List[Dict[str, Any]] = []
     prefix = f"{strategy_name}:"
@@ -859,8 +865,9 @@ async def list_strategy_trades(
             warning = warning or f"节点 {node_id} trades: {item.get('error')}"
             break
         for t in item.get("data") or []:
+            vt_oid = str(t.get("vt_orderid") or "")
             oid = str(t.get("orderid") or "")
-            ref = orderid_ref.get(oid, "")
+            ref = vt_orderid_ref.get(vt_oid, "")
             if not ref.startswith(prefix):
                 continue
             vt = t.get("vt_symbol") or ""
