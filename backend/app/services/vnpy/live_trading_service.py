@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+import sqlalchemy as sa
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import Session
 
@@ -961,6 +962,35 @@ async def snapshot_tick() -> None:
                         if (not gateway_name or str(p.get("gateway_name", "")) == gateway_name)
                         and float(p.get("volume") or 0) > 0
                     )
+                # Session-boundary 检测: vnpy 重启后, 前一次 session 的 account_equity
+                # 与本次新 state 不连续 (持仓 / equity 跳变), 前端按 ts 排序画线会出现
+                # 锯齿. 检测"距上次 wall-clock heartbeat > GAP_THRESHOLD_SEC"作为新
+                # session 触发, 删本 strategy 旧 wall-clock 快照 (replay_settle 保留 — 那是
+                # 逻辑日, 不受 wall-clock session 影响).
+                GAP_THRESHOLD_SEC = 300  # 5 分钟无心跳 = 新 session
+                last_wall_ts = session.execute(
+                    sa.select(sa.func.max(StrategyEquitySnapshot.ts))
+                    .where(StrategyEquitySnapshot.strategy_name == name)
+                    .where(StrategyEquitySnapshot.node_id == node_id)
+                    .where(StrategyEquitySnapshot.engine == engine_name)
+                    .where(StrategyEquitySnapshot.source_label != "replay_settle")
+                ).scalar()
+                if last_wall_ts is not None:
+                    gap = (now - last_wall_ts).total_seconds()
+                    if gap > GAP_THRESHOLD_SEC:
+                        deleted = session.execute(
+                            sa_delete(StrategyEquitySnapshot)
+                            .where(StrategyEquitySnapshot.strategy_name == name)
+                            .where(StrategyEquitySnapshot.node_id == node_id)
+                            .where(StrategyEquitySnapshot.engine == engine_name)
+                            .where(StrategyEquitySnapshot.source_label != "replay_settle")
+                        ).rowcount
+                        logger.info(
+                            "[snapshot_tick] new session for %s/%s/%s after gap=%.0fs, "
+                            "cleared %d stale wall-clock snapshots",
+                            node_id, engine_name, name, gap, deleted,
+                        )
+
                 row = StrategyEquitySnapshot(
                     node_id=node_id,
                     engine=engine_name,
