@@ -23,6 +23,7 @@ import {
 } from '@/config/navigation'
 import { BRAND_NAME } from '@/config/brand'
 import Logo from '@/components/brand/Logo'
+import { useTheme } from '@/hooks/useTheme'
 
 const { Sider } = Layout
 
@@ -51,6 +52,7 @@ const buildMenuItems = (items: NavItem[]): MenuProps['items'] =>
 const Sidebar = ({ collapsed }: SidebarProps) => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { mode } = useTheme()
 
   const activeLeafKey = useMemo(() => findActiveLeafKey(location.pathname), [location.pathname])
   const activeParentKey = useMemo(
@@ -117,7 +119,7 @@ const Sidebar = ({ collapsed }: SidebarProps) => {
       {/* 导航 Menu */}
       <Menu
         mode="inline"
-        theme="dark"
+        theme={mode === 'dark' ? 'dark' : 'light'}
         inlineCollapsed={collapsed}
         items={menuItems}
         selectedKeys={activeLeafKey ? [activeLeafKey] : []}
