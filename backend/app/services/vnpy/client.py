@@ -201,6 +201,26 @@ class _PerNodeClient:
     async def get_ml_health(self) -> Dict[str, Any]:
         return await self._request("GET", "/api/v1/ml/health") or {}
 
+    async def get_ml_replay_equity_snapshots(
+        self,
+        strategy_name: str,
+        since: Optional[str] = None,
+        limit: int = 10000,
+    ) -> List[Dict[str, Any]]:
+        """A1/B2 解耦后 vnpy 端本地 replay_history.db 的回放权益快照.
+
+        Used by replay_equity_sync_service to incrementally pull (since=
+        local_max(inserted_at)) and UPSERT into mlearnweb.db.
+        """
+        params: Dict[str, Any] = {"limit": limit}
+        if since:
+            params["since"] = since
+        return await self._request(
+            "GET",
+            f"/api/v1/ml/strategies/{strategy_name}/replay/equity_snapshots",
+            params=params,
+        ) or []
+
     # --- write endpoints ----------------------------------------------------
 
     async def create_strategy(self, engine: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -342,6 +362,30 @@ class VnpyMultiNodeClient:
                     nid, strategy_name, e,
                 )
                 return {"node_id": nid, "ok": False, "data": {}, "error": str(e)}
+
+        return await asyncio.gather(
+            *(_one(nid, c) for nid, c in self._clients.items())
+        )
+
+    async def get_ml_replay_equity_snapshots_all(
+        self,
+        strategy_name: str,
+        since: Optional[str] = None,
+        limit: int = 10000,
+    ) -> List[FanoutItem]:
+        """Fanout replay equity snapshots across nodes (A1/B2 sync service)."""
+        async def _one(nid: str, client: _PerNodeClient) -> FanoutItem:
+            try:
+                data = await client.get_ml_replay_equity_snapshots(
+                    strategy_name, since=since, limit=limit,
+                )
+                return {"node_id": nid, "ok": True, "data": data, "error": None}
+            except Exception as e:
+                logger.warning(
+                    "[vnpy.client] node=%s get_ml_replay_equity_snapshots(%s) failed: %s",
+                    nid, strategy_name, e,
+                )
+                return {"node_id": nid, "ok": False, "data": [], "error": str(e)}
 
         return await asyncio.gather(
             *(_one(nid, c) for nid, c in self._clients.items())

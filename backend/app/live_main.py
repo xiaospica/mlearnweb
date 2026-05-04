@@ -27,6 +27,7 @@ from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
+from app.services.vnpy.replay_equity_sync_service import replay_equity_sync_loop
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +91,13 @@ async def lifespan(app: FastAPI):
     ml_task = asyncio.create_task(ml_snapshot_loop())
     # 方案 §2.4.5 — 同步推理机回填的历史 IC 到 SQLite (5min 一次)
     hist_sync_task = asyncio.create_task(historical_metrics_sync_loop())
+    # A1/B2 解耦 — 拉 vnpy 端本地 replay_history.db 的回放权益快照 (5min 一次)
+    replay_equity_task = asyncio.create_task(replay_equity_sync_loop())
     # Phase 3B — 部署追踪扫描 (10min 一次)
     deployment_task = asyncio.create_task(deployment_sync_loop())
-    tasks = (equity_task, ml_task, hist_sync_task, deployment_task)
+    tasks = (
+        equity_task, ml_task, hist_sync_task, replay_equity_task, deployment_task,
+    )
     try:
         yield
     finally:

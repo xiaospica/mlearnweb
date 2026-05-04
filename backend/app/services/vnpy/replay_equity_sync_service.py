@@ -1,0 +1,238 @@
+"""Replay equity sync service (A1/B2 解耦后的 vnpy → mlearnweb 数据流接力).
+
+背景:
+    vnpy 端不再直接写 mlearnweb.db 的 strategy_equity_snapshots
+    (跨工程紧耦合,跨机部署阻塞). 改成写 vnpy 本地 replay_history.db,
+    通过 vnpy_webtrader endpoint 暴露给 mlearnweb 拉.
+
+本 service:
+    每 N 分钟 (默认 5min) fanout 调
+        GET /api/v1/ml/strategies/{name}/replay/equity_snapshots?since=&limit=
+    用 mlearnweb 本地 ``MAX(inserted_at)`` 作 since 增量拉,
+    UPSERT 到 strategy_equity_snapshots(source_label='replay_settle').
+
+为何独立 loop (与 ml_snapshot_loop / historical_metrics_sync_service 并列):
+    1. 关注点分离: snapshot_loop 拉实时 wall-clock equity (每 60s),
+       本 service 拉历史回放快照 (5min 周期已足够)
+    2. 失败域隔离: replay 同步失败不影响实时 snapshot_loop
+    3. source_label 区分: 实时 = 'strategy_pnl' / 'account_equity' /
+       'position_sum_pnl', 回放 = 'replay_settle'
+
+详见 docs/deployment_a1_p21_plan.md §一.2c (vnpy_strategy_dev 工程).
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func
+from sqlalchemy.orm import sessionmaker
+
+from app.models.database import StrategyEquitySnapshot, engine as db_engine
+from app.services.vnpy.client import VnpyMultiNodeClient, get_vnpy_client
+
+
+logger = logging.getLogger(__name__)
+
+
+# 与 ml_monitoring_service / live_trading_service 一致, MlStrategy engine.
+ML_ENGINE_NAME = "MlStrategy"
+# 5 分钟 — 回放权益是历史值, 不需要高频拉取
+SYNC_POLL_INTERVAL_SECONDS = 300
+# vnpy 端 endpoint 默认上限 100000, 我们一次最多拉 10000 行已远超 30 天回放 (30 行).
+SYNC_LIMIT = 10000
+# 'replay_settle' source_label 与 vnpy_ml_strategy.template._persist_replay_equity_snapshot
+# 历史固化值一致, 不要改 (前端 / equity_curve_comparison.py 按此 label 过滤).
+REPLAY_SOURCE_LABEL = "replay_settle"
+
+
+SessionLocal = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
+
+
+async def _collect_strategy_names(
+    client: VnpyMultiNodeClient,
+) -> Dict[str, List[str]]:
+    """{node_id: [strategy_name...]} — 与 historical_metrics_sync_service 同款 discovery."""
+    result: Dict[str, List[str]] = {}
+    fo = await client.get_ml_health_all()
+    for item in fo:
+        if not item.get("ok"):
+            continue
+        data = item.get("data") or {}
+        strategies = data.get("strategies") or []
+        names = [s.get("name") for s in strategies if s.get("name")]
+        if names:
+            result[item["node_id"]] = names
+    return result
+
+
+def _get_local_max_inserted_at(
+    session, *, node_id: str, strategy_name: str,
+) -> Optional[str]:
+    """本地 strategy_equity_snapshots 中 (node, engine, strategy, source_label=replay_settle)
+    的最大 ts (用作 vnpy 端 since 增量边界).
+
+    注意: vnpy 端的 inserted_at 是写本地 SQLite 时刻; mlearnweb 端 ts 字段是回放
+    逻辑日 15:00. 但我们用 since 是为了避免重复拉, 所以用本地 ts 字段 (= vnpy 端
+    回传的 ts) 作 since OK — vnpy 端 list_snapshots 内部用 datetime() 比 inserted_at,
+    实际上传过去的 since 字符串 vnpy 端会按 inserted_at 比较,但只要保证字符串单调递增即可.
+
+    更稳的语义: 直接拿 vnpy 端 inserted_at 作 since, 但目前 mlearnweb 端不存 inserted_at.
+    简化: 同 (node/engine/strategy) 已经存在的最新 ts 之后的, 视为新增. 重叠的旧 ts
+    会被 UPSERT 覆盖, 幂等.
+    """
+    row = (
+        session.query(func.max(StrategyEquitySnapshot.ts))
+        .filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == ML_ENGINE_NAME,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+            StrategyEquitySnapshot.source_label == REPLAY_SOURCE_LABEL,
+        )
+        .scalar()
+    )
+    if row is None:
+        return None
+    # 转回 ISO 字符串给 vnpy 端 since 用 (vnpy 端 SQLite datetime() 兼容)
+    return row.isoformat() if isinstance(row, datetime) else str(row)
+
+
+def _upsert_remote_rows(
+    session,
+    *,
+    node_id: str,
+    strategy_name: str,
+    rows: List[Dict[str, Any]],
+) -> int:
+    """UPSERT 一批远端行到本地 strategy_equity_snapshots. 返回本次写入的行数.
+
+    SQLite 走"先 DELETE 同 (node, engine, strategy, source_label, DATE(ts))
+    再 INSERT"幂等模式. 关键: DELETE 后必须 flush 让 SQL 落库, 否则
+    session.add 加进去的新对象与待删旧对象在同一 unit-of-work 里, commit
+    时执行顺序不保证, 旧行可能没被实际删掉.
+    """
+    n = 0
+    for r in rows:
+        ts_raw = r.get("ts")
+        if not ts_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except (TypeError, ValueError):
+            logger.warning("[replay_equity_sync] 跳过非法 ts=%r", ts_raw)
+            continue
+
+        session.query(StrategyEquitySnapshot).filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == ML_ENGINE_NAME,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+            StrategyEquitySnapshot.source_label == REPLAY_SOURCE_LABEL,
+            func.date(StrategyEquitySnapshot.ts) == ts.date(),
+        ).delete(synchronize_session=False)
+        # 让 DELETE 先于后面的 INSERT 落库 (uow 顺序保证)
+        session.flush()
+
+        session.add(StrategyEquitySnapshot(
+            node_id=node_id,
+            engine=ML_ENGINE_NAME,
+            strategy_name=strategy_name,
+            ts=ts,
+            strategy_value=float(r.get("strategy_value") or 0.0),
+            account_equity=float(r.get("account_equity") or 0.0),
+            source_label=REPLAY_SOURCE_LABEL,
+            positions_count=int(r.get("positions_count") or 0),
+            raw_variables_json=str(r.get("raw_variables") or {})
+                if r.get("raw_variables") is not None else None,
+        ))
+        session.flush()
+        n += 1
+    return n
+
+
+async def sync_one_node_strategy(
+    client: VnpyMultiNodeClient,
+    *,
+    node_id: str,
+    strategy_name: str,
+) -> int:
+    """同步单 (node, strategy) 一次. 返回 UPSERT 行数."""
+    session = SessionLocal()
+    try:
+        since = _get_local_max_inserted_at(
+            session, node_id=node_id, strategy_name=strategy_name,
+        )
+    finally:
+        session.close()
+
+    rows = await client.get_per_node(node_id).get_ml_replay_equity_snapshots(
+        strategy_name, since=since, limit=SYNC_LIMIT,
+    )
+    if not rows:
+        return 0
+
+    session = SessionLocal()
+    try:
+        n = _upsert_remote_rows(
+            session, node_id=node_id, strategy_name=strategy_name, rows=rows,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    return n
+
+
+async def sync_all() -> Dict[str, Any]:
+    """主入口: discovery → 逐 (node, strategy) 同步. 返回 {scanned, upserted}."""
+    client = get_vnpy_client()
+    by_node = await _collect_strategy_names(client)
+    if not by_node:
+        return {"scanned": 0, "upserted": 0, "ok": True, "msg": "no strategies discovered"}
+
+    total_upserted = 0
+    total_scanned = 0
+    for nid, names in by_node.items():
+        for name in names:
+            total_scanned += 1
+            try:
+                n = await sync_one_node_strategy(client, node_id=nid, strategy_name=name)
+                total_upserted += n
+            except Exception as exc:
+                logger.warning(
+                    "[replay_equity_sync] node=%s strategy=%s 同步失败: %s",
+                    nid, name, exc,
+                )
+    return {
+        "scanned": total_scanned,
+        "upserted": total_upserted,
+        "ok": True,
+        "msg": "",
+    }
+
+
+async def replay_equity_sync_loop() -> None:
+    """长跑后台 loop, 由 live_main.py lifespan 接入. 失败仅 log warn 不退出."""
+    logger.info(
+        "[replay_equity_sync] 启动, 每 %ds 同步一次", SYNC_POLL_INTERVAL_SECONDS,
+    )
+    while True:
+        try:
+            stats = await sync_all()
+            if stats.get("upserted"):
+                logger.info(
+                    "[replay_equity_sync] 同步完成 scanned=%d upserted=%d",
+                    stats.get("scanned", 0), stats.get("upserted", 0),
+                )
+        except asyncio.CancelledError:
+            logger.info("[replay_equity_sync] cancelled, 退出")
+            raise
+        except Exception as exc:
+            logger.warning("[replay_equity_sync] 周期内异常: %s", exc)
+        try:
+            await asyncio.sleep(SYNC_POLL_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
