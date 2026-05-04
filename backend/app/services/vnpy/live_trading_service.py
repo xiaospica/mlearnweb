@@ -901,23 +901,50 @@ async def list_node_statuses() -> List[Dict[str, Any]]:
     return await client.probe_nodes()
 
 
-def delete_strategy_records(
+async def delete_strategy_records(
     db: Session,
     node_id: str,
     engine: str,
     strategy_name: str,
-) -> Dict[str, int]:
-    """删除指定策略在 mlearnweb 端积累的所有记录。
+) -> Dict[str, Any]:
+    """彻底删除策略：vnpy 节点端 stop + delete 实例 + mlearnweb 端清三张表.
 
-    清理的表：
-      - strategy_equity_snapshots: 权益曲线快照
-      - ml_metric_snapshots: ML 监控指标快照（IC/PSI/直方图等）
+    清理范围:
+      - vnpy 节点端: stop_strategy + delete_strategy (从 fanout 列表彻底消失)
+      - mlearnweb.db.strategy_equity_snapshots: 权益曲线快照
+      - mlearnweb.db.ml_metric_snapshots: ML 监控指标快照 (IC/PSI/直方图等)
+      - mlearnweb.db.ml_prediction_daily: 每日预测 summary (topk + score_histogram)
 
-    不动 vnpy 侧（vnpy_qmt_sim 持仓 / 账户 / sim_*.db）— 那由 reset_sim_state.py 管。
-    不动训练记录（training_records 等）— 与策略运行无关。
+    不动 vnpy_qmt_sim 持仓 / 账户 / sim_*.db — 那由 reset_sim_state.py 管.
+    不动训练记录 (training_records 等) — 与策略运行实例无关.
 
-    返回各表删除行数 dict（前端展示）。
+    顺序: 先 stop + delete vnpy 端 (避免清 db 后, ml_snapshot_loop / replay_equity_sync_loop
+    在 60s 内又把数据写回来), 再清 db. vnpy 端失败 (策略已不存在 / 节点离线)
+    log warn 后继续清 db, 满足用户"一键彻底清理"的语义.
+
+    返回 stats dict 含每个清理动作的结果.
     """
+    vnpy_stop: Dict[str, Any] = {"ok": False, "skipped": True}
+    vnpy_delete: Dict[str, Any] = {"ok": False, "skipped": True}
+    client = get_vnpy_client()
+    if node_id in client.node_ids:
+        try:
+            vnpy_stop = await client.stop_strategy(node_id, engine, strategy_name)
+        except Exception as exc:
+            logger.warning(
+                "[delete_strategy_records] vnpy stop_strategy(%s,%s,%s) 失败 (continuing): %s",
+                node_id, engine, strategy_name, exc,
+            )
+            vnpy_stop = {"ok": False, "error": str(exc)}
+        try:
+            vnpy_delete = await client.delete_strategy(node_id, engine, strategy_name)
+        except Exception as exc:
+            logger.warning(
+                "[delete_strategy_records] vnpy delete_strategy(%s,%s,%s) 失败 (continuing): %s",
+                node_id, engine, strategy_name, exc,
+            )
+            vnpy_delete = {"ok": False, "error": str(exc)}
+
     n_equity = (
         db.query(StrategyEquitySnapshot)
         .filter(
@@ -927,7 +954,6 @@ def delete_strategy_records(
         )
         .delete(synchronize_session=False)
     )
-    # ml_metric_snapshots 没有 engine 字段，按 node_id + strategy_name 过滤即可
     try:
         n_ml = (
             db.query(MLMetricSnapshot)
@@ -940,8 +966,27 @@ def delete_strategy_records(
     except Exception as exc:
         logger.warning("[delete_strategy_records] ml_metric_snapshots 删除失败: %s", exc)
         n_ml = 0
+    try:
+        from app.models.ml_monitoring import MLPredictionDaily
+        n_pred = (
+            db.query(MLPredictionDaily)
+            .filter(
+                MLPredictionDaily.node_id == node_id,
+                MLPredictionDaily.strategy_name == strategy_name,
+            )
+            .delete(synchronize_session=False)
+        )
+    except Exception as exc:
+        logger.warning("[delete_strategy_records] ml_prediction_daily 删除失败: %s", exc)
+        n_pred = 0
     db.commit()
-    return {"equity_snapshots": n_equity, "ml_metric_snapshots": n_ml}
+    return {
+        "equity_snapshots": n_equity,
+        "ml_metric_snapshots": n_ml,
+        "ml_prediction_daily": n_pred,
+        "vnpy_stop": vnpy_stop,
+        "vnpy_delete": vnpy_delete,
+    }
 
 
 async def list_strategy_trades(
