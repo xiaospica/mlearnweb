@@ -100,6 +100,94 @@ def _load_close_lookup() -> Tuple[Dict[Tuple[str, pd.Timestamp], float], List[pd
     return close_map, trade_dates
 
 
+def _resolve_node_id_for_strategy(session: Session, strategy_name: str) -> str:
+    """从已有的 ml_metric_snapshots / ml_prediction_daily 查 node_id; 都没有 → 'local'.
+
+    backfill 在 mlearnweb 端跑, 没有直接的"节点归属"信息. 但只要 ml_snapshot_tick
+    曾经拉到过 latest, 就一定写过至少一行 (含 node_id). 单节点部署直接 fallback
+    到 'local' 兼容.
+    """
+    row = (
+        session.query(MLMetricSnapshot.node_id)
+        .filter(MLMetricSnapshot.strategy_name == strategy_name)
+        .order_by(MLMetricSnapshot.trade_date.desc())
+        .first()
+    )
+    if row and row[0]:
+        return row[0]
+    row = (
+        session.query(MLPredictionDaily.node_id)
+        .filter(MLPredictionDaily.strategy_name == strategy_name)
+        .order_by(MLPredictionDaily.trade_date.desc())
+        .first()
+    )
+    if row and row[0]:
+        return row[0]
+    return "local"
+
+
+def _ensure_metric_row(
+    session: Session, *, node_id: str, strategy_name: str, trade_date: datetime,
+    model_run_id: Optional[str], status: str = "ok",
+) -> int:
+    """新建 ml_metric_snapshots 行如果不存在 (按整日匹配, 跨 trade_date 字符串格式).
+    返回 1=新建, 0=已存在.
+
+    注意: SQLite TEXT unique index 把 '2026-01-28 00:00:00' 与
+    '2026-01-28 00:00:00.000000' 视为不同字符串. 用 SQLAlchemy func.date()
+    按日匹配查重, 然后走 ORM session.add 让 SQLAlchemy DateTime 适配器统一
+    用 '%Y-%m-%d %H:%M:%S.%f' (含微秒) 格式 — 与既有 ml_snapshot_tick 写的
+    格式一致.
+    """
+    from sqlalchemy import func as sa_func
+    exists = (
+        session.query(MLMetricSnapshot.id)
+        .filter(
+            MLMetricSnapshot.node_id == node_id,
+            MLMetricSnapshot.engine == "MlStrategy",
+            MLMetricSnapshot.strategy_name == strategy_name,
+            sa_func.date(MLMetricSnapshot.trade_date) == trade_date.date(),
+        )
+        .first()
+    )
+    if exists is not None:
+        return 0
+    row = MLMetricSnapshot(
+        node_id=node_id, engine="MlStrategy", strategy_name=strategy_name,
+        trade_date=trade_date, model_run_id=model_run_id, status=status,
+    )
+    session.add(row)
+    session.flush()
+    return 1
+
+
+def _ensure_prediction_row(
+    session: Session, *, node_id: str, strategy_name: str, trade_date: datetime,
+    model_run_id: Optional[str], status: str = "ok",
+) -> int:
+    """同 _ensure_metric_row, 对 ml_prediction_daily."""
+    from sqlalchemy import func as sa_func
+    exists = (
+        session.query(MLPredictionDaily.id)
+        .filter(
+            MLPredictionDaily.node_id == node_id,
+            MLPredictionDaily.engine == "MlStrategy",
+            MLPredictionDaily.strategy_name == strategy_name,
+            sa_func.date(MLPredictionDaily.trade_date) == trade_date.date(),
+        )
+        .first()
+    )
+    if exists is not None:
+        return 0
+    row = MLPredictionDaily(
+        node_id=node_id, engine="MlStrategy", strategy_name=strategy_name,
+        trade_date=trade_date, model_run_id=model_run_id, status=status,
+    )
+    session.add(row)
+    session.flush()
+    return 1
+
+
 def _backfill_one_strategy(
     session: Session,
     strategy_name: str,
@@ -107,18 +195,26 @@ def _backfill_one_strategy(
     close_map: Dict[Tuple[str, pd.Timestamp], float],
     trade_dates: List[pd.Timestamp],
 ) -> Dict[str, int]:
-    """对单只策略做 backfill, 返 (n_metric_updated, n_pred_updated).
+    """对单只策略做 backfill, 返 (n_metric_updated, n_pred_updated, n_inserted).
 
     优先级:
       1. 读 metrics.json (vnpy batch 现已写完整 metrics — 含 IC/PSI/直方图等)
       2. fallback 从 predictions.parquet 算 (兼容旧 batch 产物没 metrics.json)
+
+    A1/B2 解耦后修复: 不仅 UPDATE 已有行, 还为磁盘上每一个交易日 INSERT 缺失行.
+    db684c4 删除了 vnpy 端的 _persist_replay_ml_snapshot 直写 mlearnweb.db, 而新链路
+    (ml_snapshot_tick 拉 metrics/latest) 只能拉到最新一天 → 中间天的 ml_metric_snapshots
+    永久缺失 → 前端 IC/RankIC/PSI 时序图只显示一两天 (用户 V1 demo 反馈).
     """
     base = output_root / strategy_name
     if not base.exists():
-        return {"metric": 0, "prediction": 0}
+        return {"metric": 0, "prediction": 0, "inserted": 0}
+
+    node_id = _resolve_node_id_for_strategy(session, strategy_name)
 
     n_metric = 0
     n_pred = 0
+    n_inserted = 0
     for day_dir in sorted(base.iterdir()):
         if not day_dir.is_dir() or not day_dir.name.isdigit():
             continue
@@ -147,6 +243,26 @@ def _backfill_one_strategy(
             continue
         if pred.empty:
             continue
+
+        # INSERT-IF-MISSING: 中间天没被 ml_snapshot_tick 拉到 (它只拿 latest),
+        # 但磁盘上有完整 day_dir 数据 → 这里补建空行, 再走下面 UPDATE 填字段.
+        model_run_id_disk = metrics_json.get("model_run_id") or None
+        if not model_run_id_disk:
+            diag_path = day_dir / "diagnostics.json"
+            if diag_path.exists():
+                try:
+                    diag = json.loads(diag_path.read_text(encoding="utf-8"))
+                    model_run_id_disk = diag.get("model_run_id") or None
+                except Exception:
+                    pass
+        n_inserted += _ensure_metric_row(
+            session, node_id=node_id, strategy_name=strategy_name,
+            trade_date=day_start, model_run_id=model_run_id_disk,
+        )
+        n_inserted += _ensure_prediction_row(
+            session, node_id=node_id, strategy_name=strategy_name,
+            trade_date=day_start, model_run_id=model_run_id_disk,
+        )
 
         scores = pred["score"] if "score" in pred.columns else pred.iloc[:, 0]
         stats = _compute_pred_stats(scores)
@@ -243,7 +359,7 @@ def _backfill_one_strategy(
              strategy_name, day_start, day_end),
         ).rowcount
         n_pred += n
-    return {"metric": n_metric, "prediction": n_pred}
+    return {"metric": n_metric, "prediction": n_pred, "inserted": n_inserted}
 
 
 def backfill_all_strategies() -> Dict[str, Any]:
@@ -262,6 +378,7 @@ def backfill_all_strategies() -> Dict[str, Any]:
     session = SessionLocal()
     total_m = 0
     total_p = 0
+    total_inserted = 0
     n_strategies = 0
     try:
         for strat_dir in sorted(output_root.iterdir()):
@@ -270,6 +387,7 @@ def backfill_all_strategies() -> Dict[str, Any]:
             r = _backfill_one_strategy(session, strat_dir.name, output_root, close_map, trade_dates)
             total_m += r["metric"]
             total_p += r["prediction"]
+            total_inserted += r.get("inserted", 0)
             n_strategies += 1
         session.commit()
     except Exception as e:
@@ -281,4 +399,5 @@ def backfill_all_strategies() -> Dict[str, Any]:
         "strategies": n_strategies,
         "metric_updated": total_m,
         "prediction_updated": total_p,
+        "rows_inserted": total_inserted,
     }
