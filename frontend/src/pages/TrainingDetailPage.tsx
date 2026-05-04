@@ -487,12 +487,11 @@ const TrainingDetailPage: React.FC = () => {
           </Card>
         </Col>
 
-        <Col xs={24} lg={12}>
+        <Col xs={24} lg={12} className="config-snapshot-col">
           <Card
+            className="config-snapshot-card"
             title={<><SettingOutlined style={{ marginRight: 8, color: '#fa8c16' }} />配置快照</>}
             size="small"
-            style={{ height: '100%' }}
-            styles={{ body: { height: 'calc(100% - 57px)', overflow: 'auto' } }}
           >
             {configSnapshot ? (
               <div>

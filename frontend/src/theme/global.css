@@ -143,6 +143,27 @@
     --ap-content-px: 24px;
     --ap-content-py: 20px;
   }
+
+  /* 训练记录详情页"配置快照"卡片：lg+ 时与左列两个卡片总高对齐
+   * 思路：右 Col 用 position:relative，Card 用 position:absolute inset:0 脱离布局流，
+   *       这样 Card 不参与撑高 Row（Row 高度完全由左列内容决定），
+   *       Card 自动填满左列等高的右 Col。
+   *       Body 用 flex:1 + min-height:0 + overflow:auto 让内容超出时内部滚动。
+   * xs/sm/md 不应用此样式 — 移动端两列堆叠，让 Card 按内容自然撑开。 */
+  .config-snapshot-col {
+    position: relative;
+  }
+  .config-snapshot-col > .config-snapshot-card.ant-card {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .config-snapshot-col > .config-snapshot-card.ant-card > .ant-card-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
 }
 @media (min-width: 1200px) {
   :root {
