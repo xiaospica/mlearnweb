@@ -239,6 +239,10 @@ class NodeStatus(BaseModel):
     online: bool = False
     last_probe_ts: Optional[int] = None
     last_error: Optional[str] = None
+    # 节点级元数据，由 probe_nodes 填充；详见 vnpy_common/naming.py 命名约定章节
+    mode: Optional[str] = None  # "live" | "sim"
+    latency_ms: Optional[int] = None  # health 探活耗时；离线时 None
+    app_version: Optional[str] = None  # vnpy 端 /api/v1/node/health 响应字段，缺失时 None
 
 
 class EquityPoint(BaseModel):
@@ -288,6 +292,19 @@ class StrategySummary(BaseModel):
     # 节点离线时从 mlearnweb.db 拼出的离线视图标识
     node_offline: Optional[bool] = None
     offline_reason: Optional[str] = None
+    # ---- 调度元数据（由 _infer_strategy_schedule 填充）-----------------------
+    # 策略 cron 触发时间（来自 strategy.parameters，ML 策略才有）
+    trigger_time: Optional[str] = None  # "21:00"
+    buy_sell_time: Optional[str] = None  # "09:26"
+    # 双轨依赖：影子策略 signal_source_strategy 指向上游策略名
+    signal_source_strategy: Optional[str] = None
+    # 上次执行结果（来自 strategy.variables）
+    last_run_date: Optional[str] = None  # "YYYY-MM-DD"
+    last_status: Optional[str] = None  # "ok" | "failed" | "empty"
+    last_duration_ms: Optional[int] = None
+    last_error: Optional[str] = None
+    # 回放状态（双轨影子策略 / 历史回放进度）
+    replay_status: Optional[str] = None  # "running" | "completed" | "error" 等；"idle" 归一为 None
 
 
 class StrategyDetail(StrategySummary):

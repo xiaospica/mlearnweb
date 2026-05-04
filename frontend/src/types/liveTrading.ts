@@ -9,6 +9,10 @@ export interface NodeStatus {
   online: boolean
   last_probe_ts?: number | null
   last_error?: string | null
+  // 节点级元数据（详见 vnpy_common/naming.py 命名约定）
+  mode?: StrategyMode | null
+  latency_ms?: number | null
+  app_version?: string | null
 }
 
 export interface EquityPoint {
@@ -78,6 +82,12 @@ export interface CorpActionEvent {
 
 export type StrategyMode = 'live' | 'sim'
 
+/** vnpy_ml_strategy 上次执行结果归一化值（白名单外 → null）。 */
+export type LastStatus = 'ok' | 'failed' | 'empty'
+
+/** vnpy_ml_strategy 回放进度状态。'idle' 后端归一为 null，前端不会收到。 */
+export type ReplayStatus = 'running' | 'completed' | 'error' | string
+
 export interface StrategySummary {
   node_id: string
   engine: string
@@ -101,6 +111,19 @@ export interface StrategySummary {
   // 节点离线时为 true，从 mlearnweb.db 历史快照拼出
   node_offline?: boolean
   offline_reason?: string
+  // ---- 调度元数据（仅 ML 策略有；非 ML 策略全部为 null）---------------------
+  /** 日频推理触发时间，如 "21:00" */
+  trigger_time?: string | null
+  /** T+1 复盘下单时间，如 "09:26" */
+  buy_sell_time?: string | null
+  /** 双轨依赖：影子策略的上游策略名 */
+  signal_source_strategy?: string | null
+  /** 上次成功运行的逻辑日 YYYY-MM-DD */
+  last_run_date?: string | null
+  last_status?: LastStatus | null
+  last_duration_ms?: number | null
+  last_error?: string | null
+  replay_status?: ReplayStatus | null
 }
 
 export type StrategyCapability = 'add' | 'edit' | 'init' | 'remove' | 'start' | 'stop'

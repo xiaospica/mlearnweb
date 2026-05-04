@@ -409,10 +409,24 @@ class VnpyMultiNodeClient:
         return await self.get_per_node(node_id).get_ml_prediction_summary(strategy_name)
 
     async def probe_nodes(self) -> List[Dict[str, Any]]:
-        """Lightweight liveness probe. Never raises."""
+        """Lightweight liveness probe. Never raises.
+
+        附带返回节点级元数据：
+          - mode: 节点 yaml 中的 mode 字段（"live" / "sim"），用于前端节点 header 标记
+          - latency_ms: 本次 health 探活耗时（毫秒），离线时 None
+          - app_version: vnpy /api/v1/node/health 响应中的 version 字段（缺失时 None）
+        """
         async def _one(nid: str, client: _PerNodeClient) -> Dict[str, Any]:
+            mode = getattr(client.node, "mode", None)
+            t0 = time.perf_counter()
             try:
-                await client.get_node_health()
+                health = await client.get_node_health()
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                app_version: Optional[str] = None
+                if isinstance(health, dict):
+                    v = health.get("version") or health.get("app_version")
+                    if v is not None:
+                        app_version = str(v)
                 status = {
                     "node_id": nid,
                     "base_url": client.node.base_url,
@@ -420,6 +434,9 @@ class VnpyMultiNodeClient:
                     "online": True,
                     "last_probe_ts": int(time.time() * 1000),
                     "last_error": None,
+                    "mode": mode,
+                    "latency_ms": latency_ms,
+                    "app_version": app_version,
                 }
             except Exception as e:
                 status = {
@@ -429,6 +446,9 @@ class VnpyMultiNodeClient:
                     "online": False,
                     "last_probe_ts": int(time.time() * 1000),
                     "last_error": str(e),
+                    "mode": mode,
+                    "latency_ms": None,
+                    "app_version": None,
                 }
             self._last_probe[nid] = status
             return status

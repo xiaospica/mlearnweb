@@ -97,6 +97,102 @@ def _infer_strategy_mode(strategy_dict: Dict[str, Any], node_mode: str) -> Tuple
 
 
 # ---------------------------------------------------------------------------
+# Strategy schedule extraction (cron + last-run health)
+# ---------------------------------------------------------------------------
+
+
+_VALID_LAST_STATUS = ("ok", "failed", "empty")
+
+
+def _infer_strategy_schedule(s: Dict[str, Any]) -> Dict[str, Any]:
+    """从 strategy.parameters / variables 提取 cron 调度元数据 + 上次执行健康度。
+
+    所有字段失败统一退到 None（不抛异常），保证主循环健壮——非 ML 策略 / 老版本 vnpy
+    没有这些字段时整片调度信息为 None，前端按此判断是否渲染 cron strip。
+
+    源字段（vnpy_ml_strategy/template.py）：
+      parameters.trigger_time         → "21:00"  日频推理 + persist 触发时间
+      parameters.buy_sell_time        → "09:26"  T+1 复盘下单时间
+      parameters.signal_source_strategy → 双轨影子策略指向的上游名
+      variables.last_run_date         → "YYYY-MM-DD" 最近一次成功运行的逻辑日
+      variables.last_status           → "ok" | "failed" | "empty"
+      variables.last_duration_ms      → int
+      variables.last_error            → str
+      variables.replay_status         → "idle"|"running"|"completed"|"error"|... ；"idle" 归一为 None
+    """
+    params = s.get("parameters") or {}
+    vars_: Dict[str, Any] = s.get("variables") or {}
+
+    def _str_or_none(x: Any) -> Optional[str]:
+        if x is None:
+            return None
+        if isinstance(x, str):
+            x = x.strip()
+            return x or None
+        # 非字符串类型（int/float/dict 之类）一律 str() 后再判
+        x = str(x).strip()
+        return x or None
+
+    def _int_or_none(x: Any) -> Optional[int]:
+        if x is None or x == "":
+            return None
+        try:
+            return int(x)
+        except (TypeError, ValueError):
+            return None
+
+    status = _str_or_none(vars_.get("last_status"))
+    if status not in _VALID_LAST_STATUS:
+        status = None  # 大小写漂移 / 未知值统一退到 None
+
+    replay = _str_or_none(vars_.get("replay_status"))
+    if replay == "idle":
+        replay = None  # 默认值不发给前端，避免渲染无意义 chip
+
+    return {
+        "trigger_time": _str_or_none(params.get("trigger_time")),
+        "buy_sell_time": _str_or_none(params.get("buy_sell_time")),
+        "signal_source_strategy": _str_or_none(params.get("signal_source_strategy")),
+        "last_run_date": _str_or_none(vars_.get("last_run_date")),
+        "last_status": status,
+        "last_duration_ms": _int_or_none(vars_.get("last_duration_ms")),
+        "last_error": _str_or_none(vars_.get("last_error")),
+        "replay_status": replay,
+    }
+
+
+_SCHEDULE_NULL_DICT: Dict[str, Any] = {
+    "trigger_time": None,
+    "buy_sell_time": None,
+    "signal_source_strategy": None,
+    "last_run_date": None,
+    "last_status": None,
+    "last_duration_ms": None,
+    "last_error": None,
+    "replay_status": None,
+}
+
+
+def _schedule_from_raw_variables_json(raw_json: Optional[str]) -> Dict[str, Any]:
+    """离线 fallback 路径用：从 StrategyEquitySnapshot.raw_variables_json 反序列化复原调度元数据。
+
+    parameters 端的 trigger_time / buy_sell_time 不在 raw_variables_json 里——只能复原
+    variables 子集（last_run_date / last_status / last_duration_ms / last_error / replay_status）。
+    parameters 字段保持 None。
+    """
+    if not raw_json:
+        return dict(_SCHEDULE_NULL_DICT)
+    try:
+        vars_ = json.loads(raw_json) or {}
+    except (TypeError, ValueError):
+        return dict(_SCHEDULE_NULL_DICT)
+    if not isinstance(vars_, dict):
+        return dict(_SCHEDULE_NULL_DICT)
+    sched = _infer_strategy_schedule({"parameters": {}, "variables": vars_})
+    return sched
+
+
+# ---------------------------------------------------------------------------
 # PnL resolution
 # ---------------------------------------------------------------------------
 
@@ -402,6 +498,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             engine_name = s.get("engine", "")
             name = s.get("name", "")
             mode, gateway_name = _infer_strategy_mode(s, node_mode)
+            schedule = _infer_strategy_schedule(s)
             value, label, acct_eq = _resolve_strategy_value(
                 s, node_positions, node_accounts, gateway_name=gateway_name or None,
             )
@@ -435,6 +532,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
                 "capabilities": capabilities.get(node_id, {}).get(engine_name, []),
                 "mode": mode,
                 "gateway_name": gateway_name,
+                **schedule,
             })
 
     # 离线节点的策略：从 db 历史快照拼出 summary
@@ -491,6 +589,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             "gateway_name": None,
             "node_offline": True,
             "offline_reason": "策略当前未在节点上运行（仅展示历史）",
+            **_schedule_from_raw_variables_json(last.raw_variables_json),
         })
 
     return summaries, warning
@@ -549,6 +648,7 @@ def _list_offline_strategies_for_node(
             "gateway_name": None,
             "node_offline": True,
             "offline_reason": offline_reason,
+            **_schedule_from_raw_variables_json(last.raw_variables_json),
         })
     return out
 
@@ -572,6 +672,20 @@ def _offline_detail_from_history(
         return None  # 历史也没有 → 真的什么都没有，让上游报错
 
     last = full_curve[-1]
+    # 拿最新一行的 raw_variables_json 复原调度元数据
+    last_row = (
+        db.query(StrategyEquitySnapshot)
+        .filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == engine,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+        )
+        .order_by(StrategyEquitySnapshot.ts.desc())
+        .first()
+    )
+    schedule = _schedule_from_raw_variables_json(
+        last_row.raw_variables_json if last_row else None
+    )
     return {
         "node_id": node_id,
         "engine": engine,
@@ -598,6 +712,7 @@ def _offline_detail_from_history(
         # 标记给前端的离线提示（前端按此显示 "节点离线" 角标）
         "node_offline": True,
         "offline_reason": offline_reason,
+        **schedule,
     }
 
 
@@ -663,6 +778,7 @@ async def get_strategy_detail(
     node_accounts = accounts_by_node.get(node_id, [])
     node_mode = next((getattr(n, "mode", "sim") for n in getattr(client, "nodes", []) if n.node_id == node_id), "sim")
     mode, gateway_name = _infer_strategy_mode(strategy, node_mode)
+    schedule = _infer_strategy_schedule(strategy)
     value, label, acct_eq = _resolve_strategy_value(
         strategy, node_positions, node_accounts, gateway_name=gateway_name or None,
     )
@@ -717,6 +833,7 @@ async def get_strategy_detail(
         "mode": mode,
         "gateway_name": gateway_name,
         "positions": _render_positions(positions),
+        **schedule,
     }
     return detail, warning
 

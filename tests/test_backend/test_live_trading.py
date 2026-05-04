@@ -53,10 +53,25 @@ class FakeVnpyClient:
                         "author": "",
                         "inited": True,
                         "trading": True,
-                        "parameters": {"p1": 1},
-                        "variables": {"pos": 5, "total_pnl": 123.45},
+                        # cta1 模拟一个 ML 策略，含完整调度元数据
+                        "parameters": {
+                            "p1": 1,
+                            "trigger_time": "21:00",
+                            "buy_sell_time": "09:26",
+                            "signal_source_strategy": "",  # 上游策略，非影子
+                        },
+                        "variables": {
+                            "pos": 5,
+                            "total_pnl": 123.45,
+                            "last_run_date": "2026-05-03",
+                            "last_status": "ok",
+                            "last_duration_ms": 312,
+                            "last_error": "",
+                            "replay_status": "completed",
+                        },
                     },
                     {
+                        # cta2 是非 ML 策略，没有调度字段；用作降级回归
                         "engine": "CtaStrategy",
                         "name": "cta2",
                         "class_name": "TestCta",
@@ -153,6 +168,9 @@ class FakeVnpyClient:
                 "online": True,
                 "last_probe_ts": 1,
                 "last_error": None,
+                "mode": "sim",
+                "latency_ms": 12,
+                "app_version": "1.2.0",
             },
             {
                 "node_id": "nodeB",
@@ -161,6 +179,9 @@ class FakeVnpyClient:
                 "online": False,
                 "last_probe_ts": 1,
                 "last_error": "offline",
+                "mode": "live",
+                "latency_ms": None,
+                "app_version": None,
             },
         ]
 
@@ -438,6 +459,20 @@ class TestReadEndpoints:
         assert len(data["data"]) == 2
         assert data["data"][0]["node_id"] == "nodeA"
 
+    def test_list_nodes_exposes_mode_latency_version(self, api_client):
+        """节点级元数据 mode / latency_ms / app_version 必须透出。"""
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/nodes")
+        data = resp.json()
+        by_id = {n["node_id"]: n for n in data["data"]}
+        assert by_id["nodeA"]["mode"] == "sim"
+        assert by_id["nodeA"]["latency_ms"] == 12
+        assert by_id["nodeA"]["app_version"] == "1.2.0"
+        # nodeB 离线：mode 仍透出，latency / version 为 None
+        assert by_id["nodeB"]["mode"] == "live"
+        assert by_id["nodeB"]["latency_ms"] is None
+        assert by_id["nodeB"]["app_version"] is None
+
     def test_list_strategies_merges_fanout(self, api_client):
         client, _, _ = api_client
         resp = client.get("/api/live-trading/strategies")
@@ -456,6 +491,31 @@ class TestReadEndpoints:
         assert by_name["cta2"]["source_label"] == "position_sum_pnl"
         assert by_name["cta2"]["strategy_value"] == 400.0  # 250+150 (two ag positions)
         assert by_name["signal1"]["source_label"] == "account_equity"
+
+    def test_list_strategies_exposes_schedule_fields(self, api_client):
+        """ML 策略的 cron + last-run 字段必须透出到 list 响应；非 ML 策略全 None。"""
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies")
+        data = resp.json()
+        by_name = {s["strategy_name"]: s for s in data["data"]}
+
+        # cta1 是 ML 策略：完整字段
+        cta1 = by_name["cta1"]
+        assert cta1["trigger_time"] == "21:00"
+        assert cta1["buy_sell_time"] == "09:26"
+        assert cta1["signal_source_strategy"] is None  # 空字符串 → None
+        assert cta1["last_run_date"] == "2026-05-03"
+        assert cta1["last_status"] == "ok"
+        assert cta1["last_duration_ms"] == 312
+        assert cta1["last_error"] is None
+        assert cta1["replay_status"] == "completed"
+
+        # cta2 / signal1 是非 ML 策略：调度字段全 None（降级）
+        for name in ("cta2", "signal1"):
+            row = by_name[name]
+            assert row["trigger_time"] is None
+            assert row["last_status"] is None
+            assert row["last_duration_ms"] is None
 
     def test_get_strategy_detail(self, api_client):
         client, _, _ = api_client
@@ -663,3 +723,101 @@ class TestInferStrategyMode:
         mode, gw = _infer_strategy_mode({"parameters": {"gateway": "QMT_SIM"}}, "live")
         assert mode == "sim"
         assert gw == "QMT_SIM"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: _infer_strategy_schedule (cron + last-run health)
+# ---------------------------------------------------------------------------
+
+
+class TestInferStrategySchedule:
+    """Verify schedule extraction & normalization from strategy parameters/variables.
+
+    See vnpy_ml_strategy/template.py for the source-of-truth field semantics.
+    """
+
+    def test_full_ml_strategy_extracts_all_fields(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        s = {
+            "parameters": {
+                "trigger_time": "21:00",
+                "buy_sell_time": "09:26",
+                "signal_source_strategy": "csi300_v2_live",
+            },
+            "variables": {
+                "last_run_date": "2026-05-03",
+                "last_status": "ok",
+                "last_duration_ms": 312,
+                "last_error": "",
+                "replay_status": "completed",
+            },
+        }
+        sched = _infer_strategy_schedule(s)
+        assert sched["trigger_time"] == "21:00"
+        assert sched["buy_sell_time"] == "09:26"
+        assert sched["signal_source_strategy"] == "csi300_v2_live"
+        assert sched["last_run_date"] == "2026-05-03"
+        assert sched["last_status"] == "ok"
+        assert sched["last_duration_ms"] == 312
+        assert sched["last_error"] is None  # 空字符串归一为 None
+        assert sched["replay_status"] == "completed"
+
+    def test_non_ml_strategy_all_fields_none(self) -> None:
+        """非 ML 策略 (CTA / SignalStrategyPlus) parameters/variables 缺这些键 → 全 None。"""
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        for s in [{}, {"parameters": {}, "variables": {}}, {"parameters": None, "variables": None}]:
+            sched = _infer_strategy_schedule(s)
+            assert all(v is None for v in sched.values()), f"failed for {s}: {sched}"
+
+    def test_last_status_unknown_value_normalizes_to_none(self) -> None:
+        """白名单外的值（'OK' 大写、拼写错误）一律退到 None，不传给前端搞混。"""
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        for raw in ["OK", "weird", "Failed", "running", "  "]:
+            sched = _infer_strategy_schedule({"variables": {"last_status": raw}})
+            assert sched["last_status"] is None, f"'{raw}' should normalize to None"
+
+    def test_last_duration_ms_string_coerced_to_int(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        sched = _infer_strategy_schedule({"variables": {"last_duration_ms": "1234"}})
+        assert sched["last_duration_ms"] == 1234
+
+    def test_last_duration_ms_garbage_returns_none(self) -> None:
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        for raw in [None, "", "not-a-number", float("nan")]:
+            sched = _infer_strategy_schedule({"variables": {"last_duration_ms": raw}})
+            assert sched["last_duration_ms"] is None, f"raw={raw!r}"
+
+    def test_replay_status_idle_normalizes_to_none(self) -> None:
+        """'idle' 是默认初始值，发给前端没有信息量，归一为 None 让 UI 不渲染 chip。"""
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        sched = _infer_strategy_schedule({"variables": {"replay_status": "idle"}})
+        assert sched["replay_status"] is None
+
+    def test_signal_source_strategy_empty_string_to_none(self) -> None:
+        """空字符串视同未设置（上游策略 vs 影子策略的判别依据）。"""
+        from app.services.vnpy.live_trading_service import _infer_strategy_schedule
+        sched = _infer_strategy_schedule({"parameters": {"signal_source_strategy": ""}})
+        assert sched["signal_source_strategy"] is None
+
+    def test_offline_recovery_from_raw_variables_json(self) -> None:
+        """节点离线时从 StrategyEquitySnapshot.raw_variables_json 复原 last_run_date 等。"""
+        import json as _json
+        from app.services.vnpy.live_trading_service import _schedule_from_raw_variables_json
+        raw = _json.dumps({
+            "last_run_date": "2026-05-01",
+            "last_status": "failed",
+            "last_error": "model file not found",
+        })
+        sched = _schedule_from_raw_variables_json(raw)
+        assert sched["last_run_date"] == "2026-05-01"
+        assert sched["last_status"] == "failed"
+        assert sched["last_error"] == "model file not found"
+        # parameters 字段不在 raw_variables_json 里 → None
+        assert sched["trigger_time"] is None
+        assert sched["buy_sell_time"] is None
+
+    def test_offline_recovery_from_invalid_json_returns_all_none(self) -> None:
+        from app.services.vnpy.live_trading_service import _schedule_from_raw_variables_json
+        for bad in [None, "", "not-json", "[1, 2, 3]"]:
+            sched = _schedule_from_raw_variables_json(bad)
+            assert all(v is None for v in sched.values()), f"bad={bad!r}"

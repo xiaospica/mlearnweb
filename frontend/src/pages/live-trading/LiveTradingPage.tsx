@@ -1,219 +1,35 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Alert,
-  Badge,
   Button,
   Card,
-  Col,
   Empty,
-  Row,
   Segmented,
+  Skeleton,
   Space,
-  Spin,
-  Tag,
-  Tooltip,
-  Typography,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { tuningService } from '@/services/tuningService'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/zh-cn'
 import { liveTradingService } from '@/services/liveTradingService'
-import type { SourceLabel, StrategySummary } from '@/types/liveTrading'
-import MiniEquityChart from './components/MiniEquityChart'
-import NodeStatusBar from './components/NodeStatusBar'
-import StrategyActions from './components/StrategyActions'
+import type { StrategySummary } from '@/types/liveTrading'
 import StrategyCreateWizard from './components/StrategyCreateWizard'
 import PageContainer from '@/components/layout/PageContainer'
-
-dayjs.extend(relativeTime)
-dayjs.locale('zh-cn')
-
-const { Title, Text } = Typography
-
-const SOURCE_LABEL_TEXT: Record<SourceLabel, string> = {
-  strategy_pnl: '策略PnL',
-  position_sum_pnl: '持仓浮盈',
-  account_equity: '账户权益',
-  unavailable: '无数据',
-}
-
-const SOURCE_LABEL_HELP: Record<SourceLabel, string> = {
-  strategy_pnl: '从策略 variables 中的 PnL 字段直接读取',
-  position_sum_pnl: '按 vt_symbol 聚合匹配持仓的浮动盈亏',
-  account_equity: '账户总权益，多策略共享时为近似值',
-  unavailable: '当前没有可用数据',
-}
-
-function fmtValue(v: number | null | undefined): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return '-'
-  return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
-
-function valueColor(
-  v: number | null | undefined,
-  label: SourceLabel | null,
-): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return 'var(--ap-text-muted)'
-  // account_equity / strategy_pnl: absolute number, use brand blue
-  if (label === 'account_equity') return 'var(--ap-info)'
-  // position_sum_pnl / strategy_pnl: signed value, A-share red-up / green-down convention
-  if (v > 0) return 'var(--ap-market-up)'
-  if (v < 0) return 'var(--ap-market-down)'
-  return 'var(--ap-text)'
-}
-
-interface StrategyCardProps {
-  item: StrategySummary
-  onClick: () => void
-  /** 用于支持右键「新标签页打开」的 SPA URL —— 卡内 strategy_name 标题
-      会渲染成 <Link to={detailHref}>，浏览器接管右键菜单。 */
-  detailHref: string
-}
-
-const StrategyCard: React.FC<StrategyCardProps> = ({ item, onClick, detailHref }) => {
-  const label = (item.source_label || 'unavailable') as SourceLabel
-  const isOffline = Boolean(item.node_offline)
-  const badgeStatus: 'processing' | 'default' | 'warning' | 'error' =
-    isOffline ? 'error' : item.running ? 'processing' : item.inited ? 'warning' : 'default'
-  const badgeText = isOffline ? '节点离线' : item.running ? '运行中' : item.inited ? '已初始化' : '未初始化'
-
-  // mode 视觉编码：实盘红色警示，模拟绿色，离线灰色（走主题 token）
-  const isLive = item.mode === 'live'
-  const modeColor = isOffline
-    ? 'var(--ap-text-dim)'
-    : isLive
-      ? 'var(--ap-danger)'
-      : 'var(--ap-success)'
-  // 透明 bg 配色边框 + 同色文字，dark/light 都清晰可读
-  const modeBg = 'transparent'
-  const modeText = isOffline ? '离线' : isLive ? '实盘' : '模拟'
-  const modeIcon = isOffline ? '🔌' : isLive ? '⚠' : '🧪'
-
-  return (
-    <Card
-      hoverable
-      onClick={onClick}
-      style={{
-        cursor: 'pointer',
-        borderLeft: `4px solid ${modeColor}`,
-      }}
-      styles={{ body: { padding: '16px 18px' } }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: 'var(--ap-text)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-            title={item.strategy_name}
-          >
-            <span
-              style={{
-                display: 'inline-block',
-                marginRight: 8,
-                padding: '1px 8px',
-                fontSize: 11,
-                fontWeight: 600,
-                color: modeColor,
-                background: modeBg,
-                border: `1px solid ${modeColor}`,
-                borderRadius: 3,
-                verticalAlign: 'middle',
-              }}
-              title={item.gateway_name ? `gateway: ${item.gateway_name}` : '未识别 gateway'}
-            >
-              {modeIcon} {modeText}
-            </span>
-            {/* 标题渲染为 SPA Link，使浏览器右键菜单能识别这个路径 */}
-            <Link
-              to={detailHref}
-              onClick={(e) => e.stopPropagation()}
-              style={{ color: 'inherit', textDecoration: 'none' }}
-            >
-              {item.strategy_name}
-            </Link>
-          </div>
-          <Space size={4} style={{ marginTop: 4 }}>
-            <Tag color="geekblue" style={{ margin: 0 }}>
-              {item.node_id}
-            </Tag>
-            <Tag color="purple" style={{ margin: 0 }}>
-              {item.engine}
-            </Tag>
-            {item.class_name && (
-              <Tag style={{ margin: 0 }}>{item.class_name}</Tag>
-            )}
-          </Space>
-        </div>
-        <Badge status={badgeStatus} text={<Text style={{ fontSize: 12 }}>{badgeText}</Text>} />
-      </div>
-
-      <div style={{ marginTop: 14 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'baseline',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {SOURCE_LABEL_TEXT[label]}{' '}
-              <Tooltip title={SOURCE_LABEL_HELP[label]}>
-                <InfoCircleOutlined style={{ fontSize: 10 }} />
-              </Tooltip>
-            </Text>
-            <div
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: valueColor(item.strategy_value, label),
-                fontFamily: "'SF Mono', 'Consolas', monospace",
-              }}
-            >
-              {fmtValue(item.strategy_value)}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              持仓 {item.positions_count}
-            </Text>
-            <div style={{ fontSize: 11, color: 'var(--ap-text-muted)' }}>
-              {item.last_update_ts ? dayjs(item.last_update_ts).fromNow() : '-'}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 12, height: 40 }}>
-        <MiniEquityChart points={item.mini_curve} height={40} />
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <StrategyActions
-          nodeId={item.node_id}
-          engine={item.engine}
-          name={item.strategy_name}
-          capabilities={item.capabilities}
-          inited={item.inited}
-          trading={item.trading}
-          compact
-        />
-      </div>
-    </Card>
-  )
-}
-
-type ModeFilter = 'all' | 'live' | 'sim' | 'offline'
+import GlobalKpiStrip from './components/GlobalKpiStrip'
+import FilterBar from './components/FilterBar'
+import NodeSection from './components/NodeSection'
+import { NowMsProvider } from './hooks/useNowMs'
+import { useDensity } from './hooks/useDensity'
+import { useNodeCollapse } from './hooks/useNodeCollapse'
+import { useStrategyFilters } from './hooks/useStrategyFilters'
+import {
+  buildDownstreamCountMap,
+  groupStrategiesByNode,
+  summarizeStrategies,
+} from './utils/groupByNode'
+import { nextRunInMs, parseTimeOfDay } from './utils/scheduleParse'
+import dayjs from 'dayjs'
 
 const LiveTradingPage: React.FC = () => {
   const navigate = useNavigate()
@@ -227,10 +43,12 @@ const LiveTradingPage: React.FC = () => {
     vt_symbol?: string
     settingOverrides?: Record<string, unknown>
   } | undefined>(undefined)
-  const [modeFilter, setModeFilter] = useState<ModeFilter>('all')
 
-  // V3.9: 工作台 DeployModal 跳转过来时 location.state 携带 prefillFromTuningJob
-  // 拉 manifest → 预填 wizard → 自动打开
+  const [density, setDensity] = useDensity()
+  const collapse = useNodeCollapse()
+  const { filters, set: setFilters } = useStrategyFilters()
+
+  // V3.9 工作台 → 实盘部署预填
   useEffect(() => {
     const state = location.state as
       | { prefillFromTuningJob?: number; prefillNodeId?: string; prefillEngine?: string; prefillStrategyName?: string; prefillVtSymbol?: string }
@@ -244,7 +62,6 @@ const LiveTradingPage: React.FC = () => {
         setWizardInitialValues({
           nodeId: state.prefillNodeId,
           engine: state.prefillEngine,
-          className: undefined,  // 让用户自己选（class 跟 engine 强相关）
           strategy_name: state.prefillStrategyName,
           vt_symbol: state.prefillVtSymbol,
           settingOverrides: {
@@ -256,14 +73,8 @@ const LiveTradingPage: React.FC = () => {
         })
         setWizardOpen(true)
       })
-      .catch(() => {
-        // 失败让用户手动新建
-        setWizardOpen(true)
-      })
-      .finally(() => {
-        // 清掉 state 防 reload 重复触发
-        navigate(location.pathname, { replace: true, state: null })
-      })
+      .catch(() => setWizardOpen(true))
+      .finally(() => navigate(location.pathname, { replace: true, state: null }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
 
@@ -274,130 +85,273 @@ const LiveTradingPage: React.FC = () => {
     staleTime: 0,
   })
 
+  const nodes = nodesQuery.data?.data || []
+  const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
+
   const strategiesQuery = useQuery({
     queryKey: ['live-strategies'],
     queryFn: () => liveTradingService.listStrategies(),
     refetchInterval: 5000,
     staleTime: 0,
+    enabled: nodes.length === 0 ? true : !allOffline,  // 全离线时停止策略轮询，nodes 仍轮询以恢复
   })
 
-  const nodes = nodesQuery.data?.data || []
   const allStrategies = strategiesQuery.data?.data || []
-  // 离线策略 mode=null：在 live/sim filter 下也始终显示（用户原来是 live/sim
-  // 跑的策略，节点断联后仍想看到历史/删除记录）；'offline' 模式下只显示离线
-  const strategies = modeFilter === 'all'
-    ? allStrategies
-    : modeFilter === 'offline'
-      ? allStrategies.filter((s) => s.node_offline)
-      : allStrategies.filter((s) => s.mode === modeFilter || s.node_offline)
-  const liveCount = allStrategies.filter((s) => s.mode === 'live').length
-  const simCount = allStrategies.filter((s) => s.mode === 'sim').length
-  const offlineCount = allStrategies.filter((s) => s.node_offline).length
   const warning = strategiesQuery.data?.warning || null
-  const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
+
+  // 应用 filter / sort / search
+  const visibleStrategies = useMemo(
+    () => filterAndSort(allStrategies, filters),
+    [allStrategies, filters],
+  )
+
+  const summary = useMemo(() => summarizeStrategies(allStrategies), [allStrategies])
+  const groups = useMemo(
+    () => groupStrategiesByNode(nodes, visibleStrategies),
+    [nodes, visibleStrategies],
+  )
+  const downstreamCounts = useMemo(
+    () => buildDownstreamCountMap(allStrategies),
+    [allStrategies],
+  )
+
+  // 单节点退化：当用户实际只配了一个节点时，隐藏 NodeSectionHeader 直接平铺
+  const singleNode = nodes.length <= 1
+
+  // 跨卡片跳转（影子 → 上游）
+  const handleJumpToStrategy = (name: string) => {
+    const el = document.querySelector(`[data-strategy-name="${CSS.escape(name)}"]`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.animate(
+      [
+        { boxShadow: '0 0 0 0 rgba(59, 130, 246, 0.6)' },
+        { boxShadow: '0 0 0 6px rgba(59, 130, 246, 0)' },
+      ],
+      { duration: 1200, iterations: 2 },
+    )
+  }
+
+  const handleCreateForNode = (nodeId: string) => {
+    setWizardInitialValues({ nodeId })
+    setWizardOpen(true)
+  }
 
   return (
-    <PageContainer
-      title="实盘交易"
-      subtitle="跨节点策略汇总 · 5秒自动刷新"
-      actions={
-        <Space wrap>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              nodesQuery.refetch()
-              strategiesQuery.refetch()
-            }}
-          >
-            刷新
-          </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setWizardOpen(true)}
-            disabled={nodes.filter((n) => n.online).length === 0}
-          >
-            新建策略
-          </Button>
-        </Space>
-      }
-    >
-
-      <Card styles={{ body: { padding: '12px 16px' } }} style={{ marginBottom: 12 }}>
-        <NodeStatusBar nodes={nodes} />
-      </Card>
-
-      <div style={{ marginBottom: 12 }}>
-        <Segmented
-          value={modeFilter}
-          onChange={(v) => setModeFilter(v as ModeFilter)}
-          options={[
-            { label: `全部 (${allStrategies.length})`, value: 'all' },
-            { label: `⚠ 实盘 (${liveCount})`, value: 'live' },
-            { label: `🧪 模拟 (${simCount})`, value: 'sim' },
-            ...(offlineCount > 0
-              ? [{ label: `🔌 离线 (${offlineCount})` , value: 'offline' as const }]
-              : []),
-          ]}
-        />
-      </div>
-
-      {allOffline && (
-        <Alert
-          type="error"
-          showIcon
-          message="所有 vnpy 节点均不可达"
-          description="请检查 SSH 隧道 / vnpy_webtrader 是否启动"
-          style={{ marginBottom: 12 }}
-        />
-      )}
-
-      {warning && (
-        <Alert
-          type="warning"
-          showIcon
-          message={warning}
-          style={{ marginBottom: 12 }}
-          closable
-        />
-      )}
-
-      {strategiesQuery.isLoading ? (
-        <div style={{ textAlign: 'center', padding: 60 }}>
-          <Spin />
+    <NowMsProvider>
+      <PageContainer
+        title="实盘交易"
+        subtitle="跨节点策略汇总 · 5秒自动刷新"
+        actions={
+          <Space wrap>
+            <Segmented
+              size="small"
+              value={density}
+              onChange={(v) => setDensity(v as typeof density)}
+              options={[
+                { label: '舒适', value: 'comfort' },
+                { label: '紧凑', value: 'compact' },
+              ]}
+            />
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                nodesQuery.refetch()
+                strategiesQuery.refetch()
+              }}
+            >
+              刷新
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setWizardOpen(true)}
+              disabled={nodes.filter((n) => n.online).length === 0}
+            >
+              新建策略
+            </Button>
+          </Space>
+        }
+      >
+        <div style={{ marginBottom: 12 }}>
+          <GlobalKpiStrip
+            liveCount={summary.live}
+            simCount={summary.sim}
+            offlineCount={summary.offline}
+            scheduleAlerts={summary.scheduleAlerts}
+            totalEquity={summary.totalEquity}
+            nodeOnline={nodes.filter((n) => n.online).length}
+            nodeTotal={nodes.length}
+          />
         </div>
-      ) : strategies.length === 0 ? (
-        <Card>
-          <Empty description="尚无策略。点击右上角『新建策略』开始" />
-        </Card>
-      ) : (
-        <Row gutter={[16, 16]}>
-          {strategies.map((s) => {
-            const detailHref = `/live-trading/${encodeURIComponent(s.node_id)}/${encodeURIComponent(s.engine)}/${encodeURIComponent(s.strategy_name)}`
-            return (
-              <Col key={`${s.node_id}-${s.engine}-${s.strategy_name}`} xs={24} md={12} xl={8}>
-                <StrategyCard
-                  item={s}
-                  detailHref={detailHref}
-                  onClick={() => navigate(detailHref)}
-                />
-              </Col>
-            )
-          })}
-        </Row>
-      )}
 
-      <StrategyCreateWizard
-        open={wizardOpen}
-        onClose={() => {
-          setWizardOpen(false)
-          setWizardInitialValues(undefined)
-        }}
-        nodes={nodes}
-        initialValues={wizardInitialValues}
-      />
-    </PageContainer>
+        <div style={{ marginBottom: 12 }}>
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            nodes={nodes}
+            liveCount={summary.live}
+            simCount={summary.sim}
+            offlineCount={summary.offline}
+          />
+        </div>
+
+        {allOffline && (
+          <Alert
+            type="error"
+            showIcon
+            message="所有 vnpy 节点均不可达"
+            description="请检查 SSH 隧道 / vnpy_webtrader 是否启动"
+            style={{ marginBottom: 12 }}
+          />
+        )}
+
+        {warning && (
+          <Alert
+            type="warning"
+            showIcon
+            message={warning}
+            style={{ marginBottom: 12 }}
+            closable
+          />
+        )}
+
+        {/* 状态分支 */}
+        {strategiesQuery.isLoading && nodesQuery.isLoading ? (
+          <Card>
+            <Skeleton active paragraph={{ rows: 6 }} />
+          </Card>
+        ) : nodes.length === 0 ? (
+          <Card>
+            <Empty description="尚未注册 vnpy 节点；请检查 mlearnweb/backend/vnpy_nodes.yaml" />
+          </Card>
+        ) : visibleStrategies.length === 0 && allStrategies.length > 0 ? (
+          <Card>
+            <Empty description="无策略匹配当前过滤条件" />
+          </Card>
+        ) : groups.length === 0 ? (
+          <Card>
+            <Empty description="尚无策略。点击右上角『新建策略』开始" />
+          </Card>
+        ) : (
+          groups.map((g) => (
+            <NodeSection
+              key={g.node.node_id}
+              node={g.node}
+              strategies={g.strategies}
+              liveCount={g.liveCount}
+              simCount={g.simCount}
+              failedCount={g.failedCount}
+              offlineCount={g.offlineCount}
+              density={density}
+              collapsed={collapse.isCollapsed(g.node.node_id)}
+              onToggleCollapse={() => collapse.toggle(g.node.node_id)}
+              downstreamCounts={downstreamCounts}
+              onJumpToStrategy={handleJumpToStrategy}
+              onCreateStrategy={handleCreateForNode}
+              hideHeader={singleNode}
+            />
+          ))
+        )}
+
+        <StrategyCreateWizard
+          open={wizardOpen}
+          onClose={() => {
+            setWizardOpen(false)
+            setWizardInitialValues(undefined)
+          }}
+          nodes={nodes}
+          initialValues={wizardInitialValues}
+        />
+      </PageContainer>
+    </NowMsProvider>
   )
+}
+
+/** 应用 filter + sort + search 全管线。 */
+function filterAndSort(
+  strategies: StrategySummary[],
+  filters: ReturnType<typeof useStrategyFilters>['filters'],
+): StrategySummary[] {
+  let out = strategies
+
+  // mode
+  if (filters.mode !== 'all') {
+    if (filters.mode === 'offline') out = out.filter((s) => s.node_offline)
+    else out = out.filter((s) => s.mode === filters.mode || s.node_offline)
+  }
+
+  // node 多选
+  if (filters.nodeIds.length > 0) {
+    const set = new Set(filters.nodeIds)
+    out = out.filter((s) => set.has(s.node_id))
+  }
+
+  // status
+  if (filters.status !== 'all') {
+    out = out.filter((s) => {
+      if (s.node_offline) return false
+      if (filters.status === 'running') return s.running
+      if (filters.status === 'inited') return s.inited && !s.running
+      if (filters.status === 'failed') return s.last_status === 'failed'
+      if (filters.status === 'never_run') return !s.last_run_date
+      return true
+    })
+  }
+
+  // search
+  const q = filters.search.trim().toLowerCase()
+  if (q) {
+    out = out.filter(
+      (s) =>
+        s.strategy_name.toLowerCase().includes(q) ||
+        (s.vt_symbol ?? '').toLowerCase().includes(q),
+    )
+  }
+
+  // sort
+  const sorted = [...out]
+  const now = dayjs()
+  switch (filters.sort) {
+    case 'name':
+      sorted.sort((a, b) => a.strategy_name.localeCompare(b.strategy_name))
+      break
+    case 'equity':
+      sorted.sort(
+        (a, b) =>
+          (b.strategy_value ?? -Infinity) - (a.strategy_value ?? -Infinity),
+      )
+      break
+    case 'last_status':
+      // failed > empty > null > ok
+      sorted.sort((a, b) => statusRank(a.last_status) - statusRank(b.last_status))
+      break
+    case 'next_run':
+    default:
+      sorted.sort((a, b) => {
+        const an = nextRunMinutes(a, now)
+        const bn = nextRunMinutes(b, now)
+        return an - bn
+      })
+      break
+  }
+  return sorted
+}
+
+function statusRank(s: StrategySummary['last_status']): number {
+  if (s === 'failed') return 0
+  if (s === 'empty') return 1
+  if (!s) return 2
+  return 3  // ok 排最后（最不需要关注）
+}
+
+function nextRunMinutes(s: StrategySummary, now: dayjs.Dayjs): number {
+  const mins = [parseTimeOfDay(s.trigger_time), parseTimeOfDay(s.buy_sell_time)]
+    .filter((v): v is number => v != null)
+  const ms = nextRunInMs(mins, now)
+  // 没有 schedule 的策略排到最后
+  if (ms == null) return Number.MAX_SAFE_INTEGER
+  return ms
 }
 
 export default LiveTradingPage
