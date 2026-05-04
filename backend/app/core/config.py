@@ -52,6 +52,22 @@ class Settings(BaseSettings):
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
     deployment_sync_interval_seconds: int = 600
 
+    # P1-3 Plan A: vnpy 节点 watchdog 周期 probe + 连续 offline 邮件告警。
+    # interval=探活周期（秒），threshold=连续 offline N 次后才发告警邮件（防抖）。
+    # 60s × 3 次 ≈ 3 分钟检测窗。recovery 邮件按状态切换发，不依赖 N。
+    watchdog_probe_interval_seconds: int = 60
+    watchdog_offline_threshold: int = 3
+
+    # SMTP 配置 (mlearnweb 进程发邮件用; vnpy 进程独立用 vt_setting.json email.*)
+    # 任一字段缺失 → watchdog 不发邮件, 仅日志记录 (并非 fatal).
+    smtp_server: Optional[str] = None
+    smtp_port: int = 465
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_sender: Optional[str] = None
+    smtp_receiver: Optional[str] = None
+    smtp_use_ssl: bool = True   # 465 → SSL; 587/25 → STARTTLS (use_ssl=False)
+
     # 聚宽（JoinQuant）持仓 JSON 导出目录。同机部署假设：与 strategy_dev/result/
     # 同一文件系统，复用旧 notebook 路径方便老脚本兼容。文件命名
     # ``joinquant_positions_record{record_id}_{ts}.json``，DB 用
