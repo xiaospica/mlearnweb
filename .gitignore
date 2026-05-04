@@ -20,3 +20,4 @@ frontend/tsconfig.tsbuildinfo
 .vscode
 .idea
 dist
+/frontend/tsconfig.tsbuildinfo
