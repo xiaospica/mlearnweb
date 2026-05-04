@@ -397,7 +397,13 @@ def _read_curve(
     strategy_name: str,
     limit: Optional[int] = None,
     since: Optional[datetime] = None,
+    dedupe_per_day: bool = True,
 ) -> List[Dict[str, Any]]:
+    """读策略权益曲线。dedupe_per_day=True (默认) 时,按 (DATE(ts), source_label)
+    去重保留每日最新一行 — 这样曲线既保留 replay_settle 历史 (1/天) 又把高频
+    account_equity 快照 (snapshot_loop ~10s/次) 压成日线。否则原始 limit/since
+    截断会让 list mini_curve 全是当日 account_equity 的平直线,看不到回放历史。
+    """
     q = (
         db.query(StrategyEquitySnapshot)
         .filter(
@@ -409,10 +415,23 @@ def _read_curve(
     )
     if since is not None:
         q = q.filter(StrategyEquitySnapshot.ts >= since)
-    if limit is not None:
-        q = q.limit(limit)
     rows = list(q)
+
+    if dedupe_per_day:
+        seen: set[Tuple[Any, str]] = set()
+        kept: List[StrategyEquitySnapshot] = []
+        for r in rows:  # 已是 ts desc, 第一次见 (date, source_label) 即最新
+            key = (r.ts.date(), r.source_label or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(r)
+        rows = kept
+
+    if limit is not None:
+        rows = rows[:limit]
     rows.reverse()  # chronological
+
     return [
         {
             "ts": int(r.ts.timestamp() * 1000),
@@ -502,7 +521,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             value, label, acct_eq = _resolve_strategy_value(
                 s, node_positions, node_accounts, gateway_name=gateway_name or None,
             )
-            curve = _read_curve(db, node_id, engine_name, name, limit=60)
+            curve = _read_curve(db, node_id, engine_name, name)
             inited = bool(s.get("inited"))
             trading = bool(s.get("trading"))
             summaries.append({
@@ -571,7 +590,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
         )
         if last is None:
             continue
-        curve = _read_curve(db, node_id, engine_name, strategy_name, limit=60)
+        curve = _read_curve(db, node_id, engine_name, strategy_name)
         summaries.append({
             "node_id": node_id,
             "engine": engine_name,
@@ -626,7 +645,7 @@ def _list_offline_strategies_for_node(
         )
         if last is None:
             continue
-        curve = _read_curve(db, node_id, engine_name, strategy_name, limit=60)
+        curve = _read_curve(db, node_id, engine_name, strategy_name)
         out.append({
             "node_id": node_id,
             "engine": engine_name,
