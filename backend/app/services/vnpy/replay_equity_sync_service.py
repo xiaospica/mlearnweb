@@ -39,8 +39,10 @@ logger = logging.getLogger(__name__)
 
 # 与 ml_monitoring_service / live_trading_service 一致, MlStrategy engine.
 ML_ENGINE_NAME = "MlStrategy"
-# 5 分钟 — 回放权益是历史值, 不需要高频拉取
-SYNC_POLL_INTERVAL_SECONDS = 300
+# 60s — 与 ml_snapshot_loop 周期一致. 历史值稳态不变, 但 demo / 实盘冷启动 (策略
+# 重新部署 / mlearnweb 重启) 时, 5min 周期会让用户最长等 5 分钟才看到回放权益曲线.
+# 60s 周期下稳态每分钟一次空查 (无新数据 → 0 行 UPSERT) 开销 < 50ms HTTP, 可忽略.
+SYNC_POLL_INTERVAL_SECONDS = 60
 # vnpy 端 endpoint 默认上限 100000, 我们一次最多拉 10000 行已远超 30 天回放 (30 行).
 SYNC_LIMIT = 10000
 # 'replay_settle' source_label 与 vnpy_ml_strategy.template._persist_replay_equity_snapshot
