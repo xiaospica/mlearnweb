@@ -120,6 +120,47 @@ class TrainingRunMapping(Base):
     training_record = relationship("TrainingRecord", back_populates="run_mappings")
 
 
+class JoinquantExport(Base):
+    """聚宽（JoinQuant）持仓 JSON 导出索引表。
+
+    一条 export 记录 = 用户在某个 training_record 详情页点了"生成聚宽 JSON" 一次。
+    文件实际写到 ``settings.joinquant_export_dir`` 下；本表只索引元数据让 UI 能
+    列出/下载/删除/审计。
+
+    选择不挂 mlflow artifact 而是文件 + DB 索引的理由详见
+    ``mlearnweb/docs/plan/`` 的导出方案评估（方案 2 — DB 索引 + 文件存储）。
+
+    字段语义：
+      - ``training_record_id`` : 该次导出来源的训练记录；ON DELETE CASCADE 跟着删
+      - ``mlflow_run_ids``     : JSON list，记录聚合时用了哪些 run（滚动训练 N 期 → N 个）
+      - ``file_path``          : 绝对路径，便于跨进程读写时无歧义
+      - ``status``             : "ok" | "failed"；失败时 file_path 可为空, ``error_msg`` 填原因
+      - ``sha256`` / ``file_size`` : 完整性校验 + UI 展示
+      - ``created_by``         : 预留多用户审计字段；当前 mlearnweb 无 auth, 默认 NULL
+    """
+    __tablename__ = "joinquant_exports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    training_record_id = Column(
+        Integer,
+        ForeignKey("training_records.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_path = Column(String(1024), nullable=True)
+    file_name = Column(String(255), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+    mlflow_run_ids = Column(JSON, nullable=True)
+    n_dates = Column(Integer, nullable=True)
+    n_runs_used = Column(Integer, nullable=True)
+    n_runs_skipped = Column(Integer, nullable=True)
+    status = Column(String(16), default="ok", nullable=False, index=True)
+    error_msg = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+
+
 class TuningJob(Base):
     """调参作业（auto_tune Optuna study 包装）。
 

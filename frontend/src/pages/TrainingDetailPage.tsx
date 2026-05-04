@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, Descriptions, Table, Tag, Button, Space, Typography, Spin, Empty, Row, Col, Statistic, Tooltip, Badge, Tabs, Input, message, Modal } from 'antd'
-import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined, EditOutlined, SaveOutlined, FileTextOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, InfoCircleOutlined, SettingOutlined, UnorderedListOutlined, FileSearchOutlined, MergeCellsOutlined, LineChartOutlined, CodeOutlined, EditOutlined, SaveOutlined, FileTextOutlined, ExportOutlined } from '@ant-design/icons'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { trainingService } from '@/services/trainingService'
@@ -11,6 +11,7 @@ import PageContainer from '@/components/layout/PageContainer'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 import ResponsiveDescriptions from '@/components/responsive/ResponsiveDescriptions'
 import { useResponsiveModalProps } from '@/hooks/useResponsiveModalProps'
+import JoinquantExportPanel from './components/JoinquantExportPanel'
 
 const MemoEditor = React.lazy(() => import('@/components/MemoEditor/MemoEditor'))
 
@@ -294,6 +295,13 @@ const TrainingDetailPage: React.FC = () => {
       ),
     })
   }
+
+  // 聚宽（JoinQuant）持仓 JSON 导出 — 单次 / 滚动训练都支持
+  tabItems.push({
+    key: 'joinquant',
+    label: <span><ExportOutlined /> 聚宽导出</span>,
+    children: <JoinquantExportPanel recordId={Number(id)} recordStatus={record?.status} />,
+  })
 
   tabItems.push({
     key: 'log',

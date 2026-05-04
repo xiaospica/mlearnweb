@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 
 from app.core.config import settings
 from app.models.database import init_db, get_db_session
-from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images, tuning, settings as settings_router
+from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images, tuning, settings as settings_router, joinquant_exports
 
 
 @asynccontextmanager
@@ -92,6 +92,7 @@ app.include_router(training_record_images.router)
 app.include_router(factor_docs.router)
 app.include_router(tuning.router)
 app.include_router(settings_router.router)
+app.include_router(joinquant_exports.router)
 
 
 @app.get("/")

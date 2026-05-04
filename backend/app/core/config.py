@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
     deployment_sync_interval_seconds: int = 600
 
+    # 聚宽（JoinQuant）持仓 JSON 导出目录。同机部署假设：与 strategy_dev/result/
+    # 同一文件系统，复用旧 notebook 路径方便老脚本兼容。文件命名
+    # ``joinquant_positions_record{record_id}_{ts}.json``，DB 用
+    # ``joinquant_exports`` 表索引。env 覆盖：JOINQUANT_EXPORT_DIR。
+    joinquant_export_dir: str = str(Path(_BASE_DIR).parent.parent / "strategy_dev" / "result")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

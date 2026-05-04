@@ -512,6 +512,27 @@ class TuningFinalizeRequest(BaseModel):
     trial_number: int = Field(..., ge=0)
 
 
+class JoinquantExportItem(BaseModel):
+    """聚宽持仓 JSON 导出元数据（前端表格展示）。"""
+    id: int
+    training_record_id: int
+    file_name: Optional[str] = None
+    file_path: Optional[str] = None
+    file_size: Optional[int] = None
+    sha256: Optional[str] = None
+    mlflow_run_ids: Optional[List[str]] = None
+    n_dates: Optional[int] = None
+    n_runs_used: Optional[int] = None
+    n_runs_skipped: Optional[int] = None
+    status: str = "ok"
+    error_msg: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TuningDeployRequest(BaseModel):
     """从工作台一键部署到 vnpy 实盘"""
     node_id: str = Field(..., min_length=1)
