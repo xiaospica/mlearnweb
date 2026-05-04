@@ -43,7 +43,10 @@ class Settings(BaseSettings):
     # 历史持仓浏览 endpoint 直读此处的 sim_trades 重建任意日期 EOD 持仓。
     # 同机部署假设：mlearnweb backend 与 vnpy 同机；跨机部署需后续升级到
     # vnpy_webtrader 暴露 /api/v1/positions/history 接口 + mlearnweb fanout。
-    vnpy_sim_db_root: str = r"F:\Quant\vnpy\vnpy_strategy_dev\vnpy_qmt_sim\.trading_state"
+    # [A2] 默认改为 D:/vnpy_data/state/ — 与 replay_history.db 同级, 便于备份.
+    # 旧路径 vnpy_qmt_sim/.trading_state/ 已废弃, 升级时 vnpy 端 mv 文件即可,
+    # mlearnweb 端 .env 同步更新 VNPY_SIM_DB_ROOT.
+    vnpy_sim_db_root: str = r"D:\vnpy_data\state"
 
     # 历史持仓重建用的活动 daily_merged_all_new.parquet (含 pct_chg / close)
     daily_merged_all_path: str = r"D:\vnpy_data\stock_data\daily_merged_all_new.parquet"
