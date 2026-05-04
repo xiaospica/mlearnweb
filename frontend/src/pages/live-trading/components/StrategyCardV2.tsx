@@ -42,13 +42,19 @@ function valueColor(v: number | null | undefined, label: SourceLabel | null): st
   return 'var(--ap-text)'
 }
 
-/** mode 视觉编码三层叠加：颜色 + tinted bg + 大写徽章。 */
+/** mode 视觉编码三层叠加：颜色 + tinted bg + 大写徽章。
+ *
+ * 基色统一用 `--ap-panel-elevated`（dark: #2c2c2c, light: #fff），相比 page bg
+ * `--ap-bg` (dark: #141414) 有约 18% 亮度差，确保卡片"浮"出来。tint 在此基础上
+ * 叠加 5% mode 主色，对比度足够但不刺眼。offline 卡片也保留 elevated bg —
+ * 视觉降级靠 leading 色条灰化 + 整卡 opacity，不再用 transparent 让它"沉"下去。
+ */
 function modeStyle(mode: StrategyMode | null, offline: boolean) {
   if (offline) {
     return {
       color: 'var(--ap-text-dim)',
       label: 'OFF',
-      tint: 'transparent',
+      tint: 'var(--ap-panel-elevated)',
       title: '节点离线 / 策略已停运',
     }
   }
@@ -56,14 +62,14 @@ function modeStyle(mode: StrategyMode | null, offline: boolean) {
     return {
       color: 'var(--ap-danger)',
       label: 'LIVE',
-      tint: 'color-mix(in srgb, var(--ap-danger) 4%, var(--ap-panel))',
+      tint: 'color-mix(in srgb, var(--ap-danger) 5%, var(--ap-panel-elevated))',
       title: '实盘',
     }
   }
   return {
     color: 'var(--ap-success)',
     label: 'SIM',
-    tint: 'color-mix(in srgb, var(--ap-success) 4%, var(--ap-panel))',
+    tint: 'color-mix(in srgb, var(--ap-success) 5%, var(--ap-panel-elevated))',
     title: '模拟',
   }
 }
@@ -96,19 +102,26 @@ const StrategyCardV2: React.FC<StrategyCardV2Props> = ({
   const ss = stateShape(item, offline)
   const sourceLabel = (item.source_label || 'unavailable') as SourceLabel
 
-  // leading 6px 色条饱和度由 state 调
-  const leadOpacity = offline ? 0.4 : item.running ? 1 : item.inited ? 0.6 : 0.3
+  // leading 6px 色条饱和度由 state 调（offline 70% 仍清晰可见，避免色条"消失"）
+  const leadOpacity = offline ? 0.7 : item.running ? 1 : item.inited ? 0.6 : 0.3
+  const leadColor = `color-mix(in srgb, ${ms.color} ${Math.round(leadOpacity * 100)}%, transparent)`
 
   return (
     <Card
       hoverable
+      className="live-card-v2"
       style={{
         position: 'relative',
         cursor: 'pointer',
         background: ms.tint,
         overflow: 'hidden',
-        // leading 6px 色条用 box-shadow inset 实现，不占内边距
-        boxShadow: `inset 6px 0 0 0 color-mix(in srgb, ${ms.color} ${Math.round(leadOpacity * 100)}%, transparent)`,
+        opacity: offline ? 0.85 : 1,
+        // CSS-var 暴露给 :hover 规则用，避免 hover 时丢失 leading 色条颜色
+        ['--card-lead' as string]: leadColor,
+        // 三段 box-shadow 复合：leading 色条（inset）+ 顶边高光 + 底部投影
+        // 顶边高光 + 投影来自全局 --ap-elevation-1 token，dark/light 主题各自定义
+        boxShadow: `inset 6px 0 0 0 ${leadColor}, var(--ap-elevation-1)`,
+        transition: 'box-shadow 0.18s ease, transform 0.18s ease',
       }}
       styles={{ body: { padding: '14px 16px 14px 18px' } }}
       data-strategy-name={item.strategy_name}
@@ -332,3 +345,21 @@ export default React.memo(StrategyCardV2, (prev, next) => {
     prev.detailHref === next.detailHref
   )
 })
+
+// 一次性注入 hover 提升样式：保留 leading 色条 + 切换到 elevation-2 + 上移 1px
+// 用 !important 覆盖 inline style 的 boxShadow / transform。
+if (typeof document !== 'undefined' && !document.getElementById('live-card-v2-hover-styles')) {
+  const style = document.createElement('style')
+  style.id = 'live-card-v2-hover-styles'
+  style.textContent = `
+    .live-card-v2.ant-card {
+      border-color: var(--ap-border) !important;
+    }
+    .live-card-v2.ant-card.ant-card-hoverable:hover {
+      box-shadow: inset 6px 0 0 0 var(--card-lead, var(--ap-text-dim)), var(--ap-elevation-2) !important;
+      transform: translateY(-1px);
+      border-color: color-mix(in srgb, var(--card-lead, var(--ap-text-dim)) 40%, var(--ap-border)) !important;
+    }
+  `
+  document.head.appendChild(style)
+}

@@ -17,9 +17,10 @@ const STATUS_GLYPH: Record<LastStatus, { glyph: string; color: string; title: st
 }
 
 function modeBg(mode: StrategyMode | null, offline: boolean): string {
-  if (offline) return 'transparent'
-  if (mode === 'live') return 'color-mix(in srgb, var(--ap-danger) 4%, var(--ap-panel))'
-  return 'color-mix(in srgb, var(--ap-success) 4%, var(--ap-panel))'
+  // 与 StrategyCardV2 同源：用 panel-elevated 提升对比度，offline 也保留 elevated bg
+  if (offline) return 'var(--ap-panel-elevated)'
+  if (mode === 'live') return 'color-mix(in srgb, var(--ap-danger) 5%, var(--ap-panel-elevated))'
+  return 'color-mix(in srgb, var(--ap-success) 5%, var(--ap-panel-elevated))'
 }
 
 function modeColor(mode: StrategyMode | null, offline: boolean): string {
@@ -68,7 +69,10 @@ const StrategyCardCompact: React.FC<StrategyCardCompactProps> = ({ item, detailH
         borderRadius: 8,
         border: '1px solid var(--ap-border)',
         background: modeBg(item.mode, offline),
-        boxShadow: `inset 4px 0 0 0 ${modeColor(item.mode, offline)}`,
+        // 复合 box-shadow：4px leading 色条 + elevation-1 立体感
+        boxShadow: `inset 4px 0 0 0 ${modeColor(item.mode, offline)}, var(--ap-elevation-1)`,
+        opacity: offline ? 0.85 : 1,
+        transition: 'box-shadow 0.18s ease, transform 0.18s ease',
       }}
     >
       {/* mode 徽章 */}
