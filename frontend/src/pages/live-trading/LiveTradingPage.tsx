@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import {
   Alert,
   Button,
@@ -83,6 +83,8 @@ const LiveTradingPage: React.FC = () => {
     queryFn: () => liveTradingService.listNodes(),
     refetchInterval: 10000,
     staleTime: 0,
+    // 离开/再回页面时保留上次节点列表，慢节点 (10s timeout) 不再阻塞首屏
+    placeholderData: keepPreviousData,
   })
 
   const nodes = nodesQuery.data?.data || []
@@ -94,6 +96,8 @@ const LiveTradingPage: React.FC = () => {
     refetchInterval: 5000,
     staleTime: 0,
     enabled: nodes.length === 0 ? true : !allOffline,  // 全离线时停止策略轮询，nodes 仍轮询以恢复
+    // 同 nodesQuery：返回页面时立即渲染上次数据，后台静默刷新
+    placeholderData: keepPreviousData,
   })
 
   const allStrategies = strategiesQuery.data?.data || []
@@ -115,8 +119,10 @@ const LiveTradingPage: React.FC = () => {
     [allStrategies],
   )
 
-  // 单节点退化：当用户实际只配了一个节点时，隐藏 NodeSectionHeader 直接平铺
-  const singleNode = nodes.length <= 1
+  // 节点 header 始终显示。之前为"避免单节点冗余"做过 hideHeader 退化，但实际
+  // 让用户完全看不到节点 base_url / mode / latency / 心跳等信息——回到"节点信息缺失"
+  // 的老痛点。现在不论几个节点都展示 header（重构原始目标）。
+  const hideNodeHeader = false
 
   // 跨卡片跳转（影子 → 上游）
   const handleJumpToStrategy = (name: string) => {
@@ -155,6 +161,10 @@ const LiveTradingPage: React.FC = () => {
             />
             <Button
               icon={<ReloadOutlined />}
+              loading={
+                (nodesQuery.isFetching && !nodesQuery.isLoading) ||
+                (strategiesQuery.isFetching && !strategiesQuery.isLoading)
+              }
               onClick={() => {
                 nodesQuery.refetch()
                 strategiesQuery.refetch()
@@ -249,7 +259,7 @@ const LiveTradingPage: React.FC = () => {
               downstreamCounts={downstreamCounts}
               onJumpToStrategy={handleJumpToStrategy}
               onCreateStrategy={handleCreateForNode}
-              hideHeader={singleNode}
+              hideHeader={hideNodeHeader}
             />
           ))
         )}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   Alert,
   App as AntApp,
@@ -47,12 +47,15 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const { guardWrite } = useOpsPassword()
   const queryClient = useQueryClient()
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['live-strategy', nodeId, engine, name],
     queryFn: () => liveTradingService.getStrategy(nodeId, engine, name),
     refetchInterval: 3000,
     staleTime: 0,
     enabled: !!(nodeId && engine && name),
+    // 离开 ↔ 再回 / 切 tab / 跨页跳转时保留上次数据；vnpy 慢节点 (10s timeout)
+    // 不再阻塞首屏。后台刷新时通过 isFetching 给一个低调指示器。
+    placeholderData: keepPreviousData,
   })
 
   const detail = data?.success ? data?.data : null
@@ -100,7 +103,7 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/live-trading')} size="small">
             返回
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} size="small">
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()} size="small" loading={isFetching && !isLoading}>
             刷新
           </Button>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
