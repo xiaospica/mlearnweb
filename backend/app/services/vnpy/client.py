@@ -36,10 +36,15 @@ class VnpyClientError(Exception):
 class _PerNodeClient:
     def __init__(self, node: NodeConfig) -> None:
         self.node = node
-        # 仅作 AsyncClient 默认超时（也是兜底）；每次请求会按运行时配置覆盖
+        # 仅作 AsyncClient 默认超时（也是兜底）；每次请求会按运行时配置覆盖.
+        # trust_env=False — 不读 HTTP_PROXY / HTTPS_PROXY env. mlearnweb 跟
+        # vnpy 节点之间是直连 (本机 127.0.0.1 / SSH 隧道 / 局域网内网),
+        # 不应该被开发机上的全局 proxy (常见 Clash/v2ray 7890) 拦截.
+        # 默认 trust_env=True 会让 mlearnweb 走代理 → 7890 拒绝转发到 8001 → 502.
         self._client = httpx.AsyncClient(
             base_url=node.base_url,
             timeout=settings.vnpy_request_timeout,
+            trust_env=False,
         )
         self._token: Optional[str] = None
         self._token_expire_ts: float = 0.0
