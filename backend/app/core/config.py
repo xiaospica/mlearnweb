@@ -30,30 +30,17 @@ class Settings(BaseSettings):
     live_trading_ops_password: Optional[str] = None
 
     # ML strategy live output root (where subprocess writes predictions.parquet
-    # per day). Used by backtest-vs-live diff route. Override via env
-    # ``ML_LIVE_OUTPUT_ROOT``.
+    # per day). Phase 3.2 后所有读路径走 vnpy webtrader HTTP, 此字段仅供
+    # ``backtest-vs-live diff`` 路由的本地 fallback (同机部署优化), 跨机部署
+    # 留 None 即可. 覆盖: env ``ML_LIVE_OUTPUT_ROOT``.
     ml_live_output_root: Optional[str] = None
 
-    # Tushare daily merged snapshots root (vnpy_tushare_pro 每日 20:00 产出
-    # daily_merged_YYYYMMDD.parquet). 用于 corp action 检测等数据查询。
-    # 单机部署时通常与 vnpy_qmt_sim 共用同一目录。
-    daily_merged_root: str = r"D:\vnpy_data\snapshots\merged"
-
-    # vnpy_qmt_sim trading_state 目录（含 sim_<account_id>.db）。
-    # 历史持仓浏览 endpoint 直读此处的 sim_trades 重建任意日期 EOD 持仓。
-    # 同机部署假设：mlearnweb backend 与 vnpy 同机；跨机部署需后续升级到
-    # vnpy_webtrader 暴露 /api/v1/positions/history 接口 + mlearnweb fanout。
-    # [A2] 默认改为 D:/vnpy_data/state/ — 与 replay_history.db 同级, 便于备份.
-    # 旧路径 vnpy_qmt_sim/.trading_state/ 已废弃, 升级时 vnpy 端 mv 文件即可,
-    # mlearnweb 端 .env 同步更新 VNPY_SIM_DB_ROOT.
-    vnpy_sim_db_root: str = r"D:\vnpy_data\state"
-
-    # 历史持仓重建用的活动 daily_merged_all_new.parquet (含 pct_chg / close).
-    # 仅 historical_positions_service 的 sim db fallback 路径在用 (mark-to-market
-    # 的 settle 阶段 pct_chg). 跨机部署时通常 None — fallback 路径不可用,
-    # 历史持仓重建走 vnpy webtrader /api/v1/position/history 主路径.
-    # 同机部署时配此路径可让 fallback 路径精确还原成本价 (含除权调整).
-    daily_merged_all_path: Optional[str] = None
+    # vnpy_qmt_sim trading_state 目录 (含 sim_<account_id>.db). 历史持仓浏览
+    # endpoint 在 vnpy webtrader RPC 不可用时直读此处的 sim_trades 重建持仓
+    # (同机部署快路径). 跨机部署留 None — 主路径走 vnpy webtrader
+    # /api/v1/position/history 接口, fallback 自动 skip.
+    # [A2] 默认 D:/vnpy_data/state/ — 与 replay_history.db 同级便于备份.
+    vnpy_sim_db_root: Optional[str] = r"D:\vnpy_data\state"
 
     # Phase 3B: deployment 同步周期（秒）。10 分钟扫描一次 vnpy 节点策略并
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
@@ -84,6 +71,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # 容忍 .env 里残留的旧字段 (e.g. Phase 3.3 删除的 DAILY_MERGED_ROOT,
+        # 3.4 删的 DAILY_MERGED_ALL_PATH) — 升级时不强制用户改 .env, 进程
+        # 启动不报错. 升级日志里写一行 deprecation 提示即可.
+        extra = "ignore"
 
 
 settings = Settings()

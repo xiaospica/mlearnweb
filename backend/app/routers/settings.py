@@ -78,19 +78,8 @@ _L1_FIELD_META: Dict[str, Dict[str, Any]] = {
         "hint": "live_main 启动时读 yaml 构造 VnpyMultiNodeClient",
     },
     # ===== 远端策略机产物的本地挂载视图（不是权威配置） =====
-    "daily_merged_root": {
-        "env_var": "DAILY_MERGED_ROOT",
-        "restart": "main",
-        "ownership": "remote_mount_view",
-        "source_of_truth": {
-            "repo": "vnpy_strategy_dev",
-            "writer_path": "vnpy_tushare_pro/ml_data_build/daily_ingest_pipeline.py",
-            "writer_env": "QS_DATA_ROOT",
-            "default_writer_value": "D:/vnpy_data → snapshots/merged/",
-            "note": "vnpy_tushare_pro 每日 20:00 在策略机本地写 daily_merged_YYYYMMDD.parquet。mlearnweb 这边的 DAILY_MERGED_ROOT 只是「我这台机器上看到这个目录的路径」，必须与策略机实际写入位置一致（同机部署填同绝对路径，跨机部署填 NFS/SMB 挂载点）。",
-        },
-        "hint": "mlearnweb 看到的策略机数据本地视图；权威配置在 vnpy_strategy_dev",
-    },
+    # Phase 3.3 后 daily_merged_root 已删除 — corp_actions 走 vnpy webtrader
+    # /api/v1/reference/corp_actions, mlearnweb 不再直读策略机 parquet.
     "ml_live_output_root": {
         "env_var": "ML_LIVE_OUTPUT_ROOT",
         "restart": "live_main",
@@ -234,7 +223,6 @@ def _build_env_payload() -> Dict[str, Any]:
             "upload_dir": str(settings.upload_dir),
             "vnpy_nodes_config_path": settings.vnpy_nodes_config_path,
             # L2 可热改 —— 走 effective
-            "daily_merged_root": _eff("daily_merged_root", settings.daily_merged_root),
             "ml_live_output_root": _eff("ml_live_output_root", settings.ml_live_output_root),
         },
         "vnpy": {

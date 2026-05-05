@@ -97,11 +97,13 @@ class SettingSpec:
 
 
 SETTING_REGISTRY: Dict[str, SettingSpec] = {
-    # 注意：daily_merged_root / ml_live_output_root 等「远端数据挂载点」类路径
-    # 故意不收录在 registry 中。它们的本质是 mlearnweb 机器上挂载策略服务器
-    # 输出目录的本地挂载点，由 deploy 时 sysadmin 在 .env 配置；通过 web UI
-    # 修改它们只会让 mlearnweb 这一侧偏离写方实际路径，造成两侧不一致。
-    # 此类字段保留为 L1（仅 .env 可改 + 重启进程生效）。
+    # 注意：ml_live_output_root 等「远端数据挂载点」类路径故意不收录在 registry 中。
+    # 它们的本质是 mlearnweb 机器上挂载策略服务器输出目录的本地挂载点，由
+    # deploy 时 sysadmin 在 .env 配置；通过 web UI 修改它们只会让 mlearnweb
+    # 这一侧偏离写方实际路径，造成两侧不一致。此类字段保留为 L1
+    # (仅 .env 可改 + 重启进程生效)。
+    # Phase 3.3 后 daily_merged_root 已删除 — corp_actions 走 vnpy webtrader
+    # /api/v1/reference/corp_actions HTTP, mlearnweb 不再需要本地挂载点.
     # --- vnpy（mlearnweb 本进程行为，非远端依赖）---
     "vnpy_request_timeout": SettingSpec(
         key="vnpy_request_timeout",
