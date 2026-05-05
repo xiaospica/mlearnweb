@@ -2,26 +2,25 @@
 
 把"mlearnweb 解耦 vnpy 推理侧文件依赖" + "Windows Server 快速部署"两件事合并成一条端到端路线，按依赖排序。
 
-## 当前进度（2026-05-05）
+## 当前进度（2026-05-06）— 全部完成 ✅
 
 ```mermaid
 flowchart LR
     classDef done fill:#22c55e,color:#fff
-    classDef current fill:#3b82f6,color:#fff
-    classDef todo fill:#6b7280,color:#fff
 
     P1[Phase 1<br/>vnpy IC 闭环<br/>✓ bc28425]:::done
     P2[Phase 2<br/>mlearnweb 删 IC 计算<br/>✓ 1207ea8]:::done
     P31[Phase 3.1<br/>stock_names HTTP<br/>✓ 30a4897 + ad3ac26]:::done
     HF1[Hotfix httpx trust_env<br/>✓ fddb4d7]:::done
     HF2[Hotfix 历史持仓 RPC<br/>✓ afc3152]:::done
-    P32[Phase 3.2<br/>predictions HTTP]:::current
-    P33[Phase 3.3<br/>corp_actions HTTP]:::todo
-    P34[Phase 3.4<br/>sim db fallback 简化]:::todo
-    P35[Phase 3.5<br/>config 字段清理]:::todo
-    P4[Phase 4<br/>Windows 快速部署]:::todo
+    HF3[Hotfix 时间窗口/股票名/TopK<br/>✓ vnpy 9837005+088ac54+cb79540<br/>✓ mlearnweb 2dda7b7+02043dc+43d10ca+7a24699+2914ef6]:::done
+    P32[Phase 3.2<br/>predictions HTTP<br/>✓ vnpy 088ac54 + mlearnweb 43d10ca]:::done
+    P33[Phase 3.3<br/>corp_actions HTTP<br/>✓ vnpy cb79540 + mlearnweb 7a24699]:::done
+    P34[Phase 3.4<br/>sim db fallback 简化<br/>✓ mlearnweb 2914ef6]:::done
+    P35[Phase 3.5<br/>config 字段清理<br/>✓ mlearnweb 2914ef6]:::done
+    P4[Phase 4<br/>Windows 快速部署<br/>✓ mlearnweb 70eb595]:::done
 
-    P1 --> P2 --> P31 --> HF1 --> HF2 --> P32 --> P33 --> P34 --> P35 --> P4
+    P1 --> P2 --> P31 --> HF1 --> HF2 --> HF3 --> P32 --> P33 --> P34 --> P35 --> P4
 ```
 
 ### 已完成（端到端本地自测通过 — 跑 run_ml_headless.py + 浏览器验证）
