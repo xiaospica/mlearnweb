@@ -38,36 +38,33 @@ async def get_strategy_positions_on_date_via_rpc(
 
     Returns (positions_list, warning). None list = RPC 失败/不可用,
     上层应回退到同机直读 sim db 路径。
+
+    Bug 修复: 之前的实现把 ``if per_node is None`` 当成了 RPC 主路径分支
+    (倒置), 导致正常情况下直接返 "RPC 不支持" 让上层走 fallback. 现在改为
+    无条件用 ``get_per_node`` 拿到 _PerNodeClient 后调 RPC, 抛异常归一为
+    None + warning.
     """
     client = get_vnpy_client()
     if node_id not in client.node_ids:
         return None, f"未知节点: {node_id}"
-    per_node = client.get_per_node(node_id) if hasattr(client, "get_per_node") else None
-    if per_node is None:
-        # 通过 _PerNodeClient 调用; client 的 get_strategy_positions_history 是 per-node 单跑
-        for n in getattr(client, "nodes", []):
-            if n.node_id == node_id:
-                # 复用 client 内部的 _PerNodeClient (通过 fanout 拿单节点)
-                # 简化: 直接用 _request 风格调用
-                try:
-                    sub = client._clients[node_id] if hasattr(client, "_clients") else None
-                    if sub is None:
-                        return None, "vnpy client 未暴露单节点入口"
-                    rows = await sub.get_strategy_positions_history(
-                        strategy_name, target_date_str, gateway_name=gateway_name or "",
-                    )
-                    # 节点端不做 enrichment, 这里补上中文名
-                    name_map = get_stock_name_map()
-                    for r in rows:
-                        r.setdefault("name", _resolve_stock_name(r.get("vt_symbol", ""), name_map))
-                    return rows, None
-                except VnpyClientError as e:
-                    return None, f"RPC 失败: {e}"
-                except Exception as e:
-                    logger.warning(f"[history_positions] RPC err: {e}")
-                    return None, f"RPC 异常: {e}"
-        return None, f"node_id={node_id} 不在 client.nodes"
-    return None, "RPC 不支持"
+    try:
+        per_node = client.get_per_node(node_id)
+        rows = await per_node.get_strategy_positions_history(
+            strategy_name, target_date_str, gateway_name=gateway_name or "",
+        )
+    except VnpyClientError as e:
+        return None, f"RPC 失败: {e}"
+    except Exception as e:
+        logger.warning(f"[history_positions] RPC err: {e}")
+        return None, f"RPC 异常: {e}"
+
+    if rows is None:
+        return None, "RPC 返回空 (节点端可能 sim db 不存在)"
+    # 节点端目前不做 stock name enrichment, 这里补上中文名
+    name_map = get_stock_name_map()
+    for r in rows:
+        r.setdefault("name", _resolve_stock_name(r.get("vt_symbol", ""), name_map))
+    return rows, None
 
 
 def _vt_to_ts(vt: str) -> str:

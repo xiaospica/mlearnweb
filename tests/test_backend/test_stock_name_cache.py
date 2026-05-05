@@ -70,7 +70,7 @@ class TestRefreshStockNamesOnce:
             async def get_reference_stock_names_first_ok(self):
                 return {"names": {}, "count": 0, "source_path": None}
 
-        with patch.object(cache_module, "get_vnpy_client", return_value=_EmptyClient(), create=True):
+        with patch("app.services.vnpy.client.get_vnpy_client", return_value=_EmptyClient()):
             n = asyncio.run(cache_module.refresh_stock_names_once())
 
         # 本地 cache 保留
@@ -88,7 +88,7 @@ class TestRefreshStockNamesOnce:
             async def get_reference_stock_names_first_ok(self):
                 raise RuntimeError("network down")
 
-        with patch.object(cache_module, "get_vnpy_client", return_value=_FailClient(), create=True):
+        with patch("app.services.vnpy.client.get_vnpy_client", return_value=_FailClient()):
             n = asyncio.run(cache_module.refresh_stock_names_once())
 
         assert n == 1
@@ -102,7 +102,7 @@ class TestRefreshStockNamesOnce:
             async def get_reference_stock_names_first_ok(self):
                 return {"names": "not a dict"}  # 错误结构
 
-        with patch.object(cache_module, "get_vnpy_client", return_value=_BadClient(), create=True):
+        with patch("app.services.vnpy.client.get_vnpy_client", return_value=_BadClient()):
             n = asyncio.run(cache_module.refresh_stock_names_once())
 
         assert n == 0  # cache 仍空
