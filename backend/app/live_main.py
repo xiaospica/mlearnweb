@@ -78,15 +78,11 @@ async def lifespan(app: FastAPI):
     # eager-build the multi-node client so any yaml / network issue surfaces at startup
     get_vnpy_client()
 
-    # 启动立即 backfill 一次 — 让用户 reset_sim_state + 重启 vnpy 回放完成后,
-    # 即使 vnpy vendor batch 不写 metrics.json, mlearnweb 启动后图表也立即有数据。
-    # ml_snapshot_loop 后续每 tick 也会调 backfill 持续兜底。
-    try:
-        from app.services.vnpy.ml_metrics_backfill_service import backfill_all_strategies
-        result = await asyncio.to_thread(backfill_all_strategies)
-        logger.info(f"[live_main] startup backfill: {result}")
-    except Exception as e:
-        logger.warning(f"[live_main] startup backfill failed (non-fatal): {e}")
+    # 注: 早期这里调 ml_metrics_backfill_service.backfill_all_strategies 兜底,
+    # 但那是在 mlearnweb 端扫 D:\ml_output / D:\vnpy_data\... 自己算 IC 的
+    # 误工实现 (违反"推理端算单日, 监控端跨天聚合"原则). vendor + vnpy_ml_strategy
+    # IC 闭环已补全 (vnpy commit bc28425), 现在 IC 完全由推理端负责; mlearnweb
+    # 启动后只需 historical_metrics_sync_loop 5min 一次 HTTP 拉到本地即可.
 
     equity_task = asyncio.create_task(snapshot_loop())
     ml_task = asyncio.create_task(ml_snapshot_loop())

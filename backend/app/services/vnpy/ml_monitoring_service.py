@@ -286,16 +286,11 @@ async def ml_snapshot_tick() -> None:
     finally:
         session.close()
 
-    # tick 末尾兜底回填 IC / score_histogram / pred_mean/std 等字段。
-    # vnpy vendor 的 batch run_inference 不写 metrics.json (cli/run_inference.py:206),
-    # 而 ml_snapshot_loop 拉的 metrics 字段是 None → db 没数据 → 前端图表全空。
-    # 这里每 tick 调一次自动 backfill (从 D:/ml_output predictions.parquet 算),
-    # 让用户每次清数据 + 重启 vnpy 后图表立即有数据 (无需手动跑 backfill 脚本)。
-    try:
-        from app.services.vnpy.ml_metrics_backfill_service import backfill_all_strategies
-        await asyncio.to_thread(backfill_all_strategies)
-    except Exception as e:
-        logger.warning(f"[ml_snapshot] backfill failed (non-fatal): {e}")
+    # 注: 早期此处调 ml_metrics_backfill_service.backfill_all_strategies 在
+    # mlearnweb 端扫 D:\ml_output / daily_merged 自己算 IC, 违反"推理端算单日,
+    # 监控端跨天聚合"原则 + 跨机部署不可行. 已删 (vnpy commit bc28425 后 vendor
+    # IcBackfillService 端到端闭环, IC 完全由推理端 metrics.json 提供). 监控端
+    # 拉取走 historical_metrics_sync_loop 5min 一次, 在独立 service 里.
 
 
 async def ml_snapshot_loop() -> None:

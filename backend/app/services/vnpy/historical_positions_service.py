@@ -116,7 +116,15 @@ def get_strategy_positions_on_date(
             "检查 mlearnweb 与 vnpy 是否同机 + VNPY_SIM_DB_ROOT 配置"
         )
 
-    # 1. 加载 daily_merged_all_new.parquet 拿 (ts, date) → pct_chg / close
+    # 1. 加载 daily_merged_all_new.parquet 拿 (ts, date) → pct_chg.
+    # daily_merged_all_path 为 None (跨机部署常见): fallback 路径不可用,
+    # 直接返错让上游 (historical_positions HTTP 端点) 走 vnpy webtrader
+    # /api/v1/position/history 主路径.
+    if not settings.daily_merged_all_path:
+        return None, (
+            "DAILY_MERGED_ALL_PATH 未配置, sim db fallback 路径不可用. "
+            "历史持仓重建请走 vnpy webtrader /api/v1/position/history 主路径."
+        )
     merged_path = Path(settings.daily_merged_all_path)
     if not merged_path.exists():
         return None, f"daily_merged_all_new.parquet 不存在: {merged_path}"

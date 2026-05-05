@@ -48,8 +48,12 @@ class Settings(BaseSettings):
     # mlearnweb 端 .env 同步更新 VNPY_SIM_DB_ROOT.
     vnpy_sim_db_root: str = r"D:\vnpy_data\state"
 
-    # 历史持仓重建用的活动 daily_merged_all_new.parquet (含 pct_chg / close)
-    daily_merged_all_path: str = r"D:\vnpy_data\stock_data\daily_merged_all_new.parquet"
+    # 历史持仓重建用的活动 daily_merged_all_new.parquet (含 pct_chg / close).
+    # 仅 historical_positions_service 的 sim db fallback 路径在用 (mark-to-market
+    # 的 settle 阶段 pct_chg). 跨机部署时通常 None — fallback 路径不可用,
+    # 历史持仓重建走 vnpy webtrader /api/v1/position/history 主路径.
+    # 同机部署时配此路径可让 fallback 路径精确还原成本价 (含除权调整).
+    daily_merged_all_path: Optional[str] = None
 
     # Phase 3B: deployment 同步周期（秒）。10 分钟扫描一次 vnpy 节点策略并
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
