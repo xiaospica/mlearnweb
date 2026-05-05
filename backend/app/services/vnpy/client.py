@@ -213,6 +213,29 @@ class _PerNodeClient:
             "GET", f"/api/v1/ml/strategies/{strategy_name}/prediction/latest/summary"
         ) or {}
 
+    async def get_ml_prediction_dates(self, strategy_name: str) -> List[str]:
+        """Phase 3.2: 列出策略可用的历史预测日期 (YYYY-MM-DD 升序).
+
+        给 ``historical_predictions_sync_service`` 用 — 拿到列表后逐天
+        ``get_ml_prediction_summary_by_date`` 灌进 SQLite ``ml_prediction_daily``.
+        """
+        return await self._request(
+            "GET", f"/api/v1/ml/strategies/{strategy_name}/prediction/dates"
+        ) or []
+
+    async def get_ml_prediction_summary_by_date(
+        self, strategy_name: str, yyyymmdd: str,
+    ) -> Dict[str, Any]:
+        """Phase 3.2: 按日 YYYYMMDD 取预测 summary (含 topk + score_histogram).
+
+        与 ``get_ml_prediction_summary`` 同结构, 但是从磁盘 ``metrics.json`` +
+        ``selections.parquet`` 读取的历史值, 不是 MetricsCache latest.
+        """
+        return await self._request(
+            "GET",
+            f"/api/v1/ml/strategies/{strategy_name}/prediction/{yyyymmdd}/summary",
+        ) or {}
+
     async def get_ml_health(self) -> Dict[str, Any]:
         return await self._request("GET", "/api/v1/ml/health") or {}
 
@@ -422,6 +445,20 @@ class VnpyMultiNodeClient:
         self, node_id: str, strategy_name: str
     ) -> Dict[str, Any]:
         return await self.get_per_node(node_id).get_ml_prediction_summary(strategy_name)
+
+    async def get_ml_prediction_dates(
+        self, node_id: str, strategy_name: str,
+    ) -> List[str]:
+        """Phase 3.2 — 单节点查可用历史预测日期."""
+        return await self.get_per_node(node_id).get_ml_prediction_dates(strategy_name)
+
+    async def get_ml_prediction_summary_by_date(
+        self, node_id: str, strategy_name: str, yyyymmdd: str,
+    ) -> Dict[str, Any]:
+        """Phase 3.2 — 单节点按日取预测 summary."""
+        return await self.get_per_node(node_id).get_ml_prediction_summary_by_date(
+            strategy_name, yyyymmdd,
+        )
 
     async def probe_nodes(self) -> List[Dict[str, Any]]:
         """Lightweight liveness probe. Never raises.

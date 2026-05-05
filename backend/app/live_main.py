@@ -27,6 +27,7 @@ from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
+from app.services.vnpy.historical_predictions_sync_service import historical_predictions_sync_loop
 from app.services.vnpy.replay_equity_sync_service import replay_equity_sync_loop
 from app.services.vnpy.stock_name_cache import stock_name_refresh_loop
 from app.services.vnpy.watchdog_service import watchdog_loop
@@ -89,6 +90,9 @@ async def lifespan(app: FastAPI):
     ml_task = asyncio.create_task(ml_snapshot_loop())
     # 方案 §2.4.5 — 同步推理机回填的历史 IC 到 SQLite (5min 一次)
     hist_sync_task = asyncio.create_task(historical_metrics_sync_loop())
+    # Phase 3.2 — 历史预测 summary (topk + histogram) 落库, 让前端"历史预测回溯"
+    # 选老日期也能拿到 TopK (之前 ml_snapshot_loop 只灌 latest, 老日期空白).
+    hist_pred_task = asyncio.create_task(historical_predictions_sync_loop())
     # A1/B2 解耦 — 拉 vnpy 端本地 replay_history.db 的回放权益快照 (5min 一次)
     replay_equity_task = asyncio.create_task(replay_equity_sync_loop())
     # Phase 3B — 部署追踪扫描 (10min 一次)
@@ -98,7 +102,7 @@ async def lifespan(app: FastAPI):
     # Phase 3 解耦 — ts_code → 中文简称 缓存 (每 1h 调 vnpy /api/v1/reference/stock_names)
     stock_name_task = asyncio.create_task(stock_name_refresh_loop())
     tasks = (
-        equity_task, ml_task, hist_sync_task, replay_equity_task,
+        equity_task, ml_task, hist_sync_task, hist_pred_task, replay_equity_task,
         deployment_task, watchdog_task, stock_name_task,
     )
     try:
