@@ -280,67 +280,19 @@ def load_live_predictions(
 # ---------------------------------------------------------------------------
 
 
-_STOCK_NAME_CACHE: Dict[str, Any] = {"mtime": 0.0, "mapping": {}, "path": None}
-
-
-def _resolve_stock_list_path() -> Optional["Path"]:
-    """查找 stock_list.parquet.
-
-    1. env ``TUSHARE_STOCK_LIST_PATH`` 显式指定 (含文件名)
-    2. env ``QS_DATA_ROOT`` 推导 ``{root}/stock_data/stock_list.parquet``
-    3. vnpy_strategy_dev 默认位置 ``F:/Quant/vnpy/vnpy_strategy_dev/stock_data/stock_list.parquet``
-       (与 ``TushareApiClient`` 当前 ``DATA_DIR = cwd/stock_data`` 一致)
-    """
-    import os
-    from pathlib import Path
-    env = os.getenv("TUSHARE_STOCK_LIST_PATH")
-    if env:
-        p = Path(env)
-        if p.exists():
-            return p
-    qs_root = os.getenv("QS_DATA_ROOT")
-    if qs_root:
-        p = Path(qs_root) / "stock_data" / "stock_list.parquet"
-        if p.exists():
-            return p
-    default = Path("F:/Quant/vnpy/vnpy_strategy_dev/stock_data/stock_list.parquet")
-    if default.exists():
-        return default
-    return None
-
-
 def get_stock_name_map() -> Dict[str, str]:
-    """返回 ts_code → 股票中文简称字典 (带 mtime 缓存).
+    """返回 ts_code → 股票中文简称字典 (来自 vnpy webtrader HTTP 缓存).
 
-    查不到或文件不存在返回空字典, 调用方应 fallback 到 ts_code 显示.
+    Phase 3 重构: 不再直读 stock_list.parquet (违反"mlearnweb 跨机部署不假设
+    能访问 vnpy 推理机文件系统"原则). 数据由 ``stock_name_cache.py`` 后台 async
+    协程定期 (1h) 调 ``GET /api/v1/reference/stock_names`` 拉取 + 缓存到内存
+    dict; 同步调用方走 ``get_stock_names_snapshot()`` 读快照.
+
+    vnpy 节点全部不可达 / 启动初期未拉到 → 返空 dict (调用方 fallback 显示
+    ts_code, 不报错).
     """
-    import pandas as pd
-    path = _resolve_stock_list_path()
-    if path is None:
-        return {}
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return _STOCK_NAME_CACHE.get("mapping", {}) or {}
-    if (
-        _STOCK_NAME_CACHE["mapping"]
-        and _STOCK_NAME_CACHE["path"] == path
-        and _STOCK_NAME_CACHE["mtime"] == mtime
-    ):
-        return _STOCK_NAME_CACHE["mapping"]
-    try:
-        df = pd.read_parquet(path, columns=["ts_code", "name"])
-    except Exception as e:  # noqa: BLE001
-        logger.warning("读取 stock_list.parquet 失败 path=%s err=%s", path, e)
-        return _STOCK_NAME_CACHE.get("mapping", {}) or {}
-    mapping = {
-        str(c): str(n)
-        for c, n in zip(df["ts_code"].tolist(), df["name"].tolist())
-        if isinstance(c, str) and c
-    }
-    _STOCK_NAME_CACHE.update({"mtime": mtime, "mapping": mapping, "path": path})
-    logger.info("stock_name_map reloaded: path=%s rows=%d", path, len(mapping))
-    return mapping
+    from app.services.vnpy.stock_name_cache import get_stock_names_snapshot
+    return get_stock_names_snapshot()
 
 
 # ---------------------------------------------------------------------------

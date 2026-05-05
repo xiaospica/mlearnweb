@@ -28,6 +28,7 @@ from app.services.vnpy.live_trading_service import snapshot_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
 from app.services.vnpy.replay_equity_sync_service import replay_equity_sync_loop
+from app.services.vnpy.stock_name_cache import stock_name_refresh_loop
 from app.services.vnpy.watchdog_service import watchdog_loop
 
 logger = logging.getLogger(__name__)
@@ -94,9 +95,11 @@ async def lifespan(app: FastAPI):
     deployment_task = asyncio.create_task(deployment_sync_loop())
     # P1-3 Plan A — vnpy 节点 watchdog (默认 60s 探活, 连续 3 次 offline 发邮件)
     watchdog_task = asyncio.create_task(watchdog_loop())
+    # Phase 3 解耦 — ts_code → 中文简称 缓存 (每 1h 调 vnpy /api/v1/reference/stock_names)
+    stock_name_task = asyncio.create_task(stock_name_refresh_loop())
     tasks = (
         equity_task, ml_task, hist_sync_task, replay_equity_task,
-        deployment_task, watchdog_task,
+        deployment_task, watchdog_task, stock_name_task,
     )
     try:
         yield

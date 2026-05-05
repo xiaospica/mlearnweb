@@ -177,6 +177,16 @@ class _PerNodeClient:
     async def get_node_health(self) -> Dict[str, Any]:
         return await self._request("GET", "/api/v1/node/health") or {}
 
+    # --- Market reference data (Phase 3 解耦) -------------------------------
+
+    async def get_reference_stock_names(self) -> Dict[str, Any]:
+        """全市场 ts_code → 中文简称字典 + count + source_path 元信息.
+
+        vnpy_webtrader routes_reference.py 暴露, 数据源 stock_list.parquet.
+        mlearnweb 端跨机部署不再直读文件, 走此 HTTP 端点.
+        """
+        return await self._request("GET", "/api/v1/reference/stock_names") or {}
+
     # --- ML monitoring (Phase 3.2) -----------------------------------------
 
     async def get_ml_metrics_latest(self, strategy_name: str) -> Dict[str, Any]:
@@ -455,6 +465,27 @@ class VnpyMultiNodeClient:
 
         results = await asyncio.gather(*(_one(nid, c) for nid, c in self._clients.items()))
         return list(results)
+
+    # --- market reference data (Phase 3 解耦) ------------------------------
+
+    async def get_reference_stock_names_first_ok(self) -> Dict[str, Any]:
+        """全市场 ts_code → 中文简称字典 — 任何一个 OK 节点都行 (静态参考数据).
+
+        多节点 fanout 取首个成功响应; 全部节点失败返空 dict + count=0
+        (调用方 fallback 到显示 ts_code).
+        """
+        if not self._clients:
+            return {"names": {}, "count": 0, "source_path": None}
+        for nid, client in self._clients.items():
+            try:
+                resp = await client.get_reference_stock_names()
+                if resp and resp.get("count", 0) > 0:
+                    return resp
+            except Exception as e:
+                logger.warning(
+                    "[vnpy.client] node=%s get_reference_stock_names failed: %s", nid, e,
+                )
+        return {"names": {}, "count": 0, "source_path": None}
 
     # --- single-node read helpers (engine introspection) -------------------
 
