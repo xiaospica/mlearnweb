@@ -2,6 +2,42 @@
 
 把"mlearnweb 解耦 vnpy 推理侧文件依赖" + "Windows Server 快速部署"两件事合并成一条端到端路线，按依赖排序。
 
+## 当前进度（2026-05-05）
+
+```mermaid
+flowchart LR
+    classDef done fill:#22c55e,color:#fff
+    classDef current fill:#3b82f6,color:#fff
+    classDef todo fill:#6b7280,color:#fff
+
+    P1[Phase 1<br/>vnpy IC 闭环<br/>✓ bc28425]:::done
+    P2[Phase 2<br/>mlearnweb 删 IC 计算<br/>✓ 1207ea8]:::done
+    P31[Phase 3.1<br/>stock_names HTTP<br/>✓ 30a4897 + ad3ac26]:::done
+    HF1[Hotfix httpx trust_env<br/>✓ fddb4d7]:::done
+    HF2[Hotfix 历史持仓 RPC<br/>✓ afc3152]:::done
+    P32[Phase 3.2<br/>predictions HTTP]:::current
+    P33[Phase 3.3<br/>corp_actions HTTP]:::todo
+    P34[Phase 3.4<br/>sim db fallback 简化]:::todo
+    P35[Phase 3.5<br/>config 字段清理]:::todo
+    P4[Phase 4<br/>Windows 快速部署]:::todo
+
+    P1 --> P2 --> P31 --> HF1 --> HF2 --> P32 --> P33 --> P34 --> P35 --> P4
+```
+
+### 已完成（端到端本地自测通过 — 跑 run_ml_headless.py + 浏览器验证）
+
+| Phase | Commit | 改动总结 | 验证 |
+|---|---|---|---|
+| **Phase 1** | vnpy `bc28425` | IcBackfillService on_complete 回调 reload metrics.json 到 MetricsCache + ic_forward_window 从 bundle/task.json 自动解析 + 38 单测 | `/api/v1/ml/strategies/.../metrics?days=30` 返回的 ic / rank_ic 字段非 null（实测 -0.13 ~ 0.07） |
+| **Phase 2** | mlearnweb `1207ea8` | 删 ml_metrics_backfill_service.py 整文件 + 删 backfill_ml_metrics_ic.py 脚本 + 升级 historical_metrics_sync 同步全字段 + INSERT-IF-MISSING + 13 新单测 | `/metrics/history` 返回 18 天完整 IC 时序 |
+| **Phase 3.1** | vnpy `30a4897` + mlearnweb `ad3ac26` | vnpy 加 `/api/v1/reference/stock_names` + mlearnweb stock_name_cache 后台 1h 协程 + 6 新单测 | 持仓中文简称正常显示（青岛港 / 中国海油 / 新和成 等 codepoints 正确） |
+| **Hotfix httpx** | mlearnweb `fddb4d7` | client.py `trust_env=False` 避免开发机 http_proxy 拦截 vnpy 节点请求 | 本机有 `http_proxy=127.0.0.1:7890` 时 mlearnweb 直连 8001 不走代理，local 节点 online ✓ |
+| **Hotfix 历史持仓** | mlearnweb `afc3152` | get_strategy_positions_on_date_via_rpc 逻辑倒置修复（之前永远走 fallback）+ test_stock_name_cache patch 路径修正 | `/positions/{yyyymmdd}` 返 7 行持仓 + 中文简称（杭州银行 / 南山铝业 等），不再误报"DAILY_MERGED_ALL_PATH 未配置" |
+
+mlearnweb backend 测试套：**160 全过**（128 原有 + 13 新增 historical_metrics_sync + 6 stock_name_cache + 13 其他）。
+
+vnpy_ml_strategy 测试套：107 / 7 — 7 个 fail 是预存 bug（git stash 验证过），与本次工作无关。Phase 1 新增 38 测全过。
+
 ## Context
 
 **目标**：mlearnweb 能作为**独立项目**部署到一台干净 Windows Server 2022 上，30 分钟内跑通；运行期不直读 vnpy 推理机的任何文件，所有数据走 HTTP（vnpy_webtrader 端点）。
@@ -11,18 +47,18 @@
 - vnpy 推理机：拉 bundle 实盘运行、写 metrics.json + predictions.parquet 到本地磁盘
 - 监控机（mlearnweb）：HTTP 拉 vnpy webtrader 数据 + 文件挂载 mlruns 用于研究侧 UI
 
-**当前阻塞**（按危险度）：
+**剩余阻塞**（按危险度）：
 
-| # | 问题 | 影响 |
-|---|---|---|
-| **A** | [vnpy_ml_strategy/engine.py:677-687](../../../../vnpy/vnpy_strategy_dev/vnpy_ml_strategy/engine.py#L677) `_trigger_ic_backfill` 创建 IcBackfillService 时没传 `on_complete` 回调 | run_ic_backfill 改磁盘 metrics.json 后，主进程 MetricsCache 不刷新 → webtrader 返回旧 IC → mlearnweb 拉到的永远是 null。**端到端 IC 数据流断的** |
-| **B** | [vnpy_ml_strategy/engine.py:683](../../../../vnpy/vnpy_strategy_dev/vnpy_ml_strategy/engine.py#L683) `forward_window=int(getattr(strat, "ic_forward_window", 2))` 默认硬编码 2 | 11 日 label / 20 日 label 策略 IC 全算错。**用错误参数算出错误 IC** |
-| **C** | [mlearnweb/backend/app/services/vnpy/ml_metrics_backfill_service.py:41](../../backend/app/services/vnpy/ml_metrics_backfill_service.py#L41) `_FORWARD_DAYS = 11` 写死 | mlearnweb 自己也算 IC（误工 + 重复计算 + 跨机部署不可行） |
-| **D** | mlearnweb 直读 `D:\vnpy_data\stock_data\daily_merged_all_new.parquet` / `D:\ml_output\` / `D:\vnpy_data\state\sim_*.db` | 跨机部署不可行；同机部署也是同步血泪 |
-| **E** | [mlearnweb/deploy/install_services.ps1:45-47](../../deploy/install_services.ps1#L45) 默认值是开发者工作站路径 | 干净 Windows Server 上 fail-fast 退出 |
-| **F** | 没有 install.ps1 一站式脚本（venv / pip / npm build / 防火墙 / Defender 排除散落各处） | 30 分钟一键部署做不到 |
-| **G** | 前端没有生产入口（vite 反代是 dev-only），运维起完不知道开哪个 URL | 默认体验差 |
-| **H** | mlearnweb 仓库根缺 README；docs 多用 ASCII art 而非 mermaid | 项目第一印象差 |
+| # | 问题 | 影响 | 状态 |
+|---|---|---|---|
+| ~~A~~ | ~~`_trigger_ic_backfill` 没传 on_complete~~ | ~~IC 写盘后 cache 不刷~~ | ✅ Phase 1 修复 |
+| ~~B~~ | ~~`forward_window` 默认 2 写死~~ | ~~跨策略 IC 全错~~ | ✅ Phase 1 修复 |
+| ~~C~~ | ~~mlearnweb 自算 IC~~ | ~~误工~~ | ✅ Phase 2 修复 |
+| **D** | mlearnweb 直读 `D:\ml_output\predictions.parquet` (Phase 3.2) / `daily_merged` 检测 corp_actions (Phase 3.3) / `sim db` fallback (Phase 3.4) | 跨机部署不可行；同机部署也是同步血泪 | ⏳ |
+| **E** | [deploy/install_services.ps1:45-47](../../deploy/install_services.ps1#L45) 默认值是开发者工作站路径 | 干净 Windows Server 上 fail-fast 退出 | ⏳ Phase 4 |
+| **F** | 没有 install.ps1 一站式脚本（venv / pip / npm build / 防火墙 / Defender 排除散落各处） | 30 分钟一键部署做不到 | ⏳ Phase 4 |
+| **G** | 前端没有生产入口（vite 反代是 dev-only），运维起完不知道开哪个 URL | 默认体验差 | ⏳ Phase 4 |
+| **H** | mlearnweb 仓库根缺 README；docs 多用 ASCII art 而非 mermaid | 项目第一印象差 | ⏳ Phase 4 |
 
 ---
 
