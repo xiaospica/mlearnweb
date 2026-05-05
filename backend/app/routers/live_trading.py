@@ -144,12 +144,14 @@ async def list_corp_actions(
     if not symbols:
         return _ok([])
     try:
-        events = corp_actions_service.detect_corp_actions(
-            vt_symbols=symbols,
+        # Phase 3.3 — service 退化为 vnpy webtrader 的 HTTP 客户端,
+        # 走 async 主路径避免在已运行 event loop 里 asyncio.run.
+        events = await corp_actions_service.detect_corp_actions_async(
+            symbols,
             lookback_days=days,
             threshold_pct=threshold_pct,
         )
-        # 序列化 dataclass → dict
+        # 序列化 dataclass → dict (前端契约不变)
         payload = [e.__dict__ for e in events]
         return _ok(payload)
     except Exception as exc:

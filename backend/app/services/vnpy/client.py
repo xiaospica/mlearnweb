@@ -192,6 +192,35 @@ class _PerNodeClient:
         """
         return await self._request("GET", "/api/v1/reference/stock_names") or {}
 
+    async def get_reference_corp_actions(
+        self,
+        vt_symbols: List[str],
+        days: int = 30,
+        threshold_pct: float = 0.5,
+    ) -> Dict[str, Any]:
+        """Phase 3.3 — 持仓最近 N 日除权事件 (HTTP 化).
+
+        之前 mlearnweb 直读 ``{daily_merged_root}/daily_merged_{T}.parquet`` 算
+        的逻辑搬到了 vnpy 端 ``/api/v1/reference/corp_actions``, 跨机部署不再
+        要求 mlearnweb 挂载推理机磁盘.
+
+        Returns
+        -------
+        ``{"events": [...], "count": int, "as_of": str, "snapshot_path": str|None}``
+        — events 即 ``CorpActionEvent.__dict__`` 列表, 与原 service 输出兼容.
+        """
+        if not vt_symbols:
+            return {"events": [], "count": 0}
+        return await self._request(
+            "GET",
+            "/api/v1/reference/corp_actions",
+            params={
+                "vt_symbols": ",".join(vt_symbols),
+                "days": days,
+                "threshold_pct": threshold_pct,
+            },
+        ) or {}
+
     # --- ML monitoring (Phase 3.2) -----------------------------------------
 
     async def get_ml_metrics_latest(self, strategy_name: str) -> Dict[str, Any]:
@@ -528,6 +557,35 @@ class VnpyMultiNodeClient:
                     "[vnpy.client] node=%s get_reference_stock_names failed: %s", nid, e,
                 )
         return {"names": {}, "count": 0, "source_path": None}
+
+    async def get_reference_corp_actions_first_ok(
+        self,
+        vt_symbols: List[str],
+        days: int = 30,
+        threshold_pct: float = 0.5,
+    ) -> Dict[str, Any]:
+        """Phase 3.3 — 多节点 fanout 取首个成功的 corp_actions 响应.
+
+        语义同 stock_names: 用全市场快照的节点都 OK (任意节点的 daily_merged
+        都是同一份 tushare 数据). 全部节点失败返 ``{"events": [], ...}``,
+        前端展示"暂无除权事件"即可.
+        """
+        if not self._clients or not vt_symbols:
+            return {"events": [], "count": 0, "as_of": None, "snapshot_path": None}
+        for nid, client in self._clients.items():
+            try:
+                resp = await client.get_reference_corp_actions(
+                    vt_symbols, days=days, threshold_pct=threshold_pct,
+                )
+                # 即使 events 为空 ([], 当日无除权) 只要 snapshot_path 不空
+                # 就是成功响应 — 不要继续 fanout 浪费 RTT.
+                if resp and resp.get("snapshot_path"):
+                    return resp
+            except Exception as e:
+                logger.warning(
+                    "[vnpy.client] node=%s get_reference_corp_actions failed: %s", nid, e,
+                )
+        return {"events": [], "count": 0, "as_of": None, "snapshot_path": None}
 
     # --- single-node read helpers (engine introspection) -------------------
 
