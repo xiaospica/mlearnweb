@@ -44,8 +44,11 @@ logger = logging.getLogger(__name__)
 ML_ENGINE_NAME = "MlStrategy"
 # 5 分钟 — IC 回填本身要等 forward window (≥1 个交易日), 高频轮询无意义
 SYNC_POLL_INTERVAL_SECONDS = 300
-# 每次同步回看天数, 跟 vnpy IcBackfillService 默认 scan_days 对齐
-SYNC_LOOKBACK_DAYS = 30
+# 每次同步回看天数. 与 vnpy MLEngine._metrics_cache.max_history_days (500)
+# 对齐 — vnpy 启动期把磁盘 metrics.json 全 reload 进 cache, 这里要一次性拉够
+# 长才能把"权益曲线起点之前"的历史也同步进 mlearnweb.db. INSERT-IF-MISSING
+# + UPDATE-NULL-ONLY 是幂等的, 多拉不会重复写.
+SYNC_LOOKBACK_DAYS = 500
 
 
 # vnpy /metrics 端点返回字段 → MLMetricSnapshot 列名的映射.
@@ -131,13 +134,19 @@ def _diff_and_apply(
     """
     inserted = 0
     updated_rows = 0
+    # Dedupe by trade_date — vnpy cache 上游若有重复 (init seed + replay publish)
+    # 会让一批里多条同日 entry 都走到 INSERT 路径, 因为前面 add 还没 flush 到 DB,
+    # session.query 看不到, 第二条 add 提交时撞 UNIQUE 约束. 同日只取最后一个
+    # (与 cache append 顺序一致, 即最新一次 publish_metrics 的值).
+    by_date: Dict[Any, Dict[str, Any]] = {}
     for entry in remote_history:
         if not isinstance(entry, dict):
             continue
-        trade_date = _parse_trade_date(entry)
-        if trade_date is None:
+        td = _parse_trade_date(entry)
+        if td is None:
             continue
-
+        by_date[td] = entry
+    for trade_date, entry in by_date.items():
         local = (
             session.query(MLMetricSnapshot)
             .filter(
