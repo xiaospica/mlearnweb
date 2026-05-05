@@ -31,6 +31,10 @@ _GLOBAL_LOCK = threading.Lock()
 _INITIALIZED: bool = False
 
 REFRESH_INTERVAL_SECONDS = 3600  # 1 小时一次, 股票名静态参考数据极少变
+# Cache 还为空 (启动期或全部节点掉线) 时, 用 1 分钟短重试代替 1 小时常规节奏 —
+# 否则 mlearnweb 比 vnpy 先启动 / vnpy 重启的窗口里前端持仓全无中文名要等到
+# 下个小时整点才恢复.
+COLD_RETRY_INTERVAL_SECONDS = 60
 
 
 def get_stock_names_snapshot() -> Dict[str, str]:
@@ -76,31 +80,33 @@ async def refresh_stock_names_once() -> int:
 
 
 async def stock_name_refresh_loop() -> None:
-    """后台协程, 启动时立即拉一次, 之后每 1h 一次.
+    """后台协程, 启动期短重试灌满 cache, 之后每 1h refresh 一次.
 
     在 ``app.live_main`` 的 lifespan 里 ``asyncio.create_task`` 起来;
     与其他周期 sync loop (``snapshot_loop`` / ``ml_snapshot_loop`` 等) 同级.
+
+    cache 空时 (启动 / 全节点掉线) 用 ``COLD_RETRY_INTERVAL_SECONDS`` (60s)
+    短重试; 一旦填满切回 1h 节奏. 防止 mlearnweb 先于 vnpy 启动的常见场景下,
+    前端持仓中文名要等满 1h 才恢复.
     """
     global _INITIALIZED
     logger.info(
-        "[stock_name_cache] refresh loop started (interval=%ss)",
-        REFRESH_INTERVAL_SECONDS,
+        "[stock_name_cache] refresh loop started (warm interval=%ss, cold retry=%ss)",
+        REFRESH_INTERVAL_SECONDS, COLD_RETRY_INTERVAL_SECONDS,
     )
-    # 启动立即拉一次让前端早点见到中文简称
-    try:
-        await refresh_stock_names_once()
-        _INITIALIZED = True
-    except Exception as e:
-        logger.warning("[stock_name_cache] initial refresh failed: %s", e)
-
     while True:
         try:
-            await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
-        except asyncio.CancelledError:
-            raise
-        try:
-            await refresh_stock_names_once()
+            n = await refresh_stock_names_once()
+            if n > 0 and not _INITIALIZED:
+                _INITIALIZED = True
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.exception("[stock_name_cache] refresh iteration failed: %s", e)
+            n = len(_GLOBAL_NAME_MAP)
+        # 空 cache → 短重试; 已有数据 → 正常节奏
+        sleep_s = REFRESH_INTERVAL_SECONDS if n > 0 else COLD_RETRY_INTERVAL_SECONDS
+        try:
+            await asyncio.sleep(sleep_s)
+        except asyncio.CancelledError:
+            raise
