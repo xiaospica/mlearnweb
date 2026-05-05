@@ -1,7 +1,9 @@
 import matplotlib
 matplotlib.use('Agg')
 
+import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +14,9 @@ from fastapi.exceptions import RequestValidationError
 from app.core.config import settings
 from app.models.database import init_db, get_db_session
 from app.routers import experiments, runs, reports, training_records, factor_docs, training_record_images, tuning, settings as settings_router, joinquant_exports
+from app.routers import _live_proxy
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -52,6 +57,11 @@ async def lifespan(app: FastAPI):
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
             print("[Shutdown] tuning queue scheduler stopped")
+        # W4.1 — 释放 live-proxy 的 httpx connection pool
+        try:
+            await _live_proxy.close_proxy_client()
+        except Exception:
+            pass
 
 
 app = FastAPI(
@@ -93,10 +103,17 @@ app.include_router(factor_docs.router)
 app.include_router(tuning.router)
 app.include_router(settings_router.router)
 app.include_router(joinquant_exports.router)
+# W4.1 — /api/live-trading/* 反代到 mlearnweb_live (8100). 必须挂在
+# include_router 完成 (research 侧 API 优先) + 在 StaticFiles 之前 (catch-all
+# / SPA fallback 不能吞 API).
+app.include_router(_live_proxy.router)
 
 
 @app.get("/")
 def root():
+    """API root info — 仅当 frontend_dist_dir 未配 (开发模式) 时返 JSON;
+    生产部署 (W4.1) StaticFiles mount 后该路由被 SPA index.html 覆盖.
+    """
     return {
         "service": "QLib Backtest Dashboard API",
         "version": "1.0.0",
@@ -107,6 +124,7 @@ def root():
             "reports": "/api/runs/{run_id}/report?exp_id=xxx",
             "training_records": "/api/training-records",
             "tuning": "/api/tuning/jobs",
+            "live_trading_proxy": "/api/live-trading/* → :8100",
         },
     }
 
@@ -114,6 +132,23 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# W4.1 — 单端口生产部署: 把前端 dist mount 在 / (api 路由 + 反代之后).
+# StaticFiles(html=True) 自动处理 SPA 模式 (任何 404 路径返 index.html 让
+# react-router 接管). 留 None / 路径不存在时跳过, 浏览器走 Vite dev server.
+_dist_dir = settings.frontend_dist_dir
+if _dist_dir:
+    _dist_path = Path(_dist_dir)
+    if _dist_path.is_dir():
+        # name="frontend" 与 /uploads 错开避免 starlette 重复 mount 警告.
+        app.mount("/", StaticFiles(directory=str(_dist_path), html=True), name="frontend")
+        logger.info("[main] frontend dist mounted: %s", _dist_path)
+    else:
+        logger.warning(
+            "[main] frontend_dist_dir 配了但路径不存在, 跳过 mount: %s",
+            _dist_path,
+        )
 
 
 if __name__ == "__main__":

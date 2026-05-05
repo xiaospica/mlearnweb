@@ -17,6 +17,16 @@ class Settings(BaseSettings):
     database_url: str = f"sqlite:///{os.path.join(_BASE_DIR, 'mlearnweb.db')}"
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 
+    # Phase 4 (W4.1) — 生产部署单端口模式. app.main 启动时若该路径存在则
+    # mount StaticFiles 提供 SPA fallback, 浏览器只认 :8000 不需要单独的
+    # nginx/IIS 服务前端 dist. 留 None 时仅 API, 前端走 Vite dev server (5173).
+    # 推荐值: ``<repo_root>/frontend/dist`` (npm run build 产出).
+    frontend_dist_dir: Optional[str] = None
+    # 反代 /api/live-trading/* 到 :8100 (mlearnweb_live 进程). app.main 启
+    # StaticFiles 后浏览器走单端口, /api/live-trading/* 必须穿透到 live_main
+    # 才能拿到 vnpy 节点状态 + 实盘数据.
+    live_main_internal_url: str = "http://127.0.0.1:8100"
+
     upload_dir: Path = Path(_BASE_DIR) / "uploads"
     max_image_size_mb: int = 10
     allowed_image_exts: Set[str] = {".png", ".jpg", ".jpeg", ".webp", ".gif"}

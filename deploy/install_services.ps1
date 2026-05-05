@@ -22,17 +22,25 @@
     nssm.exe 路径. 默认 'nssm' (假定已在 PATH).
 
 .PARAMETER MLearnwebRoot
-    mlearnweb 仓库根. 默认 F:\Quant\code\qlib_strategy_dev\mlearnweb.
+    mlearnweb 仓库根. 默认 ``$PSScriptRoot\..`` (脚本所在 ``deploy/`` 上一级).
+    本脚本随仓库一起 ship, 99% 用例不需要传.
 
 .PARAMETER PythonExe
-    Python 3.11 解释器 (qlib + lightgbm + mlflow 依赖).
-    默认 E:\ssd_backup\Pycharm_project\python-3.11.0-amd64\python.exe.
+    Python 3.11 解释器 (qlib + lightgbm + mlflow 依赖). 默认 ``$null`` →
+    自动 ``Get-Command python`` 找系统 PATH 上的. install_all.ps1 会显式
+    传 venv python (推荐).
 
 .PARAMETER LogRoot
-    NSSM 日志输出目录. 默认 D:\mlearnweb_logs.
+    NSSM 日志输出目录. **强制参数** — 必须传, 不再默认 D:\mlearnweb_logs.
+    install_all.ps1 会传 ``$DataRoot\logs``; 直接用 install_services.ps1 时
+    用户必须显式选盘符.
 
 .EXAMPLE
-    PS C:\> .\deploy\install_services.ps1
+    PS C:\> .\deploy\install_services.ps1 -LogRoot D:\mlearnweb_data\logs
+
+.EXAMPLE
+    # 显式传 venv python
+    PS C:\> .\deploy\install_services.ps1 -PythonExe D:\mlearnweb_data\venv\Scripts\python.exe -LogRoot D:\mlearnweb_data\logs
 
 .NOTES
     管理员权限必须. 卸载用 deploy\uninstall_services.ps1.
@@ -42,10 +50,22 @@
 [CmdletBinding()]
 param(
     [string]$NssmPath      = "nssm",
-    [string]$MLearnwebRoot = "F:\Quant\code\qlib_strategy_dev\mlearnweb",
-    [string]$PythonExe     = "E:\ssd_backup\Pycharm_project\python-3.11.0-amd64\python.exe",
-    [string]$LogRoot       = "D:\mlearnweb_logs"
+    [string]$MLearnwebRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
+    [string]$PythonExe     = $null,
+    [Parameter(Mandatory = $true)]
+    [string]$LogRoot
 )
+
+# PythonExe 默认: PATH 上的 python. install_all.ps1 应显式传 venv python.
+if (-not $PythonExe) {
+    $foundPython = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $foundPython) {
+        Write-Error "[X] PythonExe 未传 + PATH 上找不到 python. 装 Python 3.11 或显式传 -PythonExe."
+        exit 1
+    }
+    $PythonExe = $foundPython.Source
+    Write-Host "[OK] 自动选 Python = $PythonExe"
+}
 
 # ─── 前置检查 ─────────────────────────────────────────────────────────────
 
