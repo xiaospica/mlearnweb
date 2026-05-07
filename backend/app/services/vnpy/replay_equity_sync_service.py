@@ -37,7 +37,8 @@ from app.services.vnpy.client import VnpyMultiNodeClient, get_vnpy_client
 logger = logging.getLogger(__name__)
 
 
-# 与 ml_monitoring_service / live_trading_service 一致, MlStrategy engine.
+# 与 ml_monitoring_service / live_trading_service 一致; 旧版 vnpy_webtrader
+# (get_health 不带 engine 字段) 的回退值, 也是 run_ml_headless 的引擎名.
 ML_ENGINE_NAME = "MlStrategy"
 # 60s — 与 ml_snapshot_loop 周期一致. 历史值稳态不变, 但 demo / 实盘冷启动 (策略
 # 重新部署 / mlearnweb 重启) 时, 5min 周期会让用户最长等 5 分钟才看到回放权益曲线.
@@ -53,43 +54,44 @@ REPLAY_SOURCE_LABEL = "replay_settle"
 SessionLocal = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
 
 
-async def _collect_strategy_names(
+async def _collect_strategies(
     client: VnpyMultiNodeClient,
-) -> Dict[str, List[str]]:
-    """{node_id: [strategy_name...]} — 与 historical_metrics_sync_service 同款 discovery."""
-    result: Dict[str, List[str]] = {}
+) -> Dict[str, List[Dict[str, str]]]:
+    """{node_id: [{"name": ..., "engine": ...}, ...]} — 从 /api/v1/ml/health 发现策略.
+
+    health 响应里每个策略携带真实 engine 名 (SignalStrategyPlus / MlStrategy / …).
+    若 health 响应里没有 engine 字段 (旧版 vnpy_webtrader), 回退到 ML_ENGINE_NAME.
+    """
+    result: Dict[str, List[Dict[str, str]]] = {}
     fo = await client.get_ml_health_all()
     for item in fo:
         if not item.get("ok"):
             continue
         data = item.get("data") or {}
         strategies = data.get("strategies") or []
-        names = [s.get("name") for s in strategies if s.get("name")]
-        if names:
-            result[item["node_id"]] = names
+        entries = [
+            {
+                "name": s["name"],
+                "engine": s.get("engine") or ML_ENGINE_NAME,
+            }
+            for s in strategies if s.get("name")
+        ]
+        if entries:
+            result[item["node_id"]] = entries
     return result
 
 
 def _get_local_max_inserted_at(
-    session, *, node_id: str, strategy_name: str,
+    session, *, node_id: str, engine: str, strategy_name: str,
 ) -> Optional[str]:
     """本地 strategy_equity_snapshots 中 (node, engine, strategy, source_label=replay_settle)
     的最大 ts (用作 vnpy 端 since 增量边界).
-
-    注意: vnpy 端的 inserted_at 是写本地 SQLite 时刻; mlearnweb 端 ts 字段是回放
-    逻辑日 15:00. 但我们用 since 是为了避免重复拉, 所以用本地 ts 字段 (= vnpy 端
-    回传的 ts) 作 since OK — vnpy 端 list_snapshots 内部用 datetime() 比 inserted_at,
-    实际上传过去的 since 字符串 vnpy 端会按 inserted_at 比较,但只要保证字符串单调递增即可.
-
-    更稳的语义: 直接拿 vnpy 端 inserted_at 作 since, 但目前 mlearnweb 端不存 inserted_at.
-    简化: 同 (node/engine/strategy) 已经存在的最新 ts 之后的, 视为新增. 重叠的旧 ts
-    会被 UPSERT 覆盖, 幂等.
     """
     row = (
         session.query(func.max(StrategyEquitySnapshot.ts))
         .filter(
             StrategyEquitySnapshot.node_id == node_id,
-            StrategyEquitySnapshot.engine == ML_ENGINE_NAME,
+            StrategyEquitySnapshot.engine == engine,
             StrategyEquitySnapshot.strategy_name == strategy_name,
             StrategyEquitySnapshot.source_label == REPLAY_SOURCE_LABEL,
         )
@@ -97,7 +99,6 @@ def _get_local_max_inserted_at(
     )
     if row is None:
         return None
-    # 转回 ISO 字符串给 vnpy 端 since 用 (vnpy 端 SQLite datetime() 兼容)
     return row.isoformat() if isinstance(row, datetime) else str(row)
 
 
@@ -105,6 +106,7 @@ def _upsert_remote_rows(
     session,
     *,
     node_id: str,
+    engine: str,
     strategy_name: str,
     rows: List[Dict[str, Any]],
 ) -> int:
@@ -128,7 +130,7 @@ def _upsert_remote_rows(
 
         session.query(StrategyEquitySnapshot).filter(
             StrategyEquitySnapshot.node_id == node_id,
-            StrategyEquitySnapshot.engine == ML_ENGINE_NAME,
+            StrategyEquitySnapshot.engine == engine,
             StrategyEquitySnapshot.strategy_name == strategy_name,
             StrategyEquitySnapshot.source_label == REPLAY_SOURCE_LABEL,
             func.date(StrategyEquitySnapshot.ts) == ts.date(),
@@ -138,7 +140,7 @@ def _upsert_remote_rows(
 
         session.add(StrategyEquitySnapshot(
             node_id=node_id,
-            engine=ML_ENGINE_NAME,
+            engine=engine,
             strategy_name=strategy_name,
             ts=ts,
             strategy_value=float(r.get("strategy_value") or 0.0),
@@ -157,13 +159,14 @@ async def sync_one_node_strategy(
     client: VnpyMultiNodeClient,
     *,
     node_id: str,
+    engine: str,
     strategy_name: str,
 ) -> int:
-    """同步单 (node, strategy) 一次. 返回 UPSERT 行数."""
+    """同步单 (node, engine, strategy) 一次. 返回 UPSERT 行数."""
     session = SessionLocal()
     try:
         since = _get_local_max_inserted_at(
-            session, node_id=node_id, strategy_name=strategy_name,
+            session, node_id=node_id, engine=engine, strategy_name=strategy_name,
         )
     finally:
         session.close()
@@ -177,7 +180,8 @@ async def sync_one_node_strategy(
     session = SessionLocal()
     try:
         n = _upsert_remote_rows(
-            session, node_id=node_id, strategy_name=strategy_name, rows=rows,
+            session, node_id=node_id, engine=engine,
+            strategy_name=strategy_name, rows=rows,
         )
         session.commit()
     except Exception:
@@ -189,24 +193,29 @@ async def sync_one_node_strategy(
 
 
 async def sync_all() -> Dict[str, Any]:
-    """主入口: discovery → 逐 (node, strategy) 同步. 返回 {scanned, upserted}."""
+    """主入口: discovery → 逐 (node, engine, strategy) 同步. 返回 {scanned, upserted}."""
     client = get_vnpy_client()
-    by_node = await _collect_strategy_names(client)
+    by_node = await _collect_strategies(client)
     if not by_node:
         return {"scanned": 0, "upserted": 0, "ok": True, "msg": "no strategies discovered"}
 
     total_upserted = 0
     total_scanned = 0
-    for nid, names in by_node.items():
-        for name in names:
+    for nid, entries in by_node.items():
+        for entry in entries:
             total_scanned += 1
             try:
-                n = await sync_one_node_strategy(client, node_id=nid, strategy_name=name)
+                n = await sync_one_node_strategy(
+                    client,
+                    node_id=nid,
+                    engine=entry["engine"],
+                    strategy_name=entry["name"],
+                )
                 total_upserted += n
             except Exception as exc:
                 logger.warning(
-                    "[replay_equity_sync] node=%s strategy=%s 同步失败: %s",
-                    nid, name, exc,
+                    "[replay_equity_sync] node=%s engine=%s strategy=%s 同步失败: %s",
+                    nid, entry.get("engine"), entry.get("name"), exc,
                 )
     return {
         "scanned": total_scanned,
