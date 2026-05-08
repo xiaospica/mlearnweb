@@ -9,7 +9,7 @@ import {
   Skeleton,
   Space,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, PlusOutlined, ReloadOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { tuningService } from '@/services/tuningService'
 import { liveTradingService } from '@/services/liveTradingService'
@@ -155,8 +155,8 @@ const LiveTradingPage: React.FC = () => {
               value={density}
               onChange={(v) => setDensity(v as typeof density)}
               options={[
-                { label: '舒适', value: 'comfort' },
-                { label: '紧凑', value: 'compact' },
+                { label: '卡片', value: 'card', icon: <AppstoreOutlined /> },
+                { label: '列表', value: 'list', icon: <UnorderedListOutlined /> },
               ]}
             />
             <Button

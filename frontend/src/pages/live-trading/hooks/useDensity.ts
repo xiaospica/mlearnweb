@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export type Density = 'comfort' | 'compact'
+export type Density = 'card' | 'list'
 
-const STORAGE_KEY = 'mlearnweb.live.density'
+const STORAGE_KEY = 'mlearnweb.live.viewMode'
+const LEGACY_STORAGE_KEY = 'mlearnweb.live.density'
 
 function read(): Density {
-  if (typeof window === 'undefined') return 'comfort'
+  if (typeof window === 'undefined') return 'card'
   try {
     const v = window.localStorage.getItem(STORAGE_KEY)
-    return v === 'compact' ? 'compact' : 'comfort'
+    if (v === 'list' || v === 'compact') return 'list'
+    if (v === 'card' || v === 'comfort') return 'card'
+
+    const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY)
+    return legacy === 'compact' ? 'list' : 'card'
   } catch {
-    return 'comfort'
+    return 'card'
   }
 }
 
@@ -22,7 +27,7 @@ export function useDensity(): [Density, (d: Density) => void] {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY) return
-      setDensityState(e.newValue === 'compact' ? 'compact' : 'comfort')
+      setDensityState(e.newValue === 'list' || e.newValue === 'compact' ? 'list' : 'card')
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)

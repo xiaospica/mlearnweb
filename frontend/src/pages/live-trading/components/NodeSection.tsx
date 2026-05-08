@@ -67,7 +67,7 @@ const NodeSection: React.FC<NodeSectionProps> = ({
               description={node.online ? '该节点暂无策略' : '节点离线，无可显示的策略'}
               style={{ padding: '24px 0' }}
             />
-          ) : density === 'compact' ? (
+          ) : density === 'list' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {strategies.map((s) => {
                 const detailHref = `/live-trading/${encodeURIComponent(s.node_id)}/${encodeURIComponent(s.engine)}/${encodeURIComponent(s.strategy_name)}`
