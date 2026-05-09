@@ -9,7 +9,7 @@
  *   - 当前持仓: 实时 fanout vnpy 节点 (StrategyDetail.positions)
  *   - 本卡片: 任意历史日期, 通过日期选择器查询
  */
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Card, DatePicker, Empty, Spin, Alert } from 'antd'
 import type { Dayjs } from 'dayjs'
@@ -31,6 +31,16 @@ interface Props {
 function fmt(v: number | null | undefined, digits = 2): string {
   if (v === null || v === undefined || Number.isNaN(v)) return '-'
   return Number(v).toFixed(digits)
+}
+
+function normalizeHistoryDate(value: string): string | null {
+  const s = String(value || '').trim()
+  if (!s) return null
+  const iso = /^\d{8}$/.test(s)
+    ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`
+    : s
+  const parsed = dayjs(iso)
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD') : null
 }
 
 const columns: ResponsiveColumn<HistoricalPosition>[] = [
@@ -88,14 +98,29 @@ const HistoricalPositionsCard: React.FC<Props> = ({
   nodeId, engine, strategyName, gatewayName, historyDates = [],
 }) => {
   // 默认最近一个有数据的日期；historyDates 为空则 fallback 昨日
-  const latestDate = historyDates.length > 0 ? historyDates[historyDates.length - 1] : null
+  const normalizedHistoryDates = useMemo(
+    () =>
+      Array.from(new Set(historyDates.map(normalizeHistoryDate).filter((d): d is string => Boolean(d))))
+        .sort(),
+    [historyDates],
+  )
+  const latestDate = normalizedHistoryDates.length > 0
+    ? normalizedHistoryDates[normalizedHistoryDates.length - 1]
+    : null
   const [selected, setSelected] = useState<Dayjs>(() =>
     latestDate ? dayjs(latestDate) : dayjs().subtract(1, 'day')
   )
   const yyyymmdd = selected.format('YYYYMMDD')
 
   // DatePicker disabledDate: 无 historyDates 时不限制 (兼容老调用)
-  const availableDatesSet = useMemo(() => new Set(historyDates), [historyDates])
+  const availableDatesSet = useMemo(() => new Set(normalizedHistoryDates), [normalizedHistoryDates])
+
+  useEffect(() => {
+    if (!latestDate || availableDatesSet.size === 0) return
+    if (!availableDatesSet.has(selected.format('YYYY-MM-DD'))) {
+      setSelected(dayjs(latestDate))
+    }
+  }, [availableDatesSet, latestDate, selected])
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['historical-positions', nodeId, engine, strategyName, yyyymmdd, gatewayName ?? ''],
@@ -107,7 +132,7 @@ const HistoricalPositionsCard: React.FC<Props> = ({
   })
 
   const rows = data?.success ? (data.data || []) : []
-  const warning = data && !data.success ? (data.warning || data.message) : null
+  const warning = data ? (data.warning || (!data.success ? data.message : null)) : null
   const totalMV = rows.reduce((s, r) => s + (r.market_value || 0), 0)
 
   return (
