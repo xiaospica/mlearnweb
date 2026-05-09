@@ -15,6 +15,7 @@ const LABEL_TITLE: Record<SourceLabel, string> = {
   strategy_pnl: '策略收益 (variables)',
   position_sum_pnl: '持仓浮动盈亏',
   account_equity: '账户权益（多策略共享）',
+  replay_settle: '回放权益',
   unavailable: '收益曲线',
 }
 
@@ -24,6 +25,7 @@ const LABEL_HELP: Record<SourceLabel, string> = {
     '数据来源：按策略 vt_symbol 聚合其持仓的浮动盈亏；不含已实现盈亏',
   account_equity:
     '数据来源：该策略所属账户的总权益。由于账户通常被多策略共享，此数值为近似估计',
+  replay_settle: '数据来源：按回放逻辑日沉淀的策略权益快照',
   unavailable: '当前没有可用的收益口径',
 }
 

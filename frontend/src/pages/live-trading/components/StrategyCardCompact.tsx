@@ -6,6 +6,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import type { LastStatus, SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTrading'
 import StrategyActions from './StrategyActions'
+import { calcCumulativeReturn, fmtPercent, percentColor } from '../utils/equityReturn'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -56,6 +57,7 @@ const StrategyCardCompact: React.FC<StrategyCardCompactProps> = ({ item, detailH
   const offline = Boolean(item.node_offline)
   const sourceLabel = (item.source_label || 'unavailable') as SourceLabel
   const status = item.last_status ? STATUS_GLYPH[item.last_status] : null
+  const cumulativeReturn = calcCumulativeReturn(item.mini_curve, item.strategy_value, sourceLabel)
 
   return (
     <div
@@ -145,18 +147,24 @@ const StrategyCardCompact: React.FC<StrategyCardCompactProps> = ({ item, detailH
       </Tooltip>
 
       {/* equity 数值 */}
-      <div style={{ textAlign: 'right', minWidth: 110 }}>
+      <div style={{ textAlign: 'right', minWidth: 150 }}>
         <div
           style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: valueColor(item.strategy_value, sourceLabel),
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'flex-end',
+            gap: 8,
             fontFamily: 'var(--ap-font-mono)',
             fontVariantNumeric: 'tabular-nums',
-            lineHeight: 1.2,
+            lineHeight: 1.1,
           }}
         >
-          {fmtValue(item.strategy_value)}
+          <span style={{ fontSize: 14, fontWeight: 700, color: percentColor(cumulativeReturn) }}>
+            {fmtPercent(cumulativeReturn)}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: valueColor(item.strategy_value, sourceLabel) }}>
+            {fmtValue(item.strategy_value)}
+          </span>
         </div>
         <div
           style={{

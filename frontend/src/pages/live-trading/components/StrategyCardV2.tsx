@@ -9,6 +9,7 @@ import type { SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTra
 import MiniEquityChart from './MiniEquityChart'
 import StrategyActions from './StrategyActions'
 import CronScheduleStrip from './CronScheduleStrip'
+import { calcCumulativeReturn, fmtPercent, percentColor } from '../utils/equityReturn'
 
 dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
@@ -19,6 +20,7 @@ const SOURCE_LABEL_TEXT: Record<SourceLabel, string> = {
   strategy_pnl: '策略PnL',
   position_sum_pnl: '持仓浮盈',
   account_equity: '账户权益',
+  replay_settle: '回放权益',
   unavailable: '无数据',
 }
 
@@ -26,6 +28,7 @@ const SOURCE_LABEL_HELP: Record<SourceLabel, string> = {
   strategy_pnl: '从策略 variables 中的 PnL 字段直接读取',
   position_sum_pnl: '按 vt_symbol 聚合匹配持仓的浮动盈亏',
   account_equity: '账户总权益，多策略共享时为近似值',
+  replay_settle: '按回放逻辑日沉淀的策略权益快照',
   unavailable: '当前没有可用数据',
 }
 
@@ -101,6 +104,7 @@ const StrategyCardV2: React.FC<StrategyCardV2Props> = ({
   const ms = modeStyle(item.mode, offline)
   const ss = stateShape(item, offline)
   const sourceLabel = (item.source_label || 'unavailable') as SourceLabel
+  const cumulativeReturn = calcCumulativeReturn(item.mini_curve, item.strategy_value, sourceLabel)
 
   // leading 6px 色条饱和度由 state 调（offline 70% 仍清晰可见，避免色条"消失"）
   const leadOpacity = offline ? 0.7 : item.running ? 1 : item.inited ? 0.6 : 0.3
@@ -259,15 +263,37 @@ const StrategyCardV2: React.FC<StrategyCardV2Props> = ({
           </Text>
           <div
             style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: valueColor(item.strategy_value, sourceLabel),
-              fontFamily: 'var(--ap-font-mono)',
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: 1.2,
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 10,
+              flexWrap: 'wrap',
+              marginTop: 1,
             }}
           >
-            {fmtValue(item.strategy_value)}
+            <span
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color: percentColor(cumulativeReturn),
+                fontFamily: 'var(--ap-font-mono)',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.15,
+              }}
+            >
+              {fmtPercent(cumulativeReturn)}
+            </span>
+            <span
+              style={{
+                fontSize: 15,
+                fontWeight: 600,
+                color: valueColor(item.strategy_value, sourceLabel),
+                fontFamily: 'var(--ap-font-mono)',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.15,
+              }}
+            >
+              {fmtValue(item.strategy_value)}
+            </span>
           </div>
         </div>
         <div style={{ textAlign: 'right', flexShrink: 0 }}>
@@ -334,6 +360,7 @@ export default React.memo(StrategyCardV2, (prev, next) => {
     a.strategy_name === b.strategy_name &&
     a.last_update_ts === b.last_update_ts &&
     a.strategy_value === b.strategy_value &&
+    a.mini_curve === b.mini_curve &&
     a.running === b.running &&
     a.inited === b.inited &&
     a.last_status === b.last_status &&

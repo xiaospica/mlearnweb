@@ -26,6 +26,7 @@ export type SourceLabel =
   | 'strategy_pnl'
   | 'position_sum_pnl'
   | 'account_equity'
+  | 'replay_settle'
   | 'unavailable'
 
 export interface LivePosition {
