@@ -21,3 +21,4 @@ frontend/tsconfig.tsbuildinfo
 .idea
 dist
 /frontend/tsconfig.tsbuildinfo
+logs
