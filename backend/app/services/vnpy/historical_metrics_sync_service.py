@@ -256,6 +256,7 @@ async def historical_metrics_sync_tick() -> None:
     session = SessionLocal()
     total_inserted = 0
     total_updated = 0
+    changed: set[tuple[str, str]] = set()
     try:
         for nid, by_strategy in histories.items():
             for name, remote_hist in by_strategy.items():
@@ -269,12 +270,24 @@ async def historical_metrics_sync_tick() -> None:
                 )
                 total_inserted += stats["inserted"]
                 total_updated += stats["updated"]
+                if stats["inserted"] or stats["updated"]:
+                    changed.add((nid, name))
         session.commit()
         if total_inserted or total_updated:
             logger.info(
                 "[hist_metrics_sync] inserted=%d updated=%d (lookback=%dd)",
                 total_inserted, total_updated, SYNC_LOOKBACK_DAYS,
             )
+            from app.services.vnpy.live_trading_events import publish_strategy_event
+
+            for nid, name in changed:
+                await publish_strategy_event(
+                    "strategy.history.changed",
+                    node_id=nid,
+                    engine=ML_ENGINE_NAME,
+                    strategy_name=name,
+                    reason="historical_metrics_sync",
+                )
     except Exception as e:
         logger.exception("[hist_metrics_sync] write failed: %s", e)
         session.rollback()

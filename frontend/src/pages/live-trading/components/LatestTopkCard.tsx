@@ -12,8 +12,9 @@ import type { ColumnsType } from 'antd/es/table'
 import { mlMonitoringService } from '@/services/mlMonitoringService'
 import type { PredictionSummary, TopkEntry } from '@/services/mlMonitoringService'
 import {
-  ML_MONITOR_REFRESH_MS,
+  ML_MONITOR_FALLBACK_REFRESH_MS,
   ML_MONITOR_STALE_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from '../liveTradingRefresh'
 
@@ -22,6 +23,7 @@ const { Text } = Typography
 interface Props {
   nodeId: string
   strategyName: string
+  eventsConnected: boolean
 }
 
 const columns: ColumnsType<TopkEntry> = [
@@ -65,11 +67,11 @@ const columns: ColumnsType<TopkEntry> = [
   },
 ]
 
-const LatestTopkCard: React.FC<Props> = ({ nodeId, strategyName }) => {
+const LatestTopkCard: React.FC<Props> = ({ nodeId, strategyName, eventsConnected }) => {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: liveTradingQueryKeys.mlTopkLatest(nodeId, strategyName),
     queryFn: () => mlMonitoringService.predictionLatestSummary(nodeId, strategyName),
-    refetchInterval: ML_MONITOR_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, ML_MONITOR_FALLBACK_REFRESH_MS),
     staleTime: ML_MONITOR_STALE_MS,
     retry: 1,
     // refetch 失败时保留上一次成功数据, 避免表格闪空

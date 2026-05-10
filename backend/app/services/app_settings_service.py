@@ -125,6 +125,16 @@ SETTING_REGISTRY: Dict[str, SettingSpec] = {
         min=2,
         max=600,
     ),
+    "live_trading_event_fingerprint_interval_seconds": SettingSpec(
+        key="live_trading_event_fingerprint_interval_seconds",
+        value_type="int",
+        category="vnpy",
+        label="实盘事件指纹检测周期 (秒)",
+        description="P1 事件中台在未接入 vnpy WS 前，用 REST 指纹检测策略/持仓/订单/风险变化的周期。",
+        default_attr="live_trading_event_fingerprint_interval_seconds",
+        min=2,
+        max=600,
+    ),
     "vnpy_snapshot_retention_days": SettingSpec(
         key="vnpy_snapshot_retention_days",
         value_type="int",

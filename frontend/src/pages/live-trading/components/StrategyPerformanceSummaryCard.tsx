@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query'
 import { liveTradingService } from '@/services/liveTradingService'
 import type { SourceLabel, StrategyPerformanceSummary } from '@/types/liveTrading'
 import {
-  LIVE_SUMMARY_REFRESH_MS,
+  LIVE_SUMMARY_FALLBACK_REFRESH_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from '../liveTradingRefresh'
 
@@ -15,6 +16,7 @@ interface Props {
   nodeId: string
   engine: string
   strategyName: string
+  eventsConnected: boolean
 }
 
 const SOURCE_TEXT: Record<SourceLabel, string> = {
@@ -54,13 +56,13 @@ function uniqueWarnings(summary?: StrategyPerformanceSummary | null, responseWar
   return Array.from(new Set([...(summary?.warnings || []), responseWarning].filter(Boolean) as string[]))
 }
 
-const StrategyPerformanceSummaryCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
+const StrategyPerformanceSummaryCard: React.FC<Props> = ({ nodeId, engine, strategyName, eventsConnected }) => {
   const { data, isLoading, isFetching } = useQuery({
     queryKey: liveTradingQueryKeys.strategyPerformanceSummary(nodeId, engine, strategyName),
     queryFn: () => liveTradingService.getStrategyPerformanceSummary(nodeId, engine, strategyName),
     enabled: !!(nodeId && engine && strategyName),
-    staleTime: LIVE_SUMMARY_REFRESH_MS,
-    refetchInterval: LIVE_SUMMARY_REFRESH_MS,
+    staleTime: LIVE_SUMMARY_FALLBACK_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_SUMMARY_FALLBACK_REFRESH_MS),
     retry: 1,
   })
 

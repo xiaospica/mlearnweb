@@ -1,10 +1,10 @@
 import React from 'react'
-import { Tooltip } from 'antd'
+import { Tag, Tooltip } from 'antd'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
-import type { LastStatus, SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTrading'
+import type { LastStatus, RiskSeverity, SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTrading'
 import StrategyActions from './StrategyActions'
 import { calcCumulativeReturn, fmtPercent, percentColor } from '../utils/equityReturn'
 
@@ -15,6 +15,13 @@ const STATUS_GLYPH: Record<LastStatus, { glyph: string; color: string; title: st
   ok: { glyph: '✓', color: 'var(--ap-success)', title: '上次运行 ok' },
   failed: { glyph: '✗', color: 'var(--ap-danger)', title: '上次运行 failed' },
   empty: { glyph: '⊝', color: 'var(--ap-warning)', title: '上次运行 empty' },
+}
+
+const RISK_COLOR: Record<RiskSeverity, string> = {
+  info: 'default',
+  warning: 'orange',
+  error: 'red',
+  critical: 'magenta',
 }
 
 function modeBg(mode: StrategyMode | null, offline: boolean): string {
@@ -63,7 +70,7 @@ const StrategyCardCompact: React.FC<StrategyCardCompactProps> = ({ item, detailH
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: 'auto 1fr auto auto auto',
+        gridTemplateColumns: 'auto 1fr auto auto auto auto',
         alignItems: 'center',
         gap: 12,
         height: 56,
@@ -142,9 +149,20 @@ const StrategyCardCompact: React.FC<StrategyCardCompactProps> = ({ item, detailH
             fontFamily: 'var(--ap-font-mono)',
           }}
         >
-          {status?.glyph ?? '○'}
-        </span>
-      </Tooltip>
+        {status?.glyph ?? '○'}
+      </span>
+    </Tooltip>
+
+      {!!item.risk_event_count && item.highest_risk_severity && (
+        <Tooltip title={`${item.risk_event_count} 条风险事件`}>
+          <Tag
+            color={RISK_COLOR[item.highest_risk_severity]}
+            style={{ marginInlineEnd: 0, fontSize: 10 }}
+          >
+            {item.risk_event_count}
+          </Tag>
+        </Tooltip>
+      )}
 
       {/* equity 数值 */}
       <div style={{ textAlign: 'right', minWidth: 150 }}>

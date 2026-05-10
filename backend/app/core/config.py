@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     vnpy_nodes_config_path: str = os.path.join(_BASE_DIR, "vnpy_nodes.yaml")
     vnpy_request_timeout: float = 10.0
     vnpy_poll_interval_seconds: int = 10
+    live_trading_event_fingerprint_interval_seconds: int = 5
     vnpy_snapshot_retention_days: int = 30
     live_trading_ops_password: Optional[str] = None
 

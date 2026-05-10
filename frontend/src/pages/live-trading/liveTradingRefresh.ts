@@ -1,11 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { LiveTradingEvent, LiveTradingQueryGroup } from '@/types/liveTrading'
 
-export const LIVE_NODES_REFRESH_MS = 10_000
-export const LIVE_STRATEGIES_REFRESH_MS = 5_000
-export const LIVE_DETAIL_REFRESH_MS = 3_000
-export const LIVE_SUMMARY_REFRESH_MS = 5_000
-export const LIVE_TRADES_REFRESH_MS = 10_000
-export const ML_MONITOR_REFRESH_MS = 60_000
+export const LIVE_NODES_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_STRATEGIES_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_DETAIL_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_SUMMARY_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_TRADES_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_RISK_FALLBACK_REFRESH_MS = 30_000
+export const ML_MONITOR_FALLBACK_REFRESH_MS = 180_000
 export const ML_MONITOR_STALE_MS = 30_000
 export const HISTORY_POSITION_DATES_STALE_MS = 300_000
 export const HISTORY_QUERY_STALE_MS = 60_000
@@ -22,6 +24,10 @@ export const liveTradingQueryKeys = {
     ['live-strategy-performance-summary', nodeId, engine, strategyName] as const,
   trades: (nodeId: string, engine: string, strategyName: string) =>
     ['live-trades', nodeId, engine, strategyName] as const,
+  orders: (nodeId: string, engine: string, strategyName: string) =>
+    ['live-orders', nodeId, engine, strategyName] as const,
+  riskEvents: (nodeId: string, engine: string, strategyName: string) =>
+    ['live-risk-events', nodeId, engine, strategyName] as const,
   mlTopkLatest: (nodeId: string, strategyName: string) =>
     ['ml-topk-latest', nodeId, strategyName] as const,
   mlMetricsHistory: (nodeId: string, strategyName: string) =>
@@ -72,6 +78,9 @@ export async function invalidateLiveStrategyDetailQueries(
       queryKey: liveTradingQueryKeys.trades(nodeId, engine, strategyName),
     }),
     queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
+    }),
+    queryClient.invalidateQueries({
       queryKey: liveTradingQueryKeys.mlTopkLatest(nodeId, strategyName),
     }),
     queryClient.invalidateQueries({
@@ -84,6 +93,86 @@ export async function invalidateLiveStrategyDetailQueries(
       queryKey: liveTradingQueryKeys.mlPredictionLatest(nodeId, strategyName),
     }),
   ])
+}
+
+export function liveFallbackInterval(eventsConnected: boolean, intervalMs: number): number | false {
+  return eventsConnected ? false : intervalMs
+}
+
+async function invalidateIdentityGroup(
+  queryClient: QueryClient,
+  group: LiveTradingQueryGroup,
+  event: LiveTradingEvent,
+): Promise<void> {
+  const nodeId = event.node_id || ''
+  const engine = event.engine || ''
+  const strategyName = event.strategy_name || ''
+  const hasIdentity = !!(nodeId && engine && strategyName)
+
+  if (group === 'nodes') {
+    await queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.nodes() })
+    return
+  }
+  if (group === 'strategy_list') {
+    await queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.strategies() })
+    return
+  }
+  if (group === 'corp_actions') {
+    await queryClient.invalidateQueries({ queryKey: ['live-corp-actions'] })
+    return
+  }
+  if (!hasIdentity) return
+
+  if (group === 'strategy_detail') {
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.strategyDetail(nodeId, engine, strategyName),
+    })
+  } else if (group === 'performance_summary') {
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.strategyPerformanceSummary(nodeId, engine, strategyName),
+    })
+  } else if (group === 'trades') {
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.trades(nodeId, engine, strategyName),
+    })
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.orders(nodeId, engine, strategyName),
+    })
+  } else if (group === 'risk_events') {
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
+    })
+  } else if (group === 'ml_latest') {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.mlTopkLatest(nodeId, strategyName) }),
+      queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.mlPredictionLatest(nodeId, strategyName) }),
+    ])
+  } else if (group === 'ml_metrics') {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.mlMetricsHistory(nodeId, strategyName) }),
+      queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.mlMetricsRolling(nodeId, strategyName) }),
+    ])
+  } else if (group === 'history_dates') {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['historical-position-dates', nodeId, engine, strategyName],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['ml-prediction-by-date', nodeId, strategyName],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['ml-prediction-all', nodeId, strategyName],
+      }),
+    ])
+  }
+}
+
+export async function invalidateLiveTradingEventQueries(
+  queryClient: QueryClient,
+  event: LiveTradingEvent,
+): Promise<void> {
+  const groups = Array.from(new Set(event.query_groups || []))
+  await Promise.all(groups.map((group) => invalidateIdentityGroup(queryClient, group, event)))
 }
 
 export async function invalidateLiveStrategyMutationQueries(

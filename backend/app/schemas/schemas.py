@@ -305,6 +305,9 @@ class StrategySummary(BaseModel):
     last_error: Optional[str] = None
     # 回放状态（双轨影子策略 / 历史回放进度）
     replay_status: Optional[str] = None  # "running" | "completed" | "error" 等；"idle" 归一为 None
+    # 实时风险事件摘要（P0/P1 实时计算，不落表）
+    risk_event_count: Optional[int] = 0
+    highest_risk_severity: Optional[str] = None  # "info" | "warning" | "error" | "critical"
 
 
 class StrategyDetail(StrategySummary):

@@ -157,12 +157,13 @@
 
 推荐实现：
 - 新增前端模块，例如 `frontend/src/pages/live-trading/queryKeys.ts` 或 `refreshPolicy.ts`。
-- 定义：
-  - `LIVE_DETAIL_REFRESH_MS = 3000`
-  - `LIVE_SUMMARY_REFRESH_MS = 5000`
-  - `LIVE_TRADES_REFRESH_MS = 10000`
-  - `ML_MONITOR_REFRESH_MS = 60000`
-  - `HISTORY_STALE_MS = 60000/300000`
+- P0/P1 SSE 实施后，刷新常量已收敛为 fallback policy：
+  - `LIVE_DETAIL_FALLBACK_REFRESH_MS = 30000`
+  - `LIVE_SUMMARY_FALLBACK_REFRESH_MS = 30000`
+  - `LIVE_TRADES_FALLBACK_REFRESH_MS = 30000`
+  - `LIVE_RISK_FALLBACK_REFRESH_MS = 30000`
+  - `ML_MONITOR_FALLBACK_REFRESH_MS = 180000`
+  - `HISTORY_*_STALE_MS = 60000/300000`
 - 组件只引用常量和 query key factory。
 
 验收：
@@ -251,7 +252,7 @@
 
 ## 后续事件驱动方向
 
-第一阶段完成后再评估第二阶段：
-- 浏览器侧优先选 SSE，用于推送 query invalidation，而不是直接推完整业务数据。
-- mlearnweb 侧先做 hybrid：仍轮询 vnpy，但检测到状态指纹变化后立刻通知前端。
-- 真正全链路事件驱动需要确认 vnpy WebSocket 是否覆盖 strategy/account/position/trade 事件，并补齐认证、重连、去重、顺序、离线 fallback 和多节点 fanout 策略。
+后续事件驱动方向已合并到统一计划：
+
+- `mlearnweb/docs/plan/live-trading-event-driven-refresh-and-risk-visibility.md`
+- 该计划明确：P0/P1 只在 mlearnweb 内实现 SSE invalidation、REST fingerprint 和风险可见性；P2 才接 vnpy WS；P3 才做事件持久化与 ack。

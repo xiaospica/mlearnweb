@@ -192,6 +192,7 @@ async def historical_predictions_sync_tick() -> None:
     SessionLocal = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
     session = SessionLocal()
     total_inserted = 0
+    changed: set[tuple[str, str]] = set()
     try:
         for nid, by_strategy in dates_by_node.items():
             for name, dates in by_strategy.items():
@@ -221,12 +222,23 @@ async def historical_predictions_sync_tick() -> None:
                         summary=summary,
                     )
                     total_inserted += 1
+                    changed.add((nid, name))
         session.commit()
         if total_inserted > 0:
             logger.info(
                 "[hist_pred_sync] inserted=%d historical prediction rows",
                 total_inserted,
             )
+            from app.services.vnpy.live_trading_events import publish_strategy_event
+
+            for nid, name in changed:
+                await publish_strategy_event(
+                    "strategy.history.changed",
+                    node_id=nid,
+                    engine=ML_ENGINE_NAME,
+                    strategy_name=name,
+                    reason="historical_predictions_sync",
+                )
     except Exception as e:
         logger.exception("[hist_pred_sync] write failed: %s", e)
         session.rollback()

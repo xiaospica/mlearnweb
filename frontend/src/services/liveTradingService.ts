@@ -5,6 +5,8 @@ import type {
   DeleteRecordsStats,
   HistoricalPosition,
   LiveTradingResponse,
+  StrategyOrder,
+  StrategyRiskEvent,
   NodeStatus,
   PositionDatesResponse,
   StrategyCreatePayload,
@@ -106,6 +108,30 @@ export const liveTradingService = {
         params: { window_days: windowDays },
       })
       .then((r) => r.data)
+  },
+
+  listStrategyOrders(
+    nodeId: string,
+    engine: string,
+    name: string,
+  ): Promise<LiveTradingResponse<StrategyOrder[]>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/orders`)
+      .then((r) => r.data)
+  },
+
+  listStrategyRiskEvents(
+    nodeId: string,
+    engine: string,
+    name: string,
+  ): Promise<LiveTradingResponse<StrategyRiskEvent[]>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/risk-events`)
+      .then((r) => r.data)
+  },
+
+  eventsUrl(): string {
+    return '/api/live-trading/events'
   },
 
   /** 历史持仓日期索引：优先远端 vnpy，失败时由后端回退到本地权益快照日期 */

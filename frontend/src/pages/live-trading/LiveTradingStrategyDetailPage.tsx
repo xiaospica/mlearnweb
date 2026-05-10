@@ -27,21 +27,32 @@ import CorpActionsCard from './components/CorpActionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
+import RiskEventsCard from './components/RiskEventsCard'
 import StrategyPerformanceSummaryCard from './components/StrategyPerformanceSummaryCard'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
 import TradesCard from './components/TradesCard'
 import PageContainer from '@/components/layout/PageContainer'
 import {
-  LIVE_DETAIL_REFRESH_MS,
+  LIVE_DETAIL_FALLBACK_REFRESH_MS,
+  LIVE_RISK_FALLBACK_REFRESH_MS,
   invalidateLiveStrategyDetailQueries,
   invalidateLiveStrategyMutationQueries,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from './liveTradingRefresh'
+import { useLiveTradingInvalidations } from './hooks/useLiveTradingInvalidations'
+import type { RiskSeverity, StrategyRiskEvent } from '@/types/liveTrading'
 
 dayjs.extend(relativeTime)
 
 const { Title, Text } = Typography
+
+function riskAlertType(severity?: RiskSeverity | null): 'info' | 'warning' | 'error' {
+  if (severity === 'critical' || severity === 'error') return 'error'
+  if (severity === 'warning') return 'warning'
+  return 'info'
+}
 
 const LiveTradingStrategyDetailPage: React.FC = () => {
   const navigate = useNavigate()
@@ -54,11 +65,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const { guardWrite } = useOpsPassword()
   const queryClient = useQueryClient()
   const [manualRefreshing, setManualRefreshing] = useState(false)
+  const { eventsConnected } = useLiveTradingInvalidations()
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: liveTradingQueryKeys.strategyDetail(nodeId, engine, name),
     queryFn: () => liveTradingService.getStrategy(nodeId, engine, name),
-    refetchInterval: LIVE_DETAIL_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_DETAIL_FALLBACK_REFRESH_MS),
     staleTime: 0,
     enabled: !!(nodeId && engine && name),
     // 离开 ↔ 再回 / 切 tab / 跨页跳转时保留上次数据；vnpy 慢节点 (10s timeout)
@@ -69,6 +81,16 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const detail = data?.success ? data?.data : null
   const warning = data?.warning || (!data?.success ? data?.message : null)
   const isOffline = Boolean(detail?.node_offline)
+
+  const riskQuery = useQuery({
+    queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, name),
+    queryFn: () => liveTradingService.listStrategyRiskEvents(nodeId, engine, name),
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_RISK_FALLBACK_REFRESH_MS),
+    staleTime: 0,
+    enabled: !!(nodeId && engine && name),
+  })
+  const riskEvents: StrategyRiskEvent[] = riskQuery.data?.success ? riskQuery.data.data || [] : []
+  const topRisk = riskEvents[0] || null
 
   const refreshDetailPage = async () => {
     setManualRefreshing(true)
@@ -241,6 +263,16 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
         />
       )}
 
+      {topRisk && (
+        <Alert
+          type={riskAlertType(topRisk.severity)}
+          showIcon
+          message={topRisk.title}
+          description={topRisk.message || topRisk.reason || topRisk.status || undefined}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <Spin />
@@ -262,6 +294,7 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                     nodeId={nodeId}
                     engine={engine}
                     strategyName={name}
+                    eventsConnected={eventsConnected}
                   />
                   <Card style={{ marginTop: 16 }} styles={{ body: { padding: 16 } }}>
                     <FullEquityChart
@@ -277,12 +310,22 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                     <PositionsTable rows={detail.positions} />
                   </Card>
                   {engine === 'MlStrategy' && (
-                    <LatestTopkCard nodeId={nodeId} strategyName={name} />
+                    <LatestTopkCard
+                      nodeId={nodeId}
+                      strategyName={name}
+                      eventsConnected={eventsConnected}
+                    />
                   )}
-                  <TradesCard nodeId={nodeId} engine={engine} strategyName={name} />
+                  <TradesCard
+                    nodeId={nodeId}
+                    engine={engine}
+                    strategyName={name}
+                    eventsConnected={eventsConnected}
+                  />
                   <CorpActionsCard
                     vtSymbols={(detail.positions || []).filter((p) => Number(p.volume) > 0).map((p) => p.vt_symbol)}
                     days={30}
+                    eventsConnected={eventsConnected}
                   />
                   <Card title="参数 / 运行时变量" style={{ marginTop: 16 }}>
                     <ResponsiveDescriptions
@@ -327,12 +370,21 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
               key: 'monitor',
               label: '策略监控',
               children: (
-                <MlMonitorPanel
-                  nodeId={nodeId}
-                  engine={engine}
-                  strategyName={name}
-                  gatewayName={detail.gateway_name || undefined}
-                />
+                <>
+                  <RiskEventsCard
+                    nodeId={nodeId}
+                    engine={engine}
+                    strategyName={name}
+                    eventsConnected={eventsConnected}
+                  />
+                  <MlMonitorPanel
+                    nodeId={nodeId}
+                    engine={engine}
+                    strategyName={name}
+                    gatewayName={detail.gateway_name || undefined}
+                    eventsConnected={eventsConnected}
+                  />
+                </>
               ),
             },
           ]}

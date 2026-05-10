@@ -1452,3 +1452,29 @@ graph LR
 | **WAL** | SQLite Write-Ahead Logging，允许多进程并发读写 |
 | **snapshot** | `StrategyEquitySnapshot` 表的一行，记录某策略某时刻的 `strategy_value`/`account_equity`/持仓数等 |
 | **fanout** | 并发调用 N 个上游节点，把结果合并成统一列表的模式 |
+## 实盘事件中台与风险事件
+
+`app.live_main` 在原有 `snapshot_loop` / `ml_snapshot_loop` 基础上新增实盘事件中台：
+
+- `LiveTradingEvent` 是后端到前端的 SSE invalidation 事件，只包含 `event_type`、策略身份、`severity`、`reason`、`query_groups` 和时间戳。
+- `StrategyRiskEvent` 是前端展示用风险事件，由 `risk_event_service` 从 strategy variables、orders、node/gateway health 实时计算。
+- SSE endpoint 为 `/api/live-trading/events`。它不推送收益曲线、成交、持仓、ML 指标等大对象，避免把后端与 React Query key 或前端展示结构耦合。
+- 前端 `useLiveTradingInvalidations()` 将 query group 映射到 `liveTradingRefresh.ts` 中的 query key，并调用 React Query `invalidateQueries`。
+- SSE connected 时，策略详情页卡片关闭独立高频轮询；SSE disconnected 时启用低频 fallback polling，保证最终一致。
+
+Query group 映射：
+
+| group | 典型刷新目标 |
+| --- | --- |
+| `strategy_detail` | 策略详情、参数、持仓、曲线 |
+| `performance_summary` | 指标总览 |
+| `trades` | 成交与订单相关视图 |
+| `risk_events` | 顶部风险 Alert、风险事件卡片、列表风险角标 |
+| `ml_latest` | 最新 TopK、最新预测 summary |
+| `ml_metrics` | ML history / rolling 指标 |
+| `history_dates` | 历史持仓日期、历史预测日期 |
+| `corp_actions` | 当前持仓相关除权事件 |
+| `strategy_list` | 实盘策略列表 |
+| `nodes` | 节点在线状态 |
+
+P0/P1 事件不落表。P2 才接入 vnpy `/api/v1/ws`，P3 才新增事件持久化与 ack。

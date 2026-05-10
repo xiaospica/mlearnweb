@@ -234,3 +234,18 @@ async def test_ml_snapshot_tick(tmp_path, monkeypatch):
 - [DEVELOPMENT.md](./DEVELOPMENT.md) — 开发环境 + 分层纪律
 - [DEPLOYMENT.md](./DEPLOYMENT.md) — 生产部署 + 监控
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — 组件职责 + DB schema
+## Live-Trading Event Center Tests
+
+实盘事件中台相关修改至少覆盖：
+
+- risk normalization：`REJECTED`、`ORDER_JUNK`、撤单再报 `R`、普通 `CANCELLED`、长时间 `PARTTRADED`、`last_status=failed`、`replay_status=error`。
+- API degradation：orders/risk-events 空数据不 500；节点不可达返回 node-level critical risk event。
+- event bus：多 SSE client fanout、client unsubscribe、heartbeat、普通事件 coalesce、`error/critical` 不被 coalesce 延迟。
+- production proxy：`/api/live-trading/events` 在 `app.main` 单端口代理下必须保持 streaming，不允许读成 `upstream.content` 后返回。
+- frontend：`cmd /c npm run build`，并手工验证 SSE connected 时策略详情卡片不再高频轮询，SSE disconnected 时 fallback polling 生效。
+
+推荐后端命令：
+
+```bash
+python -m pytest tests/test_backend/test_live_trading.py -q --basetemp .pytest_tmp
+```

@@ -138,3 +138,13 @@ npx tsc --noEmit
 - [TESTING.md](./TESTING.md) — 测试矩阵
 - [mlearnweb-technical-design.md](./mlearnweb-technical-design.md) — 最初的技术设计(保留)
 - [api.md](./api.md) — vnpy 节点侧 API 契约
+## Live-Trading Card Refresh Rules
+
+新增或修改 `frontend/src/pages/live-trading/` 下的卡片时：
+
+- 数据读取继续使用 React Query 和 `frontend/src/services/liveTradingService.ts` / `mlMonitoringService.ts`。
+- query key 必须集中在 `liveTradingRefresh.ts`。
+- 刷新触发必须接入 `useLiveTradingInvalidations()` 的 query group invalidation。
+- 策略详情卡片不要新增独立高频 `refetchInterval`。SSE connected 时应停止周期轮询，SSE disconnected 时只允许低频 fallback。
+- 新卡片需要在 `liveTradingRefresh.ts` 中声明对应 query group 映射，而不是在组件里自定义刷新节奏。
+- 风险事件必须来自后端 `risk-events` API；前端不直接解析 vnpy 原始 order/log payload。

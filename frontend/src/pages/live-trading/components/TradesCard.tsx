@@ -6,7 +6,8 @@ import { liveTradingService } from '@/services/liveTradingService'
 import type { StrategyTrade } from '@/types/liveTrading'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
 import {
-  LIVE_TRADES_REFRESH_MS,
+  LIVE_TRADES_FALLBACK_REFRESH_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from '../liveTradingRefresh'
 
@@ -16,6 +17,7 @@ interface Props {
   nodeId: string
   engine: string
   strategyName: string
+  eventsConnected: boolean
 }
 
 interface DailyAggregated {
@@ -36,13 +38,13 @@ function isLong(direction: string): boolean {
   return direction.includes('多') || direction.toLowerCase().includes('long')
 }
 
-const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
+const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName, eventsConnected }) => {
   const [view, setView] = useState<'daily' | 'detail'>('daily')
 
   const { data, isLoading } = useQuery({
     queryKey: liveTradingQueryKeys.trades(nodeId, engine, strategyName),
     queryFn: () => liveTradingService.listStrategyTrades(nodeId, engine, strategyName),
-    refetchInterval: LIVE_TRADES_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_TRADES_FALLBACK_REFRESH_MS),
     staleTime: 0,
     enabled: !!(nodeId && engine && strategyName),
   })

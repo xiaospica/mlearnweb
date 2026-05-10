@@ -53,6 +53,15 @@ class FakePerNodeClient:
     async def get_positions(self):
         return self._data_or_raise(self.parent.positions_fanout)
 
+    async def get_orders(self):
+        return self._data_or_raise(self.parent.orders_fanout)
+
+    async def get_trades(self):
+        return self._data_or_raise(self.parent.trades_fanout)
+
+    async def get_node_health(self):
+        return self.parent.health_by_node.get(self.node_id, {})
+
 
 class FakeVnpyClient:
     """In-memory stand-in for VnpyMultiNodeClient.
@@ -146,6 +155,66 @@ class FakeVnpyClient:
             },
             {"node_id": "nodeB", "ok": False, "data": [], "error": "connection refused"},
         ]
+        self.orders_fanout = [
+            {
+                "node_id": "nodeA",
+                "ok": True,
+                "data": [
+                    {
+                        "vt_orderid": "QMT.1",
+                        "orderid": "1",
+                        "vt_symbol": "rb2501.SHFE",
+                        "direction": "多",
+                        "offset": "开",
+                        "price": 3500,
+                        "volume": 3,
+                        "traded": 0,
+                        "status": "REJECTED",
+                        "status_msg": "拒单: 资金不足",
+                        "reference": "cta1:1",
+                        "datetime": "2026-05-10 09:31:00",
+                    },
+                    {
+                        "vt_orderid": "QMT.2",
+                        "orderid": "2",
+                        "vt_symbol": "rb2501.SHFE",
+                        "direction": "多",
+                        "offset": "开",
+                        "price": 3501,
+                        "volume": 3,
+                        "traded": 1,
+                        "status": "CANCELLED",
+                        "status_msg": "撤单后重报",
+                        "reference": "cta1:2R",
+                        "datetime": "2026-05-10 09:32:00",
+                    },
+                    {
+                        "vt_orderid": "QMT.3",
+                        "orderid": "3",
+                        "vt_symbol": "ag2501.SHFE",
+                        "direction": "多",
+                        "offset": "开",
+                        "price": 5000,
+                        "volume": 1,
+                        "traded": 0,
+                        "status": "REJECTED",
+                        "status_msg": "拒单: 合约错误",
+                        "reference": "cta2:1",
+                        "datetime": "2026-05-10 09:33:00",
+                    },
+                ],
+                "error": None,
+            },
+            {"node_id": "nodeB", "ok": False, "data": [], "error": "connection refused"},
+        ]
+        self.trades_fanout = [
+            {"node_id": "nodeA", "ok": True, "data": [], "error": None},
+            {"node_id": "nodeB", "ok": False, "data": [], "error": "connection refused"},
+        ]
+        self.health_by_node = {
+            "nodeA": {"version": "1.2.0", "gateways": [{"gateway_name": "QMT", "connected": True}]},
+            "nodeB": {},
+        }
         self.engines_by_node = {
             "nodeA": [
                 {
@@ -173,6 +242,12 @@ class FakeVnpyClient:
 
     async def get_positions(self):
         return self.positions_fanout
+
+    async def get_orders(self):
+        return self.orders_fanout
+
+    async def get_trades(self):
+        return self.trades_fanout
 
     def get_per_node(self, node_id):
         return FakePerNodeClient(self, node_id)
@@ -250,10 +325,12 @@ def fake_client(monkeypatch):
     fake = FakeVnpyClient()
     from app.services.vnpy import client as client_module
     from app.services.vnpy import live_trading_service as svc_module
+    from app.services.vnpy import risk_event_service as risk_module
 
     monkeypatch.setattr(client_module, "_instance", fake)
     monkeypatch.setattr(client_module, "get_vnpy_client", lambda: fake)
     monkeypatch.setattr(svc_module, "get_vnpy_client", lambda: fake)
+    monkeypatch.setattr(risk_module, "get_vnpy_client", lambda: fake)
     # routers import `svc` which re-exports; patch in one place is enough since
     # the router calls svc.get_vnpy_client() and svc.list_strategy_summaries().
     return fake
@@ -276,11 +353,14 @@ def api_client(fake_client, tmp_path, monkeypatch):
     # Re-import service/router so they see the fresh DB engine
     from app.services.vnpy import live_trading_service as svc_module
     importlib.reload(svc_module)
+    from app.services.vnpy import risk_event_service as risk_module
+    importlib.reload(risk_module)
     from app.routers import live_trading as router_module
     importlib.reload(router_module)
 
     # re-patch after reload so the reloaded modules see the fake client
     monkeypatch.setattr(svc_module, "get_vnpy_client", lambda: fake_client)
+    monkeypatch.setattr(risk_module, "get_vnpy_client", lambda: fake_client)
 
     from fastapi import FastAPI
     app = FastAPI()
@@ -691,6 +771,47 @@ class TestReadEndpoints:
         assert len(data["data"]) == 2
         assert data["data"][0]["app_name"] == "CtaStrategy"
 
+    def test_list_strategy_orders_filters_by_reference(self, api_client):
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/orders")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        refs = {row["reference"] for row in payload["data"]}
+        assert refs == {"cta1:1", "cta1:2R"}
+        assert all(row["reference"].startswith("cta1:") for row in payload["data"])
+
+    def test_risk_events_include_rejected_and_resubmit_cancel(self, api_client):
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        events = payload["data"]
+        by_ref = {event["reference"]: event for event in events if event.get("reference")}
+        assert by_ref["cta1:1"]["severity"] == "error"
+        assert by_ref["cta1:1"]["category"] == "order"
+        assert by_ref["cta1:2R"]["severity"] == "warning"
+        assert by_ref["cta1:2R"]["is_resubmit"] is True
+        assert "cta2:1" not in by_ref
+
+    def test_risk_events_unknown_node_degrades_to_critical_event(self, api_client):
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies/ghost/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        assert payload["data"][0]["severity"] == "critical"
+        assert payload["data"][0]["category"] == "node"
+
+    def test_strategy_summary_exposes_risk_badge_fields(self, api_client):
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies")
+        assert resp.status_code == 200
+        rows = {row["strategy_name"]: row for row in resp.json()["data"]}
+        assert rows["cta1"]["risk_event_count"] >= 2
+        assert rows["cta1"]["highest_risk_severity"] == "error"
+
     def test_warning_degradation_on_client_failure(self, api_client):
         """Simulate the fake client raising → endpoint returns warning, not 500."""
         client, svc_module, _ = api_client
@@ -712,6 +833,54 @@ class TestReadEndpoints:
         assert data["success"] is True
         assert data["data"] == []
         assert "upstream blew up" in (data["warning"] or "")
+
+
+class TestLiveTradingEventBus:
+    def test_fanout_and_coalesce_preserves_critical(self):
+        import asyncio
+        from app.services.vnpy.live_trading_events import LiveTradingEventBus, make_event
+
+        async def run():
+            bus = LiveTradingEventBus(coalesce_seconds=0.01)
+            q1 = bus.subscribe()
+            q2 = bus.subscribe()
+            await bus.publish(
+                make_event(
+                    "strategy.risk.changed",
+                    node_id="nodeA",
+                    engine="CtaStrategy",
+                    strategy_name="cta1",
+                    severity="critical",
+                    reason="node_offline",
+                )
+            )
+            assert (await asyncio.wait_for(q1.get(), timeout=1)).severity == "critical"
+            assert (await asyncio.wait_for(q2.get(), timeout=1)).severity == "critical"
+
+            await bus.publish(
+                make_event(
+                    "strategy.equity.changed",
+                    node_id="nodeA",
+                    engine="CtaStrategy",
+                    strategy_name="cta1",
+                    query_groups=["strategy_detail"],
+                )
+            )
+            await bus.publish(
+                make_event(
+                    "strategy.equity.changed",
+                    node_id="nodeA",
+                    engine="CtaStrategy",
+                    strategy_name="cta1",
+                    query_groups=["performance_summary"],
+                )
+            )
+            merged = await asyncio.wait_for(q1.get(), timeout=1)
+            assert set(merged.query_groups) == {"strategy_detail", "performance_summary"}
+            bus.unsubscribe(q1)
+            bus.unsubscribe(q2)
+
+        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

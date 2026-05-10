@@ -238,6 +238,7 @@ async def ml_snapshot_tick() -> None:
     session = SessionLocal()
 
     written = 0
+    published_identities: set[tuple[str, str]] = set()
     try:
         for node_id, strategies in data_by_node.items():
             for strategy_name, payload in strategies.items():
@@ -261,6 +262,7 @@ async def ml_snapshot_tick() -> None:
                         status=status,
                     )
                     written += 1
+                    published_identities.add((node_id, strategy_name))
 
                 if prediction:
                     _upsert_prediction(
@@ -271,6 +273,7 @@ async def ml_snapshot_tick() -> None:
                         summary=prediction,
                         status=status,
                     )
+                    published_identities.add((node_id, strategy_name))
 
         # ml_metric_snapshots / ml_prediction_daily 不做 retention：
         # 这两张表每个 (策略, trade_date) 一行，回放/历史档案体量小（10 年 ~8K 行），
@@ -280,6 +283,17 @@ async def ml_snapshot_tick() -> None:
         session.commit()
         if written:
             logger.debug("[ml_snapshot] ml_snapshot_tick wrote %d rows", written)
+        if published_identities:
+            from app.services.vnpy.live_trading_events import publish_strategy_event
+
+            for node_id, strategy_name in published_identities:
+                await publish_strategy_event(
+                    "strategy.ml.changed",
+                    node_id=node_id,
+                    engine=ML_ENGINE_NAME,
+                    strategy_name=strategy_name,
+                    reason="ml_snapshot_tick",
+                )
     except Exception as e:
         logger.exception("[ml_snapshot] write failed: %s", e)
         session.rollback()

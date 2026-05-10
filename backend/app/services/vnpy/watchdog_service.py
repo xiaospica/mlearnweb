@@ -211,6 +211,16 @@ async def watchdog_loop() -> None:
             statuses = await client.probe_nodes()
             emails = wd.evaluate(statuses)
             for item in emails:
+                from app.services.vnpy.live_trading_events import make_event, publish_event
+
+                await publish_event(
+                    make_event(
+                        "node.changed",
+                        node_id=item["node_id"],
+                        severity="critical" if item["kind"] == "offline" else None,
+                        reason=f"watchdog_{item['kind']}",
+                    )
+                )
                 if item["kind"] == "offline":
                     subject, content = _build_offline_email(item)
                 else:

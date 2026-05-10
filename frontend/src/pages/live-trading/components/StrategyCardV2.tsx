@@ -1,11 +1,11 @@
 import React from 'react'
-import { Card, Tooltip, Typography } from 'antd'
+import { Card, Tag, Tooltip, Typography } from 'antd'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import { Link } from 'react-router-dom'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
-import type { SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTrading'
+import type { RiskSeverity, SourceLabel, StrategyMode, StrategySummary } from '@/types/liveTrading'
 import MiniEquityChart from './MiniEquityChart'
 import StrategyActions from './StrategyActions'
 import CronScheduleStrip from './CronScheduleStrip'
@@ -30,6 +30,20 @@ const SOURCE_LABEL_HELP: Record<SourceLabel, string> = {
   account_equity: '账户总权益，多策略共享时为近似值',
   replay_settle: '按回放逻辑日沉淀的策略权益快照',
   unavailable: '当前没有可用数据',
+}
+
+const RISK_COLOR: Record<RiskSeverity, string> = {
+  info: 'default',
+  warning: 'orange',
+  error: 'red',
+  critical: 'magenta',
+}
+
+const RISK_TEXT: Record<RiskSeverity, string> = {
+  info: 'INFO',
+  warning: 'WARN',
+  error: 'ERR',
+  critical: 'CRIT',
 }
 
 function fmtValue(v: number | null | undefined): string {
@@ -201,6 +215,17 @@ const StrategyCardV2: React.FC<StrategyCardV2Props> = ({
             {ss.shape}
           </span>
         </Tooltip>
+
+        {!!item.risk_event_count && item.highest_risk_severity && (
+          <Tooltip title={`${item.risk_event_count} 条风险事件`}>
+            <Tag
+              color={RISK_COLOR[item.highest_risk_severity]}
+              style={{ marginInlineEnd: 0, fontSize: 10, lineHeight: '16px', height: 18 }}
+            >
+              {RISK_TEXT[item.highest_risk_severity]} {item.risk_event_count}
+            </Tag>
+          </Tooltip>
+        )}
       </div>
 
       {/* Meta row */}

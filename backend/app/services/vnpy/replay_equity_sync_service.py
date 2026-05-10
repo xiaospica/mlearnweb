@@ -197,10 +197,11 @@ async def sync_all() -> Dict[str, Any]:
     client = get_vnpy_client()
     by_node = await _collect_strategies(client)
     if not by_node:
-        return {"scanned": 0, "upserted": 0, "ok": True, "msg": "no strategies discovered"}
+        return {"scanned": 0, "upserted": 0, "changed": [], "ok": True, "msg": "no strategies discovered"}
 
     total_upserted = 0
     total_scanned = 0
+    changed: list[dict[str, str]] = []
     for nid, entries in by_node.items():
         for entry in entries:
             total_scanned += 1
@@ -212,6 +213,12 @@ async def sync_all() -> Dict[str, Any]:
                     strategy_name=entry["name"],
                 )
                 total_upserted += n
+                if n:
+                    changed.append({
+                        "node_id": nid,
+                        "engine": entry["engine"],
+                        "strategy_name": entry["name"],
+                    })
             except Exception as exc:
                 logger.warning(
                     "[replay_equity_sync] node=%s engine=%s strategy=%s 同步失败: %s",
@@ -220,6 +227,7 @@ async def sync_all() -> Dict[str, Any]:
     return {
         "scanned": total_scanned,
         "upserted": total_upserted,
+        "changed": changed,
         "ok": True,
         "msg": "",
     }
@@ -238,6 +246,16 @@ async def replay_equity_sync_loop() -> None:
                     "[replay_equity_sync] 同步完成 scanned=%d upserted=%d",
                     stats.get("scanned", 0), stats.get("upserted", 0),
                 )
+                from app.services.vnpy.live_trading_events import publish_strategy_event
+
+                for item in stats.get("changed", []) or []:
+                    await publish_strategy_event(
+                        "strategy.equity.changed",
+                        node_id=item["node_id"],
+                        engine=item["engine"],
+                        strategy_name=item["strategy_name"],
+                        reason="replay_equity_sync",
+                    )
         except asyncio.CancelledError:
             logger.info("[replay_equity_sync] cancelled, 退出")
             raise

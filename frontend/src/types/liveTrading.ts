@@ -91,6 +91,67 @@ export interface StrategyTrade {
   reference: string
 }
 
+export type RiskSeverity = 'info' | 'warning' | 'error' | 'critical'
+
+export type LiveTradingQueryGroup =
+  | 'strategy_detail'
+  | 'performance_summary'
+  | 'trades'
+  | 'risk_events'
+  | 'ml_latest'
+  | 'ml_metrics'
+  | 'history_dates'
+  | 'corp_actions'
+  | 'strategy_list'
+  | 'nodes'
+
+export interface StrategyOrder {
+  vt_orderid: string
+  orderid: string
+  vt_symbol: string
+  name?: string
+  direction: string
+  offset: string
+  price: number
+  volume: number
+  traded: number
+  status: string
+  status_msg: string
+  reference: string
+  datetime: string
+}
+
+export interface StrategyRiskEvent {
+  event_id: string
+  node_id: string
+  engine: string | null
+  strategy_name: string | null
+  severity: RiskSeverity
+  category: 'strategy' | 'order' | 'trade' | 'log' | 'node' | 'gateway' | string
+  title: string
+  message: string
+  status: string | null
+  vt_orderid: string | null
+  vt_symbol: string | null
+  reference: string | null
+  is_resubmit: boolean
+  event_ts: number
+  source: 'rest_fingerprint' | 'vnpy_ws' | 'watchdog' | 'strategy_variables' | string
+  reason?: string | null
+}
+
+export interface LiveTradingEvent {
+  event_id: string
+  event_type: string
+  node_id?: string | null
+  engine?: string | null
+  strategy_name?: string | null
+  severity?: RiskSeverity | null
+  reason?: string | null
+  query_groups: LiveTradingQueryGroup[]
+  ts: number
+}
+
 export interface CorpActionEvent {
   vt_symbol: string
   name: string
@@ -146,6 +207,8 @@ export interface StrategySummary {
   last_duration_ms?: number | null
   last_error?: string | null
   replay_status?: ReplayStatus | null
+  risk_event_count?: number
+  highest_risk_severity?: RiskSeverity | null
 }
 
 export type StrategyCapability = 'add' | 'edit' | 'init' | 'remove' | 'start' | 'stop'

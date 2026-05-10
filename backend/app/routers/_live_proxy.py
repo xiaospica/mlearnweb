@@ -22,7 +22,9 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Request, Response
+from starlette.background import BackgroundTask
 from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse
 
 from app.core.config import settings
 
@@ -82,6 +84,50 @@ async def proxy_live_trading(full_path: str, request: Request) -> Response:
         if k.lower() not in _HOP_BY_HOP
     }
     body = await request.body()
+    if full_path == "events":
+        try:
+            upstream_request = client.build_request(
+                request.method,
+                upstream_path,
+                params=request.query_params,
+                content=body if body else None,
+                headers=forwarded_headers,
+            )
+            upstream = await client.send(upstream_request, stream=True)
+        except httpx.ConnectError as e:
+            logger.warning("[live-proxy] connect failed %s: %s", upstream_path, e)
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "success": False,
+                    "message": f"实盘服务 {settings.live_main_internal_url} 未启动",
+                    "data": None,
+                    "warning": "live_main 进程不可达 — 检查 mlearnweb_live 服务状态",
+                },
+            )
+        except httpx.HTTPError as e:
+            logger.warning("[live-proxy] stream http error %s: %s", upstream_path, e)
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "success": False,
+                    "message": f"反代失败: {e}",
+                    "data": None,
+                    "warning": "live_main 响应异常",
+                },
+            )
+        out_headers = {
+            k: v for k, v in upstream.headers.items()
+            if k.lower() not in _HOP_BY_HOP
+        }
+        return StreamingResponse(
+            upstream.aiter_raw(),
+            status_code=upstream.status_code,
+            headers=out_headers,
+            media_type=upstream.headers.get("content-type", "text/event-stream"),
+            background=BackgroundTask(upstream.aclose),
+        )
+
     try:
         upstream = await client.request(
             request.method,

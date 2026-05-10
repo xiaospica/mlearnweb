@@ -18,6 +18,7 @@ import type { CorpActionEvent } from '@/types/liveTrading'
 import {
   CORP_ACTIONS_REFRESH_MS,
   CORP_ACTIONS_STALE_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from '../liveTradingRefresh'
 
@@ -27,6 +28,7 @@ interface Props {
   vtSymbols: string[]
   /** 向前回溯天数。默认 30。 */
   days?: number
+  eventsConnected: boolean
 }
 
 const columns: ColumnsType<CorpActionEvent> = [
@@ -106,12 +108,12 @@ const columns: ColumnsType<CorpActionEvent> = [
   },
 ]
 
-const CorpActionsCard: React.FC<Props> = ({ vtSymbols, days = 30 }) => {
+const CorpActionsCard: React.FC<Props> = ({ vtSymbols, days = 30, eventsConnected }) => {
   const sortedKey = [...vtSymbols].sort().join(',')
   const { data, isLoading } = useQuery({
     queryKey: liveTradingQueryKeys.corpActions(sortedKey, days),
     queryFn: () => liveTradingService.listCorpActions(vtSymbols, days),
-    refetchInterval: CORP_ACTIONS_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, CORP_ACTIONS_REFRESH_MS),
     staleTime: CORP_ACTIONS_STALE_MS,
     retry: 1,
     enabled: vtSymbols.length > 0,

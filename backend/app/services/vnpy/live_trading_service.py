@@ -802,6 +802,14 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
         return [], f"未知错误: {e}"
 
     warning = _first_warning(strategies_fo, accounts_fo, positions_fo)
+    try:
+        from app.services.vnpy import risk_event_service
+
+        orders_fo = await client.get_orders()
+        risk_summaries = risk_event_service.summarize_risks_from_fanout(strategies_fo, orders_fo)
+    except Exception as exc:
+        logger.warning("[live_trading] risk summary fanout failed: %s", exc)
+        risk_summaries = {}
 
     accounts_by_node = _group_by_node(accounts_fo)
     positions_by_node = _group_by_node(positions_fo)
@@ -838,6 +846,7 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             curve = _read_curve(db, node_id, engine_name, name)
             inited = bool(s.get("inited"))
             trading = bool(s.get("trading"))
+            risk_summary = risk_summaries.get((node_id, engine_name, name), {})
             summaries.append({
                 "node_id": node_id,
                 "engine": engine_name,
@@ -865,6 +874,8 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
                 "capabilities": capabilities.get(node_id, {}).get(engine_name, []),
                 "mode": mode,
                 "gateway_name": gateway_name,
+                "risk_event_count": int(risk_summary.get("risk_event_count") or 0),
+                "highest_risk_severity": risk_summary.get("highest_risk_severity"),
                 **schedule,
             })
 
@@ -922,6 +933,8 @@ async def list_strategy_summaries(db: Session) -> Tuple[List[Dict[str, Any]], Op
             "gateway_name": None,
             "node_offline": True,
             "offline_reason": "策略当前未在节点上运行（仅展示历史）",
+            "risk_event_count": 1,
+            "highest_risk_severity": "critical",
             **_schedule_from_raw_variables_json(last.raw_variables_json),
         })
 
@@ -981,6 +994,8 @@ def _list_offline_strategies_for_node(
             "gateway_name": None,
             "node_offline": True,
             "offline_reason": offline_reason,
+            "risk_event_count": 1,
+            "highest_risk_severity": "critical",
             **_schedule_from_raw_variables_json(last.raw_variables_json),
         })
     return out
@@ -1045,6 +1060,8 @@ def _offline_detail_from_history(
         # 标记给前端的离线提示（前端按此显示 "节点离线" 角标）
         "node_offline": True,
         "offline_reason": offline_reason,
+        "risk_event_count": 1,
+        "highest_risk_severity": "critical",
         **schedule,
     }
 
@@ -1195,6 +1212,8 @@ async def get_strategy_detail(
         "mode": mode,
         "gateway_name": gateway_name,
         "positions": _render_positions(positions),
+        "risk_event_count": 0,
+        "highest_risk_severity": None,
         **schedule,
     }
     _log_detail_latency("ok")
@@ -1324,6 +1343,22 @@ async def delete_strategy_records(
         logger.warning("[delete_strategy_records] ml_prediction_daily 删除失败: %s", exc)
         n_pred = 0
     db.commit()
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.history.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=strategy_name,
+        reason="delete_strategy_records",
+    )
+    await publish_strategy_event(
+        "strategy.equity.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=strategy_name,
+        reason="delete_strategy_records",
+    )
     return {
         "equity_snapshots": n_equity,
         "ml_metric_snapshots": n_ml,
@@ -1448,6 +1483,7 @@ async def snapshot_tick() -> None:
     now = datetime.now()
     SessionLocal = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)
     session = SessionLocal()
+    written_identities: set[Tuple[str, str, str]] = set()
     try:
         written = 0
         for item in strategies_fo:
@@ -1529,6 +1565,7 @@ async def snapshot_tick() -> None:
                 )
                 session.add(row)
                 written += 1
+                written_identities.add((node_id, engine_name, name))
 
         # retention cleanup — 注意排除 source_label='replay_settle'，
         # 那是 vnpy 端写入的"按回放逻辑日"历史快照，不该被实时 retention 误删。
@@ -1550,6 +1587,16 @@ async def snapshot_tick() -> None:
         session.commit()
         if written:
             logger.debug("[live_trading] snapshot_tick wrote %d rows", written)
+            from app.services.vnpy.live_trading_events import publish_strategy_event
+
+            for node_id, engine_name, name in written_identities:
+                await publish_strategy_event(
+                    "strategy.equity.changed",
+                    node_id=node_id,
+                    engine=engine_name,
+                    strategy_name=name,
+                    reason="snapshot_tick",
+                )
     except Exception as e:
         logger.exception("[live_trading] snapshot_tick write failed: %s", e)
         session.rollback()
@@ -1589,24 +1636,84 @@ async def snapshot_loop() -> None:
 
 
 async def create_strategy(node_id: str, engine: str, body: Dict[str, Any]) -> Dict[str, Any]:
-    return await get_vnpy_client().create_strategy(node_id, engine, body)
+    result = await get_vnpy_client().create_strategy(node_id, engine, body)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=str(body.get("strategy_name") or ""),
+        reason="create_strategy",
+    )
+    return result
 
 
 async def init_strategy(node_id: str, engine: str, name: str) -> Dict[str, Any]:
-    return await get_vnpy_client().init_strategy(node_id, engine, name)
+    result = await get_vnpy_client().init_strategy(node_id, engine, name)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=name,
+        reason="init_strategy",
+    )
+    return result
 
 
 async def start_strategy(node_id: str, engine: str, name: str) -> Dict[str, Any]:
-    return await get_vnpy_client().start_strategy(node_id, engine, name)
+    result = await get_vnpy_client().start_strategy(node_id, engine, name)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=name,
+        reason="start_strategy",
+    )
+    return result
 
 
 async def stop_strategy(node_id: str, engine: str, name: str) -> Dict[str, Any]:
-    return await get_vnpy_client().stop_strategy(node_id, engine, name)
+    result = await get_vnpy_client().stop_strategy(node_id, engine, name)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=name,
+        reason="stop_strategy",
+    )
+    return result
 
 
 async def edit_strategy(node_id: str, engine: str, name: str, setting: Dict[str, Any]) -> Dict[str, Any]:
-    return await get_vnpy_client().edit_strategy(node_id, engine, name, setting)
+    result = await get_vnpy_client().edit_strategy(node_id, engine, name, setting)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=name,
+        reason="edit_strategy",
+    )
+    return result
 
 
 async def delete_strategy(node_id: str, engine: str, name: str) -> Dict[str, Any]:
-    return await get_vnpy_client().delete_strategy(node_id, engine, name)
+    result = await get_vnpy_client().delete_strategy(node_id, engine, name)
+    from app.services.vnpy.live_trading_events import publish_strategy_event
+
+    await publish_strategy_event(
+        "strategy.state.changed",
+        node_id=node_id,
+        engine=engine,
+        strategy_name=name,
+        reason="delete_strategy",
+    )
+    return result

@@ -23,6 +23,7 @@ import { NowMsProvider } from './hooks/useNowMs'
 import { useDensity } from './hooks/useDensity'
 import { useNodeCollapse } from './hooks/useNodeCollapse'
 import { useStrategyFilters } from './hooks/useStrategyFilters'
+import { useLiveTradingInvalidations } from './hooks/useLiveTradingInvalidations'
 import {
   buildDownstreamCountMap,
   groupStrategiesByNode,
@@ -30,8 +31,9 @@ import {
 } from './utils/groupByNode'
 import { nextRunInMs, parseTimeOfDay } from './utils/scheduleParse'
 import {
-  LIVE_NODES_REFRESH_MS,
-  LIVE_STRATEGIES_REFRESH_MS,
+  LIVE_NODES_FALLBACK_REFRESH_MS,
+  LIVE_STRATEGIES_FALLBACK_REFRESH_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from './liveTradingRefresh'
 import dayjs from 'dayjs'
@@ -39,6 +41,7 @@ import dayjs from 'dayjs'
 const LiveTradingPage: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { eventsConnected } = useLiveTradingInvalidations()
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardInitialValues, setWizardInitialValues] = useState<{
     nodeId?: string
@@ -86,7 +89,7 @@ const LiveTradingPage: React.FC = () => {
   const nodesQuery = useQuery({
     queryKey: liveTradingQueryKeys.nodes(),
     queryFn: () => liveTradingService.listNodes(),
-    refetchInterval: LIVE_NODES_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_NODES_FALLBACK_REFRESH_MS),
     staleTime: 0,
     // 离开/再回页面时保留上次节点列表，慢节点 (10s timeout) 不再阻塞首屏
     placeholderData: keepPreviousData,
@@ -98,7 +101,7 @@ const LiveTradingPage: React.FC = () => {
   const strategiesQuery = useQuery({
     queryKey: liveTradingQueryKeys.strategies(),
     queryFn: () => liveTradingService.listStrategies(),
-    refetchInterval: LIVE_STRATEGIES_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, LIVE_STRATEGIES_FALLBACK_REFRESH_MS),
     staleTime: 0,
     enabled: nodes.length === 0 ? true : !allOffline,  // 全离线时停止策略轮询，nodes 仍轮询以恢复
     // 同 nodesQuery：返回页面时立即渲染上次数据，后台静默刷新
@@ -152,7 +155,7 @@ const LiveTradingPage: React.FC = () => {
     <NowMsProvider>
       <PageContainer
         title="实盘交易"
-        subtitle="跨节点策略汇总 · 5秒自动刷新"
+        subtitle="跨节点策略汇总"
         actions={
           <Space wrap>
             <Segmented

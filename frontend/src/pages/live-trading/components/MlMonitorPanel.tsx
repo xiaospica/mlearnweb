@@ -29,8 +29,9 @@ import BacktestDiffPanel from './BacktestDiffPanel'
 import PredictionHistoryPanel from './PredictionHistoryPanel'
 import HistoricalPositionsCard from './HistoricalPositionsCard'
 import {
-  ML_MONITOR_REFRESH_MS,
+  ML_MONITOR_FALLBACK_REFRESH_MS,
   ML_MONITOR_STALE_MS,
+  liveFallbackInterval,
   liveTradingQueryKeys,
 } from '../liveTradingRefresh'
 
@@ -41,6 +42,7 @@ interface Props {
   engine: string
   strategyName: string
   gatewayName?: string
+  eventsConnected: boolean
 }
 
 function fmtNum(v: number | null | undefined, digits = 4): string {
@@ -210,27 +212,27 @@ function buildTopPsiFeaturesOption(psiByFeature: PsiByFeature | null) {
   }
 }
 
-const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gatewayName }) => {
+const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gatewayName, eventsConnected }) => {
   // 180 日窗口覆盖实盘积累和 backfill 测试数据. ICIR window 维持 30 日
   // (与原 Phase 3 设计一致). Refetch 60s 匹配 ml_snapshot_loop 节奏.
   const history = useQuery({
     queryKey: liveTradingQueryKeys.mlMetricsHistory(nodeId, strategyName),
     queryFn: () => mlMonitoringService.metricsHistory(nodeId, strategyName, 180),
-    refetchInterval: ML_MONITOR_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, ML_MONITOR_FALLBACK_REFRESH_MS),
     staleTime: ML_MONITOR_STALE_MS,
   })
 
   const rolling = useQuery({
     queryKey: liveTradingQueryKeys.mlMetricsRolling(nodeId, strategyName),
     queryFn: () => mlMonitoringService.metricsRolling(nodeId, strategyName, 30),
-    refetchInterval: ML_MONITOR_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, ML_MONITOR_FALLBACK_REFRESH_MS),
     staleTime: ML_MONITOR_STALE_MS,
   })
 
   const latestPrediction = useQuery({
     queryKey: liveTradingQueryKeys.mlPredictionLatest(nodeId, strategyName),
     queryFn: () => mlMonitoringService.predictionLatestSummary(nodeId, strategyName),
-    refetchInterval: ML_MONITOR_REFRESH_MS,
+    refetchInterval: liveFallbackInterval(eventsConnected, ML_MONITOR_FALLBACK_REFRESH_MS),
     staleTime: ML_MONITOR_STALE_MS,
     retry: 1,
   })

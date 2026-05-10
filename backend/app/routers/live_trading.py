@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db_session
@@ -14,8 +17,14 @@ from app.schemas.schemas import (
 )
 from app.services import corp_actions_service
 from app.services.vnpy import live_trading_service as svc
+from app.services.vnpy import risk_event_service
 from app.services.vnpy.client import VnpyClientError
 from app.services.vnpy.deps import require_ops_password
+from app.services.vnpy.live_trading_events import (
+    HEARTBEAT_SECONDS,
+    event_to_sse,
+    get_event_bus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +50,37 @@ def _client_error_to_http(e: VnpyClientError) -> HTTPException:
 # ---------------------------------------------------------------------------
 # Read endpoints (no ops-password requirement)
 # ---------------------------------------------------------------------------
+
+
+@router.get("/events", include_in_schema=False)
+async def live_trading_events(request: Request) -> StreamingResponse:
+    """SSE stream for semantic live-trading query invalidation events."""
+    bus = get_event_bus()
+    queue = bus.subscribe()
+
+    async def event_stream():
+        try:
+            yield event_to_sse("hello", {"ts": int(time.time() * 1000)})
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    yield event_to_sse("heartbeat", {"ts": int(time.time() * 1000)})
+                    continue
+                yield event_to_sse(event.event_type, event.as_payload())
+        finally:
+            bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/nodes", response_model=LiveTradingListResponse)
@@ -104,6 +144,34 @@ async def list_strategy_trades(
 ) -> LiveTradingListResponse:
     """指定策略的成交记录（当前会话内，按 datetime 倒序）。"""
     rows, warning = await svc.list_strategy_trades(node_id, engine, name)
+    return _ok(rows, warning=warning)
+
+
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/orders",
+    response_model=LiveTradingListResponse,
+)
+async def list_strategy_orders(
+    node_id: str,
+    engine: str,
+    name: str,
+) -> LiveTradingListResponse:
+    """指定策略订单记录（当前会话内，按 datetime 倒序）。"""
+    rows, warning = await risk_event_service.list_strategy_orders(node_id, engine, name)
+    return _ok(rows, warning=warning)
+
+
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/risk-events",
+    response_model=LiveTradingListResponse,
+)
+async def list_strategy_risk_events(
+    node_id: str,
+    engine: str,
+    name: str,
+) -> LiveTradingListResponse:
+    """指定策略实时风险事件（P0/P1 实时计算，不落表）。"""
+    rows, warning = await risk_event_service.list_strategy_risk_events(node_id, engine, name)
     return _ok(rows, warning=warning)
 
 
