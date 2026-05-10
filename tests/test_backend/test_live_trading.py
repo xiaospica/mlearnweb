@@ -707,6 +707,7 @@ class TestReadEndpoints:
                         source_label="account_equity",
                         positions_count=2,
                         raw_variables_json="{}",
+                        positions_json='[{"vt_symbol":"000001.SZSE","volume":100,"price":10,"market_value":1000}]',
                     )
                 )
             s.commit()
@@ -741,6 +742,7 @@ class TestReadEndpoints:
                         source_label="account_equity",
                         positions_count=2,
                         raw_variables_json="{}",
+                        positions_json='[{"vt_symbol":"000001.SZSE","volume":100,"price":10,"market_value":1000}]',
                     )
                 )
             s.commit()
@@ -749,11 +751,14 @@ class TestReadEndpoints:
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["success"] is True
-        assert payload["data"]["source"] == "equity_snapshots"
+        assert payload["data"]["source"] == "mlearnweb_position_snapshots"
         assert payload["data"]["items"] == ["2026-05-01", "2026-05-03"]
 
         dynamic_resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta2/positions/20260503")
         assert dynamic_resp.status_code == 200
+        dynamic_payload = dynamic_resp.json()
+        assert dynamic_payload["success"] is True
+        assert dynamic_payload["data"][0]["vt_symbol"] == "000001.SZSE"
 
     def test_get_strategy_detail_not_found(self, api_client):
         client, _, _ = api_client
@@ -1150,6 +1155,27 @@ class TestLiveTradingEventProducer:
         assert data["success"] is True
         assert any(row["message"] == "[signal1] rebalance completed" for row in data["data"])
 
+        store_module.persist_event_payload(
+            {
+                "event_id": "unnamed:SignalStrategyPlus:signal1:runtime-log:legacy",
+                "event_type": "strategy.log.changed",
+                "node_id": "unnamed",
+                "engine": "SignalStrategyPlus",
+                "strategy_name": "signal1",
+                "severity": "info",
+                "category": "runtime_log",
+                "title": "runtime log",
+                "message": "[signal1] legacy unnamed node log",
+                "event_ts": 1770000102_000,
+                "source": "vnpy_ws",
+                "query_groups": ["logs"],
+            }
+        )
+        legacy_resp = client.get("/api/live-trading/strategies/nodeA/SignalStrategyPlus/signal1/logs")
+        assert legacy_resp.status_code == 200
+        legacy_data = legacy_resp.json()
+        assert any(row["message"] == "[signal1] legacy unnamed node log" for row in legacy_data["data"])
+
         risk_rows = store_module.list_risk_events(
             node_id="nodeA",
             engine="SignalStrategyPlus",
@@ -1159,6 +1185,43 @@ class TestLiveTradingEventProducer:
         )
         assert len(risk_rows) == 1
         assert risk_rows[0]["severity"] == "error"
+
+    def test_recovery_ack_hides_stale_node_offline_risk(self, api_client):
+        from app.services.vnpy import live_trading_event_store as store_module
+
+        store_module.persist_risk_event(
+            {
+                "event_id": "nodeA:CtaStrategy:cta1:node:offline:test",
+                "event_type": "strategy.risk.changed",
+                "node_id": "nodeA",
+                "engine": "CtaStrategy",
+                "strategy_name": "cta1",
+                "severity": "critical",
+                "category": "node",
+                "title": "node offline",
+                "message": "node offline",
+                "status": "offline",
+                "source": "watchdog",
+                "reason": "node_offline",
+                "event_ts": 1770000200000,
+            },
+            source="watchdog",
+        )
+
+        assert store_module.ack_node_offline_events("nodeA") == 1
+        visible = store_module.list_risk_events(
+            node_id="nodeA",
+            engine="CtaStrategy",
+            strategy_name="cta1",
+        )
+        assert all(row["reason"] != "node_offline" for row in visible)
+        all_rows = store_module.list_risk_events(
+            node_id="nodeA",
+            engine="CtaStrategy",
+            strategy_name="cta1",
+            include_ack=True,
+        )
+        assert any(row["reason"] == "node_offline" and row["ack_at"] for row in all_rows)
 
     def test_rest_fingerprint_tick_publishes_only_on_change(self, fake_client, monkeypatch):
         import asyncio

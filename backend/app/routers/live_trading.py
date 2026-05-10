@@ -268,6 +268,7 @@ async def get_strategy_positions_on_date(
     name: str,
     yyyymmdd: str,
     gateway_name: Optional[str] = Query(None, description="多 gateway 沙盒下指定 gateway"),
+    db: Session = Depends(get_db_session),
 ) -> LiveTradingListResponse:
     """重建指定策略在 ``yyyymmdd`` 日 EOD 的持仓快照（含 amount/金额/仓位占比）。
 
@@ -277,24 +278,36 @@ async def get_strategy_positions_on_date(
     """
     from app.services.vnpy.historical_positions_service import (
         get_strategy_positions_on_date as svc_fn,
+        get_strategy_positions_on_date_from_snapshots,
         get_strategy_positions_on_date_via_rpc,
     )
     # 1. 优先 RPC (跨机部署正确路径)
     rows, warning = await get_strategy_positions_on_date_via_rpc(
         node_id, name, yyyymmdd, gateway_name=gateway_name,
     )
-    if rows is not None:
+    if rows:
         return _ok(rows, warning=warning)
 
     # 2. fallback 同机直读
     rows, warning2 = svc_fn(name, yyyymmdd, gateway_name=gateway_name)
-    if rows is None:
-        return LiveTradingListResponse(
-            success=False, data=None,
-            warning=warning2 or warning,
-            message=warning2 or warning or "",
+    if rows:
+        return _ok(rows, warning=warning2 or warning)
+
+    # 3. fallback to mlearnweb live snapshots. This only covers dates captured
+    # after positions_json was introduced; older equity-only rows cannot be
+    # reconstructed without vnpy sim trades.
+    snapshot_rows, snapshot_warning = get_strategy_positions_on_date_from_snapshots(
+        db, node_id, engine, name, yyyymmdd,
+    )
+    if snapshot_rows:
+        return _ok(
+            snapshot_rows,
+            warning=snapshot_warning or warning2 or warning,
         )
-    return _ok(rows, warning=warning2)
+    combined_warning = " / ".join(
+        part for part in (warning, warning2, snapshot_warning) if part
+    ) or None
+    return _ok([], warning=combined_warning)
 
 
 @router.get("/corp-actions", response_model=LiveTradingListResponse)

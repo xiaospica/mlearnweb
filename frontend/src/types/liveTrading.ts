@@ -54,7 +54,7 @@ export interface HistoricalPosition {
 
 export interface PositionDatesResponse {
   items: string[]
-  source: 'vnpy_rpc' | 'equity_snapshots' | 'none' | string
+  source: 'vnpy_rpc' | 'mlearnweb_position_snapshots' | 'equity_snapshots' | 'none' | string
   warning?: string | null
 }
 

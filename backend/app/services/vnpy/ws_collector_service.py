@@ -398,7 +398,13 @@ async def handle_ws_message(node_id: str, message: str | bytes | Dict[str, Any])
     payload = json.loads(message) if isinstance(message, str) else dict(message)
     topic = _text(payload.get("topic")).lower()
     engine = _text(payload.get("engine"))
-    event_node_id = _text(payload.get("node_id")) or node_id
+    raw_node_id = _text(payload.get("node_id"))
+    # Some vnpy nodes publish their internal default NODE_ID ("unnamed") even
+    # though mlearnweb addresses the connection as the configured registry
+    # node_id. Keep persistence/query identities aligned with mlearnweb.
+    event_node_id = raw_node_id if raw_node_id and raw_node_id != "unnamed" else node_id
+    if event_node_id not in get_vnpy_client().node_ids:
+        event_node_id = node_id
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     ts = _event_ts(payload.get("ts"))
     if topic == "strategy":

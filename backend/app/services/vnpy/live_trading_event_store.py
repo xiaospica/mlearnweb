@@ -227,9 +227,12 @@ def list_strategy_logs(
     SessionLocal = _session_factory()
     session = SessionLocal()
     try:
+        node_ids = [node_id]
+        if node_id and node_id != "unnamed":
+            node_ids.append("unnamed")
         q = session.query(LiveTradingEventRecord).filter(
             LiveTradingEventRecord.category.in_(LOG_CATEGORIES),
-            LiveTradingEventRecord.node_id == node_id,
+            LiveTradingEventRecord.node_id.in_(node_ids),
             LiveTradingEventRecord.engine == engine,
             LiveTradingEventRecord.strategy_name == strategy_name,
         )
@@ -303,6 +306,40 @@ def ack_event(event_id: str, *, ack_by: str = "operator") -> bool:
         record.ack_by = ack_by[:64] if ack_by else "operator"
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+def ack_node_offline_events(node_id: str, *, ack_by: str = "watchdog_recovery") -> int:
+    """Acknowledge stale node-offline risk rows once the node is online again."""
+    node_id = _text(node_id)
+    if not node_id:
+        return 0
+    SessionLocal = _session_factory()
+    session = SessionLocal()
+    try:
+        rows = (
+            session.query(LiveTradingEventRecord)
+            .filter(
+                LiveTradingEventRecord.node_id == node_id,
+                LiveTradingEventRecord.category == "node",
+                LiveTradingEventRecord.reason == "node_offline",
+                LiveTradingEventRecord.status == "offline",
+                LiveTradingEventRecord.ack_at.is_(None),
+            )
+            .all()
+        )
+        now = datetime.now()
+        for row in rows:
+            row.ack_at = now
+            row.ack_by = ack_by[:64] if ack_by else "watchdog_recovery"
+            row.updated_at = now
+        session.commit()
+        return len(rows)
+    except Exception:
+        session.rollback()
+        logger.exception("failed to ack node offline events for node_id=%s", node_id)
+        return 0
     finally:
         session.close()
 

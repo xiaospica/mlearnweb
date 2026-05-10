@@ -209,10 +209,24 @@ async def watchdog_loop() -> None:
         try:
             client = get_vnpy_client()
             statuses = await client.probe_nodes()
+            from app.services.vnpy.live_trading_event_store import ack_node_offline_events
+            from app.services.vnpy.live_trading_events import make_event, publish_event
+
+            for status in statuses:
+                if not bool(status.get("online")):
+                    continue
+                node_id = str(status.get("node_id") or "")
+                acked = ack_node_offline_events(node_id, ack_by="watchdog_recovery")
+                if acked:
+                    await publish_event(
+                        make_event(
+                            "node.changed",
+                            node_id=node_id,
+                            reason="watchdog_recovery_ack",
+                        )
+                    )
             emails = wd.evaluate(statuses)
             for item in emails:
-                from app.services.vnpy.live_trading_events import make_event, publish_event
-
                 await publish_event(
                     make_event(
                         "node.changed",

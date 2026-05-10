@@ -95,6 +95,7 @@ class StrategyEquitySnapshot(Base):
     account_equity = Column(Float, nullable=True)
     positions_count = Column(Integer, default=0)
     raw_variables_json = Column(Text, nullable=True)
+    positions_json = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_ses_identity_ts", "node_id", "engine", "strategy_name", "ts"),
@@ -312,8 +313,30 @@ def init_db():
     _migrate_add_memo()
     _migrate_add_group_favorite()
     _migrate_add_deployments()
+    _migrate_add_strategy_snapshot_positions()
     _migrate_strategy_equity_snapshot_indexes()
     _migrate_add_tuning_queue_columns()
+
+
+def _migrate_add_strategy_snapshot_positions():
+    """Add per-symbol position snapshots for live-trading history fallback."""
+    import sqlite3
+
+    db_path = settings.database_url.replace("sqlite:///", "")
+    if not db_path or not db_path.endswith(".db"):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(strategy_equity_snapshots)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "positions_json" not in columns:
+            cursor.execute("ALTER TABLE strategy_equity_snapshots ADD COLUMN positions_json TEXT")
+            conn.commit()
+            print("[DB Migration] Added positions_json column to strategy_equity_snapshots table")
+        conn.close()
+    except Exception as e:
+        print(f"[DB Migration] strategy snapshot positions warning: {e}")
 
 
 def _migrate_strategy_equity_snapshot_indexes():

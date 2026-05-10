@@ -20,17 +20,109 @@ td.py:settle_end_of_day 等价的"含浮盈"成本. 但那条路径让 mlearnweb
 from __future__ import annotations
 
 import logging
+import json
 import sqlite3
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.core.config import settings
+from app.models.database import StrategyEquitySnapshot
 from app.services.vnpy.client import get_vnpy_client, VnpyClientError
 from app.services.vnpy.live_trading_service import _resolve_stock_name, get_stock_name_map
 
 logger = logging.getLogger(__name__)
+
+COMMON_SIM_DB_ROOTS = (
+    Path(r"D:/vnpy_data/state"),
+    Path(r"F:/Quant/vnpy/vnpy_strategy_dev/vnpy_qmt_sim/.trading_state"),
+)
+
+
+def _float_value(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _rows_from_snapshot_json(raw_json: Optional[str]) -> List[Dict[str, Any]]:
+    if not raw_json:
+        return []
+    try:
+        raw_rows = json.loads(raw_json)
+    except Exception:
+        return []
+    if not isinstance(raw_rows, list):
+        return []
+
+    name_map = get_stock_name_map()
+    rows: List[Dict[str, Any]] = []
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            continue
+        vt_symbol = str(raw.get("vt_symbol") or "")
+        if not vt_symbol:
+            continue
+        volume = _float_value(raw.get("volume"))
+        cost_price = _float_value(raw.get("cost_price", raw.get("price")))
+        market_value = _float_value(raw.get("market_value"))
+        if market_value <= 0 and volume > 0:
+            market_value = volume * cost_price
+        if volume <= 0 and market_value <= 0:
+            continue
+        rows.append({
+            "vt_symbol": vt_symbol,
+            "name": raw.get("name") or _resolve_stock_name(vt_symbol, name_map),
+            "volume": volume,
+            "cost_price": round(cost_price, 4),
+            "market_value": round(market_value, 2),
+            "weight": 0.0,
+        })
+
+    total_mv = sum(_float_value(row.get("market_value")) for row in rows)
+    for row in rows:
+        mv = _float_value(row.get("market_value"))
+        row["weight"] = (mv / total_mv) if total_mv > 0 and mv > 0 else 0.0
+    rows.sort(key=lambda r: r["market_value"], reverse=True)
+    return rows
+
+
+def get_strategy_positions_on_date_from_snapshots(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    target_date_str: str,
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Read per-symbol positions captured by mlearnweb snapshot_loop."""
+    try:
+        target_d = datetime.strptime(target_date_str, "%Y%m%d").date()
+    except ValueError:
+        return [], f"invalid date format: {target_date_str}"
+
+    row = (
+        db.query(StrategyEquitySnapshot)
+        .filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == engine,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+            func.date(StrategyEquitySnapshot.ts) == target_d.isoformat(),
+            StrategyEquitySnapshot.positions_json.isnot(None),
+        )
+        .order_by(StrategyEquitySnapshot.ts.desc())
+        .first()
+    )
+    if row is None:
+        return [], "mlearnweb has no per-symbol position snapshot for this date"
+    rows = _rows_from_snapshot_json(row.positions_json)
+    if not rows:
+        return [], "mlearnweb position snapshot exists but contains no active holdings"
+    return rows, "using mlearnweb live position snapshot because vnpy historical position RPC returned no rows"
 
 
 async def get_strategy_positions_on_date_via_rpc(
@@ -77,19 +169,53 @@ def _resolve_sim_db_path(strategy_name: str, gateway_name: Optional[str]) -> Opt
     传入 gateway_name 优先；若空则尝试用 strategy_name 兜底（不严谨，但 vnpy 默认
     QMT_SIM_<sandbox_id> 形式 gateway 名也包含 strategy 信息）。
     """
-    if not settings.vnpy_sim_db_root:
-        return None
-    root = Path(settings.vnpy_sim_db_root)
-    if not root.exists():
-        return None
-    if gateway_name:
-        p = root / f"sim_{gateway_name}.db"
-        if p.exists():
+    roots: List[Path] = []
+    if settings.vnpy_sim_db_root:
+        roots.append(Path(settings.vnpy_sim_db_root))
+    roots.extend(COMMON_SIM_DB_ROOTS)
+
+    for root in roots:
+        if not root.exists():
+            continue
+        if gateway_name:
+            p = root / f"sim_{gateway_name}.db"
+            if p.exists():
+                return p
+        # fallback: 任何 sim_*.db
+        for p in root.glob("sim_*.db"):
             return p
-    # fallback: 任何 sim_*.db
-    for p in root.glob("sim_*.db"):
-        return p
     return None
+
+
+def get_strategy_position_dates_from_local_sim(
+    strategy_name: str,
+    gateway_name: Optional[str] = None,
+    candidate_dates: Optional[List[str]] = None,
+) -> Tuple[List[str], Optional[str]]:
+    """Return dates that can be reconstructed from local sim trades."""
+    db_path = _resolve_sim_db_path(strategy_name, gateway_name)
+    if db_path is None:
+        return [], (
+            f"sim db 不可达(root={settings.vnpy_sim_db_root}, gateway={gateway_name}). "
+            "检查 VNPY_SIM_DB_ROOT 或常用本机路径 D:/vnpy_data/state"
+        )
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT substr(datetime, 1, 10) FROM sim_trades "
+            "WHERE reference LIKE ? ORDER BY 1 ASC",
+            (f"{strategy_name}:%",),
+        )
+        trade_dates = {str(row[0]) for row in cur.fetchall() if row and row[0]}
+        conn.close()
+    except Exception as exc:
+        return [], f"读 sim db 失败: {exc}"
+    if not trade_dates:
+        return [], f"sim db has no trades for strategy {strategy_name}"
+    if candidate_dates:
+        return sorted({d for d in candidate_dates if d >= min(trade_dates)}), None
+    return sorted(trade_dates), None
 
 
 def get_strategy_positions_on_date(
@@ -147,7 +273,13 @@ def get_strategy_positions_on_date(
     pos: Dict[str, Dict[str, float]] = {}
     for d in sorted(by_day):
         for vt, direction, vol, price in by_day[d]:
-            if direction in ("LONG", "多", "Direction.LONG"):
+            direction_text = str(direction or "").strip()
+            direction_key = direction_text.lower()
+            is_long = (
+                direction_key in {"long", "direction.long", "buy", "direction.buy"}
+                or direction_text in {"多", "买入", "买"}
+            )
+            if is_long:
                 old = pos.get(vt, {"vol": 0.0, "cost": 0.0})
                 new_v = old["vol"] + vol
                 pos[vt] = {

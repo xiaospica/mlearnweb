@@ -307,6 +307,20 @@ def _count_positions(vt_symbol: Optional[str], positions: List[Dict[str, Any]]) 
     return len(positions)
 
 
+def _positions_for_strategy(
+    strategy: Dict[str, Any],
+    positions: List[Dict[str, Any]],
+    gateway_name: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Filter node positions to the current strategy boundary."""
+    vt_symbol = strategy.get("vt_symbol")
+    if vt_symbol:
+        return [p for p in positions if str(p.get("vt_symbol", "")) == vt_symbol]
+    if gateway_name:
+        return [p for p in positions if str(p.get("gateway_name", "")) == gateway_name]
+    return list(positions)
+
+
 def _resolve_strategy_value(
     strategy: Dict[str, Any],
     positions: List[Dict[str, Any]],
@@ -684,15 +698,22 @@ def _position_dates_from_snapshots(
     engine: str,
     strategy_name: str,
     limit: int = 500,
+    require_positions: bool = True,
 ) -> List[str]:
     date_expr = sa.func.date(StrategyEquitySnapshot.ts)
+    filters = [
+        StrategyEquitySnapshot.node_id == node_id,
+        StrategyEquitySnapshot.engine == engine,
+        StrategyEquitySnapshot.strategy_name == strategy_name,
+    ]
+    if require_positions:
+        filters.extend([
+            StrategyEquitySnapshot.positions_json.is_not(None),
+            StrategyEquitySnapshot.positions_json != "[]",
+        ])
     rows = (
         db.query(date_expr)
-        .filter(
-            StrategyEquitySnapshot.node_id == node_id,
-            StrategyEquitySnapshot.engine == engine,
-            StrategyEquitySnapshot.strategy_name == strategy_name,
-        )
+        .filter(*filters)
         .distinct()
         .order_by(date_expr.desc())
         .limit(limit)
@@ -743,12 +764,47 @@ async def get_strategy_position_dates(
     if rpc_dates:
         return {"items": rpc_dates, "source": "vnpy_rpc", "warning": None}
 
-    snapshot_dates = _position_dates_from_snapshots(db, node_id, engine, strategy_name)
+    equity_dates = _position_dates_from_snapshots(
+        db, node_id, engine, strategy_name, require_positions=False,
+    )
+    try:
+        from app.services.vnpy.historical_positions_service import (
+            get_strategy_position_dates_from_local_sim,
+        )
+
+        sim_dates, sim_warning = get_strategy_position_dates_from_local_sim(
+            strategy_name,
+            gateway_name,
+            candidate_dates=equity_dates or None,
+        )
+    except Exception as exc:
+        sim_dates, sim_warning = [], f"local sim position dates unavailable: {exc}"
+    if sim_dates:
+        return {
+            "items": sim_dates,
+            "source": "local_sim_db",
+            "warning": rpc_warning,
+        }
+
+    snapshot_dates = _position_dates_from_snapshots(
+        db, node_id, engine, strategy_name, require_positions=True,
+    )
     if snapshot_dates:
         return {
             "items": snapshot_dates,
-            "source": "equity_snapshots",
+            "source": "mlearnweb_position_snapshots",
             "warning": rpc_warning,
+        }
+    if equity_dates:
+        warning = (
+            rpc_warning or
+            sim_warning or
+            "mlearnweb only has equity snapshot dates; per-symbol historical positions are unavailable"
+        )
+        return {
+            "items": [],
+            "source": "equity_snapshots",
+            "warning": warning,
         }
     return {
         "items": [],
@@ -1164,14 +1220,7 @@ async def get_strategy_detail(
 
     # filter positions to just this strategy's if it has a vt_symbol
     vt_symbol = strategy.get("vt_symbol")
-    if vt_symbol:
-        positions = [p for p in node_positions if str(p.get("vt_symbol", "")) == vt_symbol]
-    else:
-        # 多 symbol 策略：按 gateway_name 过滤（多 gateway 沙盒隔离）
-        if gateway_name:
-            positions = [p for p in node_positions if str(p.get("gateway_name", "")) == gateway_name]
-        else:
-            positions = list(node_positions)
+    positions = _positions_for_strategy(strategy, node_positions, gateway_name)
 
     # capabilities (single node → single engine lookup)
     try:
@@ -1515,14 +1564,11 @@ async def snapshot_tick() -> None:
                     gateway_name=gateway_name or None,
                 )
                 # 持仓数：过滤 volume=0 + 按 gateway（避免多 gateway 时计入别家持仓）
-                if s.get("vt_symbol"):
-                    pos_count = _count_positions(s.get("vt_symbol"), node_pos)
-                else:
-                    pos_count = sum(
-                        1 for p in node_pos
-                        if (not gateway_name or str(p.get("gateway_name", "")) == gateway_name)
-                        and float(p.get("volume") or 0) > 0
-                    )
+                strategy_positions = _positions_for_strategy(s, node_pos, gateway_name or None)
+                pos_count = sum(
+                    1 for p in strategy_positions
+                    if float(p.get("volume") or 0) > 0
+                )
                 # Session-boundary 检测: vnpy 重启后, 前一次 session 的 account_equity
                 # 与本次新 state 不连续 (持仓 / equity 跳变), 前端按 ts 排序画线会出现
                 # 锯齿. 检测"距上次 wall-clock heartbeat > GAP_THRESHOLD_SEC"作为新
@@ -1562,6 +1608,7 @@ async def snapshot_tick() -> None:
                     account_equity=acct_eq,
                     positions_count=pos_count,
                     raw_variables_json=json.dumps(s.get("variables") or {}, ensure_ascii=False),
+                    positions_json=json.dumps(_render_positions(strategy_positions), ensure_ascii=False),
                 )
                 session.add(row)
                 written += 1

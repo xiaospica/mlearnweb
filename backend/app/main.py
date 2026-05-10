@@ -7,9 +7,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.models.database import init_db, get_db_session
@@ -17,6 +18,44 @@ from app.routers import experiments, runs, reports, training_records, factor_doc
 from app.routers import _live_proxy
 
 logger = logging.getLogger(__name__)
+
+
+class SPAStaticFiles(StaticFiles):
+    """StaticFiles with React Router history fallback.
+
+    Starlette's ``html=True`` serves ``index.html`` for directory requests, but
+    it does not automatically map arbitrary client routes such as
+    ``/live-trading`` back to the SPA entrypoint. Keep normal static file
+    serving first, then fall back to ``index.html`` only for non-API paths.
+    """
+
+    _fallback_excluded_prefixes = (
+        "api/",
+        "docs",
+        "redoc",
+        "openapi.json",
+    )
+
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            request_path = str(scope.get("path") or "")
+            if (
+                exc.status_code != 404
+                or self._is_fallback_excluded(path)
+                or self._is_fallback_excluded(request_path)
+            ):
+                raise
+            return await super().get_response("index.html", scope)
+
+    @classmethod
+    def _is_fallback_excluded(cls, path: str) -> bool:
+        normalized = path.lstrip("/")
+        return any(
+            normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+            for prefix in cls._fallback_excluded_prefixes
+        )
 
 
 @asynccontextmanager
@@ -114,9 +153,18 @@ app.include_router(_live_proxy.router)
 
 @app.get("/")
 def root():
-    """API root info — 仅当 frontend_dist_dir 未配 (开发模式) 时返 JSON;
-    生产部署 (W4.1) StaticFiles mount 后该路由被 SPA index.html 覆盖.
+    """Serve SPA index in production, otherwise return API root info.
+
+    Starlette routes are evaluated in registration order. Because this exact
+    "/" API route is registered before the catch-all StaticFiles mount below,
+    a configured frontend dist would otherwise still return the JSON API root
+    for http://host:8000/. Explicitly serve index.html here when production
+    frontend assets are available.
     """
+    if settings.frontend_dist_dir:
+        index_path = Path(settings.frontend_dist_dir) / "index.html"
+        if index_path.is_file():
+            return FileResponse(index_path)
     return {
         "service": "QLib Backtest Dashboard API",
         "version": "1.0.0",
@@ -147,7 +195,7 @@ if _dist_dir:
     _dist_path = Path(_dist_dir)
     if _dist_path.is_dir():
         # name="frontend" 与 /uploads 错开避免 starlette 重复 mount 警告.
-        app.mount("/", StaticFiles(directory=str(_dist_path), html=True), name="frontend")
+        app.mount("/", SPAStaticFiles(directory=str(_dist_path), html=True), name="frontend")
         logger.info("[main] frontend dist mounted: %s", _dist_path)
     else:
         logger.warning(
