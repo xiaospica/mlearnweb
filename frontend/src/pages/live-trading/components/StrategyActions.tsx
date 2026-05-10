@@ -80,10 +80,13 @@ const StrategyActions: React.FC<Props> = ({
   const handleDelete = async (e?: React.MouseEvent) => {
     e?.stopPropagation()
     const result = await guardWrite(() =>
-      liveTradingService.deleteStrategy(nodeId, engine, name),
+      liveTradingService.deleteStrategyRecords(nodeId, engine, name),
     )
-    if (result) {
-      message.success(`已删除: ${name}`)
+    if (result?.success) {
+      const stats = result.data
+      message.success(
+        `已删除策略和实盘展示数据: ${name}，权益快照 ${stats?.equity_snapshots ?? 0} 条`,
+      )
       invalidate()
     }
   }
@@ -143,7 +146,7 @@ const StrategyActions: React.FC<Props> = ({
       )}
       {can('remove') && !trading && (
         <Popconfirm
-          title={`确认删除策略 "${name}" ？此操作不可撤销`}
+          title={`确认删除策略 "${name}" 并清理实盘页面展示数据？此操作不会清理 vnpy 回放状态`}
           onConfirm={handleDelete}
           okText="删除"
           cancelText="取消"
