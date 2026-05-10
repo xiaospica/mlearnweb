@@ -124,15 +124,28 @@ function Install-NssmService {
     Write-Host ""
     Write-Host "─── 安装服务: $Name ───" -ForegroundColor Cyan
 
-    & $nssmExe.Source status $Name 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    # Do not use ``nssm status`` for existence checks. On a clean server NSSM
+    # prints "Can't open service!" to stderr for missing services; older
+    # PowerShell hosts can surface that as NativeCommandError and abort the
+    # parent install_all.ps1 before we can inspect $LASTEXITCODE.
+    $existingService = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($existingService) {
         Write-Host "  [!] $Name 已存在, 先 stop + remove"
-        & $nssmExe.Source stop $Name | Out-Null
-        Start-Sleep -Seconds 2
+        if ($existingService.Status -ne "Stopped") {
+            Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+            try {
+                (Get-Service -Name $Name -ErrorAction Stop).WaitForStatus("Stopped", "00:00:10")
+            } catch {
+                Write-Host "  [WARN] 等待 $Name 停止超时, 继续尝试 remove"
+            }
+        }
         & $nssmExe.Source remove $Name confirm | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "nssm remove $Name failed" }
+        Start-Sleep -Seconds 1
     }
 
     & $nssmExe.Source install $Name $Application $Arguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "nssm install $Name failed" }
     & $nssmExe.Source set $Name AppDirectory $WorkingDirectory | Out-Null
     & $nssmExe.Source set $Name AppStdout "$LogRoot\$Name.log" | Out-Null
     & $nssmExe.Source set $Name AppStderr "$LogRoot\$Name.err" | Out-Null
