@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     vnpy_request_timeout: float = 10.0
     vnpy_poll_interval_seconds: int = 10
     live_trading_event_fingerprint_interval_seconds: int = 5
+    live_trading_ws_enabled: bool = True
+    live_trading_ws_reconnect_initial_seconds: int = 2
+    live_trading_ws_reconnect_max_seconds: int = 60
+    live_trading_event_retention_days: int = 7
     vnpy_snapshot_retention_days: int = 30
     live_trading_ops_password: Optional[str] = None
 

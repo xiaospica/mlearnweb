@@ -18,6 +18,7 @@ from app.schemas.schemas import (
 from app.services import corp_actions_service
 from app.services.vnpy import live_trading_service as svc
 from app.services.vnpy import risk_event_service
+from app.services.vnpy import live_trading_event_store
 from app.services.vnpy.client import VnpyClientError
 from app.services.vnpy.deps import require_ops_password
 from app.services.vnpy.live_trading_events import (
@@ -169,10 +170,50 @@ async def list_strategy_risk_events(
     node_id: str,
     engine: str,
     name: str,
+    severity: Optional[str] = Query(None, description="按 severity 过滤"),
+    category: Optional[str] = Query(None, description="按 category 过滤"),
+    since_ts: Optional[int] = Query(None, ge=0, description="毫秒级时间戳下限"),
+    include_ack: bool = Query(False, description="是否包含已确认事件"),
+    limit: int = Query(200, ge=1, le=1000),
 ) -> LiveTradingListResponse:
-    """指定策略实时风险事件（P0/P1 实时计算，不落表）。"""
-    rows, warning = await risk_event_service.list_strategy_risk_events(node_id, engine, name)
+    """指定策略风险事件（P3: 事件表 + 当前状态补偿）。"""
+    rows, warning = await risk_event_service.list_strategy_risk_events(
+        node_id,
+        engine,
+        name,
+        severity=severity,
+        category=category,
+        since_ts=since_ts,
+        include_ack=include_ack,
+        limit=limit,
+    )
     return _ok(rows, warning=warning)
+
+
+@router.get("/risk-events", response_model=LiveTradingListResponse)
+async def list_live_trading_risk_events(
+    node_id: Optional[str] = Query(None),
+    engine: Optional[str] = Query(None),
+    strategy_name: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    since_ts: Optional[int] = Query(None, ge=0),
+    include_ack: bool = Query(False),
+    limit: int = Query(200, ge=1, le=1000),
+) -> LiveTradingListResponse:
+    """跨策略查询已持久化风险事件（P3 历史/过滤入口）。"""
+    return _ok(
+        live_trading_event_store.list_risk_events(
+            node_id=node_id,
+            engine=engine,
+            strategy_name=strategy_name,
+            severity=severity,
+            category=category,
+            since_ts=since_ts,
+            include_ack=include_ack,
+            limit=limit,
+        )
+    )
 
 
 @router.get(
@@ -406,3 +447,19 @@ async def delete_strategy_records(
     """
     stats = await svc.delete_strategy_records(db, node_id, engine, name)
     return _ok(stats)
+
+
+@router.post(
+    "/risk-events/{event_id}/ack",
+    response_model=LiveTradingListResponse,
+    dependencies=[Depends(require_ops_password)],
+)
+async def ack_live_trading_risk_event(
+    event_id: str,
+    ack_by: str = Query("operator", min_length=1, max_length=64),
+) -> LiveTradingListResponse:
+    """确认一条持久化风险事件。"""
+    ok = live_trading_event_store.ack_event(event_id, ack_by=ack_by)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"risk event not found: {event_id}")
+    return _ok({"event_id": event_id, "ack_by": ack_by})

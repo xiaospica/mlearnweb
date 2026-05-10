@@ -148,3 +148,5 @@ npx tsc --noEmit
 - 策略详情卡片不要新增独立高频 `refetchInterval`。SSE connected 时应停止周期轮询，SSE disconnected 时只允许低频 fallback。
 - 新卡片需要在 `liveTradingRefresh.ts` 中声明对应 query group 映射，而不是在组件里自定义刷新节奏。
 - 风险事件必须来自后端 `risk-events` API；前端不直接解析 vnpy 原始 order/log payload。
+- 已确认风险事件默认从列表中隐藏；确认操作调用 `liveTradingService.ackRiskEvent()`，必须通过 `useOpsPassword().guardWrite()`。
+- 后端新增 vnpy WS topic 处理时，只改 `services/vnpy/ws_collector_service.py` 的 topic → `LiveTradingEvent` 映射；不要让前端连接 vnpy WS。

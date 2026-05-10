@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -95,6 +96,15 @@ class _PerNodeClient:
 
     def _auth_headers(self) -> Dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
+
+    async def get_ws_url(self) -> str:
+        """Return authenticated ``/api/v1/ws`` URL for this node."""
+        if not self._token or time.time() >= self._token_expire_ts:
+            await self.login()
+        parsed = urlparse(urljoin(self.node.base_url.rstrip("/") + "/", "api/v1/ws"))
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        query = urlencode({"token": self._token or ""})
+        return urlunparse(parsed._replace(scheme=scheme, query=query))
 
     async def _request(
         self,
@@ -506,6 +516,9 @@ class VnpyMultiNodeClient:
         return await self.get_per_node(node_id).get_ml_prediction_summary_by_date(
             strategy_name, yyyymmdd,
         )
+
+    async def get_ws_url(self, node_id: str) -> str:
+        return await self.get_per_node(node_id).get_ws_url()
 
     async def probe_nodes(self) -> List[Dict[str, Any]]:
         """Lightweight liveness probe. Never raises.

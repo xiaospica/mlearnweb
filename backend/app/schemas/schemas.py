@@ -315,6 +315,8 @@ class StrategyRiskEvent(BaseModel):
     is_resubmit: bool = False
     event_ts: int
     source: str
+    ack_at: Optional[int] = None
+    ack_by: Optional[str] = None
 
 
 class LiveTradingEvent(BaseModel):

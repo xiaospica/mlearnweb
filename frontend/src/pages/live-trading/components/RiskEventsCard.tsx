@@ -1,7 +1,8 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Card, Empty, Spin, Tag, Typography } from 'antd'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Button, Card, Empty, Spin, Tag, Typography } from 'antd'
 import dayjs from 'dayjs'
+import { useOpsPassword } from '@/hooks/useOpsPassword'
 import { liveTradingService } from '@/services/liveTradingService'
 import type { RiskSeverity, StrategyRiskEvent } from '@/types/liveTrading'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
@@ -34,7 +35,8 @@ const SEVERITY_TEXT: Record<RiskSeverity, string> = {
   critical: 'CRITICAL',
 }
 
-const columns: ResponsiveColumn<StrategyRiskEvent>[] = [
+function makeColumns(onAck: (eventId: string) => void, acking: boolean): ResponsiveColumn<StrategyRiskEvent>[] {
+  return [
   {
     title: '等级',
     dataIndex: 'severity',
@@ -95,9 +97,28 @@ const columns: ResponsiveColumn<StrategyRiskEvent>[] = [
       </span>
     ),
   },
-]
+  {
+    title: '确认',
+    key: 'ack',
+    width: 88,
+    render: (_: unknown, r: StrategyRiskEvent) => (
+      r.ack_at ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          已确认
+        </Text>
+      ) : (
+        <Button size="small" type="link" loading={acking} onClick={() => onAck(r.event_id)}>
+          确认
+        </Button>
+      )
+    ),
+  },
+  ]
+}
 
 const RiskEventsCard: React.FC<Props> = ({ nodeId, engine, strategyName, eventsConnected }) => {
+  const queryClient = useQueryClient()
+  const { guardWrite } = useOpsPassword()
   const { data, isLoading, isFetching } = useQuery({
     queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
     queryFn: () => liveTradingService.listStrategyRiskEvents(nodeId, engine, strategyName),
@@ -107,6 +128,23 @@ const RiskEventsCard: React.FC<Props> = ({ nodeId, engine, strategyName, eventsC
   })
 
   const rows = data?.success ? data.data || [] : []
+  const ackMutation = useMutation({
+    mutationFn: async (eventId: string) => {
+      return guardWrite(() => liveTradingService.ackRiskEvent(eventId))
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: liveTradingQueryKeys.strategies(),
+      })
+    },
+  })
+  const columns = makeColumns(
+    (eventId) => ackMutation.mutate(eventId),
+    ackMutation.isPending,
+  )
 
   return (
     <Card
@@ -135,7 +173,7 @@ const RiskEventsCard: React.FC<Props> = ({ nodeId, engine, strategyName, eventsC
           dataSource={rows}
           columns={columns}
           pagination={{ pageSize: 10, size: 'small', showSizeChanger: true }}
-          scrollX={820}
+          scrollX={900}
         />
       )}
     </Card>

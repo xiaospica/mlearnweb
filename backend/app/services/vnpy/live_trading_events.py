@@ -199,6 +199,10 @@ def make_event(
 
 
 async def publish_event(event: LiveTradingEvent) -> None:
+    with contextlib.suppress(Exception):
+        from app.services.vnpy.live_trading_event_store import persist_live_event
+
+        persist_live_event(event)
     await get_event_bus().publish(event)
 
 

@@ -1457,10 +1457,12 @@ graph LR
 `app.live_main` 在原有 `snapshot_loop` / `ml_snapshot_loop` 基础上新增实盘事件中台：
 
 - `LiveTradingEvent` 是后端到前端的 SSE invalidation 事件，只包含 `event_type`、策略身份、`severity`、`reason`、`query_groups` 和时间戳。
-- `StrategyRiskEvent` 是前端展示用风险事件，由 `risk_event_service` 从 strategy variables、orders、node/gateway health 实时计算。
+- `StrategyRiskEvent` 是前端展示用风险事件，由 `risk_event_service` 从 strategy variables、orders、node/gateway health 实时计算，并与 `live_trading_events` 表中的历史事件合并返回。
 - SSE endpoint 为 `/api/live-trading/events`。它不推送收益曲线、成交、持仓、ML 指标等大对象，避免把后端与 React Query key 或前端展示结构耦合。
 - 前端 `useLiveTradingInvalidations()` 将 query group 映射到 `liveTradingRefresh.ts` 中的 query key，并调用 React Query `invalidateQueries`。
 - SSE connected 时，策略详情页卡片关闭独立高频轮询；SSE disconnected 时启用低频 fallback polling，保证最终一致。
+- P2 后 `ws_collector_service.py` 连接每个 vnpy 节点 `/api/v1/ws?token=...`，处理 `strategy/order/trade/position/account/log` topic；WS 在线节点暂停 REST fingerprint 热路径，断线节点自动恢复 REST fallback。
+- P3 后 `live_trading_event_store.py` 写入 `live_trading_events` 表，支持 dedupe、历史过滤、`ack_at/ack_by`。风险确认由 `POST /api/live-trading/risk-events/{event_id}/ack` 完成，并受 ops password 保护。
 
 Query group 映射：
 
@@ -1477,4 +1479,4 @@ Query group 映射：
 | `strategy_list` | 实盘策略列表 |
 | `nodes` | 节点在线状态 |
 
-P0/P1 事件不落表。P2 才接入 vnpy `/api/v1/ws`，P3 才新增事件持久化与 ack。
+前端仍不直接连接 vnpy WS；所有实时来源都先进入 `app.live_main` 的事件中台，再由 SSE 推送 invalidation。

@@ -124,9 +124,44 @@ export const liveTradingService = {
     nodeId: string,
     engine: string,
     name: string,
+    params?: { includeAck?: boolean; severity?: string; category?: string; sinceTs?: number; limit?: number },
   ): Promise<LiveTradingResponse<StrategyRiskEvent[]>> {
     return apiClient
-      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/risk-events`)
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/risk-events`, {
+        params: {
+          include_ack: params?.includeAck,
+          severity: params?.severity,
+          category: params?.category,
+          since_ts: params?.sinceTs,
+          limit: params?.limit,
+        },
+      })
+      .then((r) => r.data)
+  },
+
+  listRiskEvents(params?: {
+    nodeId?: string
+    engine?: string
+    strategyName?: string
+    includeAck?: boolean
+    severity?: string
+    category?: string
+    sinceTs?: number
+    limit?: number
+  }): Promise<LiveTradingResponse<StrategyRiskEvent[]>> {
+    return apiClient
+      .get('/live-trading/risk-events', {
+        params: {
+          node_id: params?.nodeId,
+          engine: params?.engine,
+          strategy_name: params?.strategyName,
+          include_ack: params?.includeAck,
+          severity: params?.severity,
+          category: params?.category,
+          since_ts: params?.sinceTs,
+          limit: params?.limit,
+        },
+      })
       .then((r) => r.data)
   },
 
@@ -299,6 +334,15 @@ export const liveTradingService = {
         `/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/records`,
         withOpsPassword(),
       )
+      .then((r) => r.data)
+  },
+
+  ackRiskEvent(eventId: string, ackBy = 'operator'): Promise<LiveTradingResponse<unknown>> {
+    return apiClient
+      .post(`/live-trading/risk-events/${enc(eventId)}/ack`, null, {
+        ...withOpsPassword(),
+        params: { ack_by: ackBy },
+      })
       .then((r) => r.data)
   },
 }

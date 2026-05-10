@@ -25,6 +25,7 @@ from app.routers import live_trading, ml_monitoring
 from app.services.deployment_sync_service import sync_deployments
 from app.services.vnpy.client import get_vnpy_client
 from app.services.vnpy.live_trading_service import snapshot_loop
+from app.services.vnpy.live_trading_event_store import event_retention_loop
 from app.services.vnpy.ml_monitoring_service import ml_snapshot_loop
 from app.services.vnpy.historical_metrics_sync_service import historical_metrics_sync_loop
 from app.services.vnpy.historical_predictions_sync_service import historical_predictions_sync_loop
@@ -32,6 +33,7 @@ from app.services.vnpy.replay_equity_sync_service import replay_equity_sync_loop
 from app.services.vnpy.rest_fingerprint_service import rest_fingerprint_loop
 from app.services.vnpy.stock_name_cache import stock_name_refresh_loop
 from app.services.vnpy.watchdog_service import watchdog_loop
+from app.services.vnpy.ws_collector_service import ws_collector_loop
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +102,18 @@ async def lifespan(app: FastAPI):
     deployment_task = asyncio.create_task(deployment_sync_loop())
     # P1 — REST fingerprint producer for SSE invalidation before vnpy WS is wired.
     fingerprint_task = asyncio.create_task(rest_fingerprint_loop())
+    # P2 — vnpy WS collector. REST fingerprint keeps covering nodes whose WS is down.
+    ws_task = asyncio.create_task(ws_collector_loop())
+    # P3 — live_trading_events retention cleanup.
+    event_retention_task = asyncio.create_task(event_retention_loop())
     # P1-3 Plan A — vnpy 节点 watchdog (默认 60s 探活, 连续 3 次 offline 发邮件)
     watchdog_task = asyncio.create_task(watchdog_loop())
     # Phase 3 解耦 — ts_code → 中文简称 缓存 (每 1h 调 vnpy /api/v1/reference/stock_names)
     stock_name_task = asyncio.create_task(stock_name_refresh_loop())
     tasks = (
         equity_task, ml_task, hist_sync_task, hist_pred_task, replay_equity_task,
-        deployment_task, fingerprint_task, watchdog_task, stock_name_task,
+        deployment_task, fingerprint_task, ws_task, event_retention_task,
+        watchdog_task, stock_name_task,
     )
     try:
         yield

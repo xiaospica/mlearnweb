@@ -107,7 +107,11 @@ def _fingerprint(
     }
 
 
-async def rest_fingerprint_tick(*, publish_initial: bool = False) -> Dict[str, int]:
+async def rest_fingerprint_tick(
+    *,
+    publish_initial: bool = False,
+    skip_node_ids: set[str] | None = None,
+) -> Dict[str, int]:
     client = get_vnpy_client()
     if not client.node_ids:
         return {"scanned": 0, "published": 0}
@@ -136,6 +140,8 @@ async def rest_fingerprint_tick(*, publish_initial: bool = False) -> Dict[str, i
     published = 0
     for item in strategies_fo:
         node_id = str(item.get("node_id") or "")
+        if skip_node_ids and node_id in skip_node_ids:
+            continue
         node_ok = bool(item.get("ok"))
         previous_ok = _LAST_NODE_STATUS.get(node_id)
         _LAST_NODE_STATUS[node_id] = node_ok
@@ -221,7 +227,13 @@ async def rest_fingerprint_loop() -> None:
     logger.info("[rest_fingerprint] loop started (default interval=%ss)", settings.live_trading_event_fingerprint_interval_seconds)
     while True:
         try:
-            stats = await rest_fingerprint_tick()
+            try:
+                from app.services.vnpy.ws_collector_service import ws_connected_node_ids
+
+                skip_node_ids = ws_connected_node_ids()
+            except Exception:
+                skip_node_ids = set()
+            stats = await rest_fingerprint_tick(skip_node_ids=skip_node_ids)
             if stats.get("published"):
                 logger.debug("[rest_fingerprint] %s", stats)
         except asyncio.CancelledError:
@@ -238,4 +250,3 @@ async def rest_fingerprint_loop() -> None:
             await asyncio.sleep(max(1, interval))
         except asyncio.CancelledError:
             raise
-

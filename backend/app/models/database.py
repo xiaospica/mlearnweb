@@ -297,7 +297,15 @@ def init_db():
     # Import ML monitoring models here to register them on Base.metadata
     # before create_all runs. Module-level import in __init__.py would
     # cause circular imports (models/__init__ → database → models).
-    from . import ml_monitoring  # noqa: F401
+    import importlib
+    import sys
+
+    for module_name in ("app.models.ml_monitoring", "app.models.live_trading_events"):
+        module = sys.modules.get(module_name)
+        if module is not None and getattr(module, "Base", None) is not Base:
+            importlib.reload(module)
+        elif module is None:
+            importlib.import_module(module_name)
 
     Base.metadata.create_all(bind=engine)
     _migrate_add_log_content()

@@ -138,6 +138,8 @@ export interface StrategyRiskEvent {
   event_ts: number
   source: 'rest_fingerprint' | 'vnpy_ws' | 'watchdog' | 'strategy_variables' | string
   reason?: string | null
+  ack_at?: number | null
+  ack_by?: string | null
 }
 
 export interface LiveTradingEvent {

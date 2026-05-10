@@ -405,6 +405,12 @@ async def list_strategy_risk_events(
     node_id: str,
     engine: str,
     strategy_name: str,
+    *,
+    severity: Optional[str] = None,
+    category: Optional[str] = None,
+    since_ts: Optional[int] = None,
+    include_ack: bool = False,
+    limit: int = 200,
 ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     strategies, orders, _trades, health = await _fetch_target_node(node_id)
     warnings: List[str] = []
@@ -463,7 +469,40 @@ async def list_strategy_risk_events(
         warnings.append(f"orders: {orders.get('error')}")
 
     events.sort(key=lambda event: (SEVERITY_RANK.get(event.get("severity"), 0), event.get("event_ts") or 0), reverse=True)
-    return events, "; ".join(warnings) if warnings else None
+    if severity:
+        events = [event for event in events if event.get("severity") == severity]
+    if category:
+        events = [event for event in events if event.get("category") == category]
+    if since_ts is not None:
+        events = [event for event in events if int(event.get("event_ts") or 0) >= int(since_ts)]
+
+    try:
+        from app.services.vnpy.live_trading_event_store import (
+            acked_event_ids,
+            list_risk_events,
+            merge_risk_events,
+            persist_many_risk_events,
+        )
+
+        persist_many_risk_events(events)
+        if not include_ack:
+            acked_ids = acked_event_ids(event.get("event_id") for event in events)
+            events = [event for event in events if event.get("event_id") not in acked_ids]
+        stored = list_risk_events(
+            node_id=node_id,
+            engine=engine,
+            strategy_name=strategy_name,
+            severity=severity,
+            category=category,
+            since_ts=since_ts,
+            include_ack=include_ack,
+            limit=limit,
+        )
+        events = merge_risk_events(events, stored)
+    except Exception as exc:
+        logger.warning("[risk_event] event store unavailable: %s", exc)
+
+    return events[: max(1, min(int(limit), 1000))], "; ".join(warnings) if warnings else None
 
 
 def highest_severity(events: Iterable[Dict[str, Any]]) -> Optional[str]:
@@ -535,4 +574,3 @@ def summarize_risks_from_fanout(
             if event is not None:
                 _add_event((node_id, engine, strategy_name), event)
     return summary
-

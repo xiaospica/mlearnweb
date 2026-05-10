@@ -305,7 +305,7 @@ nodes:
 - ✅ 回测-实盘一致性 Panel(Phase 4)
 - ✅ 历史预测回溯(Phase 4)
 - ⬜ 多节点告警聚合(当前逐节点独立)
-- ⬜ WebSocket 实时推送(当前纯轮询)
+- ✅ WebSocket 实时推送(`app.live_main` 后端 collector，前端仍只接 mlearnweb SSE)
 - ⬜ 用户权限分级(当前 ops_password 单级)
 - ⬜ Alembic DB migration(当前靠 `create_all` + 手工 `ALTER`)
 ## Live-Trading Event Center
@@ -314,11 +314,13 @@ nodes:
 
 - `services/vnpy/live_trading_events.py` 提供 in-memory event bus、SSE payload、query group 映射与 750ms coalesce。
 - `services/vnpy/risk_event_service.py` 将 strategy variables、orders、node/gateway health 归一为实时 `StrategyRiskEvent`。
-- `services/vnpy/rest_fingerprint_service.py` 在 vnpy WS 接入前使用 REST 指纹检测策略状态、持仓、订单和风险摘要变化。
+- `services/vnpy/ws_collector_service.py` 由 `app.live_main` 连接 vnpy `/api/v1/ws?token=...`，处理 `strategy/order/trade/position/account/log` topic，并统一转成内部事件。
+- `services/vnpy/rest_fingerprint_service.py` 保留为 fallback：WS 在线节点跳过热路径，WS 断线节点继续使用 REST 指纹检测策略状态、持仓、订单和风险摘要变化。
+- `services/vnpy/live_trading_event_store.py` 将关键事件写入 `live_trading_events` 表，支持 dedupe、历史过滤和 `ack_at/ack_by`。
 - `/api/live-trading/events` 只推 query invalidation 事件，不推完整业务数据；前端收到后再通过 REST 拉取权威数据。
 - 生产单端口模式下，`app.main` 的 `_live_proxy.py` 对 `/api/live-trading/events` 使用 streaming 透传，避免 SSE 被缓冲。
 
 长期边界：
-- P0/P1 不修改 vnpy 仓库。
-- P2 才接入 vnpy `/api/v1/ws`，REST fingerprint 保留为 fallback。
-- P3 才新增事件持久化、ack 和历史过滤。
+- mlearnweb 不修改 vnpy 仓库；vnpy WS 由后端统一认证、重连、降噪和 fanout。
+- 前端不直连 vnpy `/api/v1/ws`，只订阅 mlearnweb `/api/live-trading/events`。
+- `live_trading_events` 当前使用 SQLite + WAL；复杂用户权限和 vnpy 侧结构化字段仍是后续增强。

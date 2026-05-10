@@ -860,6 +860,40 @@ class TestReadEndpoints:
         assert payload["success"] is True
         assert payload["data"] == []
 
+    def test_risk_events_persist_and_ack(self, api_client, monkeypatch):
+        client, _, _ = api_client
+        from app.core.config import settings
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        rejected = next(event for event in resp.json()["data"] if event.get("reference") == "cta1:1")
+
+        history = client.get(
+            "/api/live-trading/risk-events",
+            params={"node_id": "nodeA", "engine": "CtaStrategy", "strategy_name": "cta1"},
+        )
+        assert history.status_code == 200
+        assert any(event["event_id"] == rejected["event_id"] for event in history.json()["data"])
+
+        monkeypatch.setattr(settings, "live_trading_ops_password", "pw")
+        ack = client.post(
+            f"/api/live-trading/risk-events/{rejected['event_id']}/ack",
+            params={"ack_by": "tester"},
+            headers={"X-Ops-Password": "pw"},
+        )
+        assert ack.status_code == 200
+
+        hidden = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert rejected["event_id"] not in {event["event_id"] for event in hidden.json()["data"]}
+
+        visible = client.get(
+            "/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events",
+            params={"include_ack": True},
+        )
+        acked = {event["event_id"]: event for event in visible.json()["data"]}[rejected["event_id"]]
+        assert acked["ack_by"] == "tester"
+        assert acked["ack_at"] is not None
+
     def test_risk_events_unknown_node_degrades_to_critical_event(self, api_client):
         client, _, _ = api_client
         resp = client.get("/api/live-trading/strategies/ghost/CtaStrategy/cta1/risk-events")
@@ -983,6 +1017,71 @@ class TestLiveTradingEventBus:
 
 
 class TestLiveTradingEventProducer:
+    def test_ws_collector_strategy_and_order_events_are_persisted(self, api_client, monkeypatch):
+        import asyncio
+        from app.services.vnpy import ws_collector_service as ws_module
+        from app.services.vnpy import live_trading_event_store as store_module
+
+        ws_module.reset_ws_state_for_tests()
+        captured = []
+
+        async def capture_strategy_event(event_type, **kwargs):
+            captured.append((event_type, kwargs))
+
+        async def capture_event(event):
+            captured.append((event.event_type, event.as_payload()))
+
+        monkeypatch.setattr(ws_module, "publish_strategy_event", capture_strategy_event)
+        monkeypatch.setattr(ws_module, "publish_event", capture_event)
+
+        async def run():
+            await ws_module.handle_ws_message(
+                "nodeA",
+                {
+                    "topic": "strategy",
+                    "engine": "CtaStrategy",
+                    "node_id": "nodeA",
+                    "ts": 1770000000.0,
+                    "data": {
+                        "strategy_name": "cta1",
+                        "inited": True,
+                        "trading": True,
+                        "variables": {"last_status": "ok", "replay_status": "completed"},
+                    },
+                },
+            )
+            await ws_module.handle_ws_message(
+                "nodeA",
+                {
+                    "topic": "order",
+                    "node_id": "nodeA",
+                    "ts": 1770000001.0,
+                    "data": {
+                        "vt_orderid": "QMT.WS1",
+                        "orderid": "WS1",
+                        "vt_symbol": "rb2501.SHFE",
+                        "status": "REJECTED",
+                        "status_msg": "拒单: WS 风控",
+                        "reference": "cta1:WS1",
+                        "datetime": "2026-05-10 09:40:00",
+                    },
+                },
+            )
+
+        asyncio.run(run())
+        event_types = [item[0] for item in captured]
+        assert "strategy.state.changed" in event_types
+        assert "strategy.order_trade.changed" in event_types
+        assert "strategy.risk.changed" in event_types
+
+        persisted = store_module.list_risk_events(
+            node_id="nodeA",
+            engine="CtaStrategy",
+            strategy_name="cta1",
+            include_ack=True,
+        )
+        assert any(event.get("source") == "vnpy_ws" and event.get("reference") == "cta1:WS1" for event in persisted)
+
     def test_rest_fingerprint_tick_publishes_only_on_change(self, fake_client, monkeypatch):
         import asyncio
         from app.services.vnpy import rest_fingerprint_service as fingerprint_module
