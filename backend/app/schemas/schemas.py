@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from datetime import datetime
 
 
@@ -267,6 +267,66 @@ class StrategyIdentity(BaseModel):
     node_id: str
     engine: str
     strategy_name: str
+
+
+RiskSeverity = Literal["info", "warning", "error", "critical"]
+LiveTradingQueryGroup = Literal[
+    "strategy_detail",
+    "performance_summary",
+    "trades",
+    "risk_events",
+    "ml_latest",
+    "ml_metrics",
+    "history_dates",
+    "corp_actions",
+    "strategy_list",
+    "nodes",
+]
+
+
+class StrategyOrder(BaseModel):
+    vt_orderid: str = ""
+    orderid: str = ""
+    vt_symbol: str = ""
+    direction: str = ""
+    offset: str = ""
+    price: float = 0.0
+    volume: float = 0.0
+    traded: float = 0.0
+    status: str = ""
+    status_msg: str = ""
+    reference: str = ""
+    datetime: str = ""
+
+
+class StrategyRiskEvent(BaseModel):
+    event_id: str
+    node_id: str
+    engine: Optional[str] = None
+    strategy_name: Optional[str] = None
+    severity: RiskSeverity
+    category: str
+    title: str
+    message: str
+    status: Optional[str] = None
+    vt_orderid: Optional[str] = None
+    vt_symbol: Optional[str] = None
+    reference: Optional[str] = None
+    is_resubmit: bool = False
+    event_ts: int
+    source: str
+
+
+class LiveTradingEvent(BaseModel):
+    event_id: str
+    event_type: str
+    node_id: Optional[str] = None
+    engine: Optional[str] = None
+    strategy_name: Optional[str] = None
+    severity: Optional[RiskSeverity] = None
+    reason: Optional[str] = None
+    query_groups: List[LiveTradingQueryGroup] = Field(default_factory=list)
+    ts: int
 
 
 class StrategySummary(BaseModel):

@@ -90,8 +90,8 @@ class LiveTradingEventBus:
 
     def __init__(self, *, coalesce_seconds: float = COALESCE_SECONDS) -> None:
         self._subscribers: Set[asyncio.Queue[LiveTradingEvent]] = set()
-        self._pending: Dict[Tuple[str, str, str, str], LiveTradingEvent] = {}
-        self._flush_tasks: Dict[Tuple[str, str, str, str], asyncio.Task[None]] = {}
+        self._pending: Dict[Tuple[str, str, str], LiveTradingEvent] = {}
+        self._flush_tasks: Dict[Tuple[str, str, str], asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
         self._coalesce_seconds = coalesce_seconds
 
@@ -102,6 +102,10 @@ class LiveTradingEventBus:
 
     def unsubscribe(self, queue: asyncio.Queue[LiveTradingEvent]) -> None:
         self._subscribers.discard(queue)
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
 
     async def publish(self, event: LiveTradingEvent) -> None:
         if not event.query_groups:
@@ -114,7 +118,6 @@ class LiveTradingEventBus:
             event.node_id or "",
             event.engine or "",
             event.strategy_name or "",
-            event.event_type,
         )
         async with self._lock:
             pending = self._pending.get(key)
@@ -123,11 +126,12 @@ class LiveTradingEventBus:
                 self._flush_tasks[key] = asyncio.create_task(self._flush_later(key))
             else:
                 pending.query_groups = sorted(set(pending.query_groups) | set(event.query_groups))
+                pending.event_type = event.event_type or pending.event_type
                 pending.reason = event.reason or pending.reason
                 pending.severity = event.severity or pending.severity
                 pending.ts = event.ts
 
-    async def _flush_later(self, key: Tuple[str, str, str, str]) -> None:
+    async def _flush_later(self, key: Tuple[str, str, str]) -> None:
         try:
             await asyncio.sleep(self._coalesce_seconds)
             async with self._lock:
@@ -219,4 +223,3 @@ async def publish_strategy_event(
             query_groups=query_groups,
         )
     )
-

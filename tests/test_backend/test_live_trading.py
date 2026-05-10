@@ -795,6 +795,71 @@ class TestReadEndpoints:
         assert by_ref["cta1:2R"]["is_resubmit"] is True
         assert "cta2:1" not in by_ref
 
+    def test_risk_events_include_strategy_variable_failures(self, api_client, fake_client):
+        client, _, _ = api_client
+        for strategy in fake_client.strategies_fanout[0]["data"]:
+            if strategy["name"] == "cta1":
+                strategy["variables"]["last_status"] = "failed"
+                strategy["variables"]["last_error"] = "model predict failed"
+                strategy["variables"]["replay_status"] = "error"
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        events = resp.json()["data"]
+        by_reason = {event.get("reason"): event for event in events}
+        assert by_reason["last_status_failed"]["severity"] == "error"
+        assert by_reason["replay_error"]["severity"] == "error"
+        assert by_reason["last_status_failed"]["category"] == "strategy"
+
+    def test_risk_events_include_stale_parttraded_order(self, api_client, fake_client):
+        client, _, _ = api_client
+        stale_dt = (datetime.now() - timedelta(minutes=6)).strftime("%Y-%m-%d %H:%M:%S")
+        fake_client.orders_fanout[0]["data"].append({
+            "vt_orderid": "QMT.4",
+            "orderid": "4",
+            "vt_symbol": "rb2501.SHFE",
+            "direction": "多",
+            "offset": "开",
+            "price": 3502,
+            "volume": 3,
+            "traded": 1,
+            "status": "PARTTRADED",
+            "status_msg": "",
+            "reference": "cta1:4",
+            "datetime": stale_dt,
+        })
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        by_ref = {event["reference"]: event for event in resp.json()["data"] if event.get("reference")}
+        assert by_ref["cta1:4"]["severity"] == "warning"
+        assert by_ref["cta1:4"]["reason"] == "parttraded_stale"
+
+    def test_risk_events_include_gateway_disconnected(self, api_client, fake_client):
+        client, _, _ = api_client
+        fake_client.health_by_node["nodeA"] = {
+            "version": "1.2.0",
+            "gateways": [{"gateway_name": "QMT", "connected": False, "last_error": "link down"}],
+        }
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/risk-events")
+        assert resp.status_code == 200
+        events = resp.json()["data"]
+        assert any(
+            event["category"] == "gateway" and event["severity"] == "critical"
+            for event in events
+        )
+
+    def test_risk_events_empty_state_degrades_quietly(self, api_client, fake_client):
+        client, _, _ = api_client
+        fake_client.orders_fanout[0]["data"] = []
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta2/risk-events")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        assert payload["data"] == []
+
     def test_risk_events_unknown_node_degrades_to_critical_event(self, api_client):
         client, _, _ = api_client
         resp = client.get("/api/live-trading/strategies/ghost/CtaStrategy/cta1/risk-events")
@@ -836,6 +901,38 @@ class TestReadEndpoints:
 
 
 class TestLiveTradingEventBus:
+    def test_sse_endpoint_emits_heartbeat_and_unsubscribes(self, monkeypatch):
+        import asyncio
+        from app.routers import live_trading as router_module
+        from app.services.vnpy.live_trading_events import get_event_bus
+
+        monkeypatch.setattr(router_module, "HEARTBEAT_SECONDS", 0.01)
+
+        class FakeRequest:
+            async def is_disconnected(self):
+                return False
+
+        async def run():
+            bus = get_event_bus()
+            before = bus.subscriber_count
+            response = await router_module.live_trading_events(FakeRequest())
+            iterator = response.body_iterator
+            chunks = []
+            try:
+                chunks.append(await anext(iterator))
+                chunks.append(await anext(iterator))
+            finally:
+                await iterator.aclose()
+            assert bus.subscriber_count == before
+            return [
+                chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                for chunk in chunks
+            ]
+
+        chunks = asyncio.run(run())
+        assert "event: hello" in chunks[0]
+        assert "event: heartbeat" in chunks[1]
+
     def test_fanout_and_coalesce_preserves_critical(self):
         import asyncio
         from app.services.vnpy.live_trading_events import LiveTradingEventBus, make_event
@@ -844,6 +941,7 @@ class TestLiveTradingEventBus:
             bus = LiveTradingEventBus(coalesce_seconds=0.01)
             q1 = bus.subscribe()
             q2 = bus.subscribe()
+            assert bus.subscriber_count == 2
             await bus.publish(
                 make_event(
                     "strategy.risk.changed",
@@ -868,19 +966,121 @@ class TestLiveTradingEventBus:
             )
             await bus.publish(
                 make_event(
-                    "strategy.equity.changed",
+                    "strategy.ml.changed",
                     node_id="nodeA",
                     engine="CtaStrategy",
                     strategy_name="cta1",
-                    query_groups=["performance_summary"],
+                    query_groups=["ml_latest"],
                 )
             )
             merged = await asyncio.wait_for(q1.get(), timeout=1)
-            assert set(merged.query_groups) == {"strategy_detail", "performance_summary"}
+            assert set(merged.query_groups) == {"strategy_detail", "ml_latest"}
             bus.unsubscribe(q1)
             bus.unsubscribe(q2)
+            assert bus.subscriber_count == 0
 
         asyncio.run(run())
+
+
+class TestLiveTradingEventProducer:
+    def test_rest_fingerprint_tick_publishes_only_on_change(self, fake_client, monkeypatch):
+        import asyncio
+        from app.services.vnpy import rest_fingerprint_service as fingerprint_module
+
+        fingerprint_module._LAST_FINGERPRINTS.clear()
+        fingerprint_module._LAST_NODE_STATUS.clear()
+        captured = []
+
+        async def capture_event(event):
+            captured.append((event.event_type, event))
+
+        async def capture_strategy_event(event_type, **kwargs):
+            captured.append((event_type, kwargs))
+
+        monkeypatch.setattr(fingerprint_module, "get_vnpy_client", lambda: fake_client)
+        monkeypatch.setattr(fingerprint_module, "publish_event", capture_event)
+        monkeypatch.setattr(fingerprint_module, "publish_strategy_event", capture_strategy_event)
+
+        stats = asyncio.run(fingerprint_module.rest_fingerprint_tick(publish_initial=True))
+        assert stats["scanned"] == 3
+        assert stats["published"] > 0
+        assert "strategy.state.changed" in [item[0] for item in captured]
+
+        captured.clear()
+        stats = asyncio.run(fingerprint_module.rest_fingerprint_tick())
+        assert stats["published"] == 0
+        assert captured == []
+
+        fake_client.orders_fanout[0]["data"].append({
+            "vt_orderid": "QMT.9",
+            "orderid": "9",
+            "vt_symbol": "rb2501.SHFE",
+            "direction": "多",
+            "offset": "开",
+            "price": 3509,
+            "volume": 1,
+            "traded": 0,
+            "status": "REJECTED",
+            "status_msg": "拒单: 风控限制",
+            "reference": "cta1:9",
+            "datetime": "2026-05-10 09:39:00",
+        })
+        stats = asyncio.run(fingerprint_module.rest_fingerprint_tick())
+        event_types = [item[0] for item in captured]
+        assert stats["published"] >= 1
+        assert "strategy.order_trade.changed" in event_types
+        assert "strategy.risk.changed" in event_types
+
+
+class TestLiveTradingProxy:
+    def test_events_proxy_streams_without_buffering(self, monkeypatch):
+        from fastapi import FastAPI
+        from app.routers import _live_proxy as proxy_module
+
+        class Upstream:
+            status_code = 200
+            headers = {
+                "content-type": "text/event-stream",
+                "cache-control": "no-cache",
+                "x-accel-buffering": "no",
+                "connection": "keep-alive",
+                "transfer-encoding": "chunked",
+            }
+
+            @property
+            def content(self):
+                raise AssertionError("SSE proxy must not buffer upstream.content")
+
+            async def aiter_raw(self):
+                yield b"event: hello\n"
+                yield b"data: {\"ts\":1}\n\n"
+
+            async def aclose(self):
+                return None
+
+        class FakeProxyClient:
+            def build_request(self, method, path, params=None, content=None, headers=None):
+                assert method == "GET"
+                assert path == "/api/live-trading/events"
+                return {"method": method, "path": path, "params": params}
+
+            async def send(self, upstream_request, stream=False):
+                assert stream is True
+                return Upstream()
+
+        monkeypatch.setattr(proxy_module, "_proxy_client", FakeProxyClient())
+
+        app = FastAPI()
+        app.include_router(proxy_module.router)
+        client = TestClient(app)
+        with client.stream("GET", "/api/live-trading/events") as resp:
+            body = b"".join(resp.iter_bytes())
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        assert resp.headers["cache-control"] == "no-cache"
+        assert resp.headers["x-accel-buffering"] == "no"
+        assert b"event: hello" in body
 
 
 # ---------------------------------------------------------------------------
@@ -897,8 +1097,15 @@ class TestWriteGuard:
     def test_write_with_password_header_ok(self, api_client, fake_client, monkeypatch):
         client, _, _ = api_client
         from app.core.config import settings
+        from app.services.vnpy import live_trading_events as events_module
 
         monkeypatch.setattr(settings, "live_trading_ops_password", "s3cret")
+        captured = []
+
+        async def capture_strategy_event(event_type, **kwargs):
+            captured.append((event_type, kwargs))
+
+        monkeypatch.setattr(events_module, "publish_strategy_event", capture_strategy_event)
         resp = client.post(
             "/api/live-trading/strategies/nodeA/CtaStrategy/cta1/start",
             headers={"X-Ops-Password": "s3cret"},
@@ -907,6 +1114,17 @@ class TestWriteGuard:
         assert resp.json()["data"]["ok"] is True
         # fake client received the call
         assert any(c[0] == "start" for c in fake_client.write_calls)
+        assert captured == [
+            (
+                "strategy.state.changed",
+                {
+                    "node_id": "nodeA",
+                    "engine": "CtaStrategy",
+                    "strategy_name": "cta1",
+                    "reason": "start_strategy",
+                },
+            )
+        ]
 
     def test_write_with_wrong_password_401(self, api_client, monkeypatch):
         client, _, _ = api_client
@@ -955,9 +1173,16 @@ class TestSnapshot:
         import asyncio
         _, svc_module, db_module = api_client
         from app.core.config import settings
+        from app.services.vnpy import live_trading_events as events_module
         from sqlalchemy.orm import sessionmaker
 
         monkeypatch.setattr(settings, "vnpy_snapshot_retention_days", 1)
+        captured = []
+
+        async def capture_strategy_event(event_type, **kwargs):
+            captured.append((event_type, kwargs))
+
+        monkeypatch.setattr(events_module, "publish_strategy_event", capture_strategy_event)
 
         # insert a stale row that should be pruned
         SessionLocal = sessionmaker(bind=db_module.engine, autocommit=False, autoflush=False)
@@ -988,6 +1213,12 @@ class TestSnapshot:
             assert "cta1" in names
             assert "cta2" in names
             assert "signal1" in names
+        published_names = {
+            kwargs["strategy_name"]
+            for event_type, kwargs in captured
+            if event_type == "strategy.equity.changed"
+        }
+        assert {"cta1", "cta2", "signal1"} <= published_names
 
 
 # ---------------------------------------------------------------------------
