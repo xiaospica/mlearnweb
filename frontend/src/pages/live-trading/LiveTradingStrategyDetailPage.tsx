@@ -24,9 +24,11 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
 import CorpActionsCard from './components/CorpActionsCard'
+import HistoricalPositionsCard from './components/HistoricalPositionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
+import StrategyPerformanceSummaryCard from './components/StrategyPerformanceSummaryCard'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
 import TradesCard from './components/TradesCard'
@@ -229,7 +231,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
               label: '收益曲线与持仓',
               children: (
                 <div>
-                  <Card styles={{ body: { padding: 16 } }}>
+                  <StrategyPerformanceSummaryCard
+                    nodeId={nodeId}
+                    engine={engine}
+                    strategyName={name}
+                  />
+                  <Card style={{ marginTop: 16 }} styles={{ body: { padding: 16 } }}>
                     <FullEquityChart
                       data={detail.curve}
                       sourceLabel={detail.source_label}
@@ -242,6 +249,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                   >
                     <PositionsTable rows={detail.positions} />
                   </Card>
+                  <HistoricalPositionsCard
+                    nodeId={nodeId}
+                    engine={engine}
+                    strategyName={name}
+                    gatewayName={detail.gateway_name || undefined}
+                  />
                   {engine === 'MlStrategy' && (
                     <LatestTopkCard nodeId={nodeId} strategyName={name} />
                   )}

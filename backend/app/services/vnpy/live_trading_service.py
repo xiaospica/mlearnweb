@@ -443,6 +443,304 @@ def _read_curve(
     ]
 
 
+def _finite_float(value: Any) -> Optional[float]:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v in (float("inf"), float("-inf")):
+        return None
+    return v
+
+
+def _equity_value_from_point(point: Dict[str, Any]) -> Optional[float]:
+    """Return the total-equity-like value from an equity curve point.
+
+    ``strategy_value`` may be pure PnL for strategy_pnl / position_sum_pnl
+    sources, so performance ratios prefer account_equity unless the snapshot
+    source is already a total-equity series.
+    """
+    label = str(point.get("source_label") or "")
+    strategy_value = _finite_float(point.get("strategy_value"))
+    account_equity = _finite_float(point.get("account_equity"))
+    if label in ("account_equity", "replay_settle"):
+        return strategy_value if strategy_value is not None else account_equity
+    return account_equity
+
+
+def _build_equity_series(curve: List[Dict[str, Any]]) -> List[Tuple[int, float]]:
+    series: List[Tuple[int, float]] = []
+    for point in curve or []:
+        value = _equity_value_from_point(point)
+        ts = _finite_float(point.get("ts"))
+        if value is None or value <= 0 or ts is None:
+            continue
+        series.append((int(ts), value))
+    return series
+
+
+def _max_drawdown(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    peak = values[0]
+    max_dd = 0.0
+    for value in values:
+        if value > peak:
+            peak = value
+        if peak > 0:
+            max_dd = max(max_dd, (peak - value) / peak)
+    return max_dd
+
+
+def _annualized_return(total_return: Optional[float], trading_days: int) -> Optional[float]:
+    if total_return is None or trading_days < 2:
+        return None
+    base = 1.0 + total_return
+    if base <= 0:
+        return None
+    return base ** (252.0 / max(trading_days - 1, 1)) - 1.0
+
+
+def _extract_available_cash(
+    accounts: List[Dict[str, Any]],
+    gateway_name: Optional[str],
+) -> Optional[float]:
+    total = 0.0
+    hit = False
+    for account in accounts or []:
+        if gateway_name and str(account.get("gateway_name", "")) != gateway_name:
+            continue
+        for key in ("available", "available_cash", "cash", "balance"):
+            value = _finite_float(account.get(key))
+            if value is None:
+                continue
+            total += value
+            hit = True
+            break
+    return total if hit else None
+
+
+async def _read_available_cash(
+    node_id: str,
+    gateway_name: Optional[str],
+) -> Tuple[Optional[float], Optional[str]]:
+    client = get_vnpy_client()
+    if node_id not in client.node_ids:
+        return None, f"unknown node: {node_id}"
+    try:
+        accounts_fo = await client.get_accounts()
+    except Exception as exc:
+        return None, f"accounts fetch failed: {exc}"
+    accounts_by_node = _group_by_node(accounts_fo)
+    cash = _extract_available_cash(accounts_by_node.get(node_id, []), gateway_name)
+    if cash is None:
+        return None, "available cash is not exposed by the vnpy node"
+    return cash, None
+
+
+def _empty_performance_summary(warnings: Optional[List[str]] = None) -> Dict[str, Any]:
+    return {
+        "cumulative_return": None,
+        "annualized_return": None,
+        "total_asset": None,
+        "available_cash": None,
+        "position_ratio": None,
+        "beta": None,
+        "max_drawdown": None,
+        "start_ts": None,
+        "end_ts": None,
+        "sample_count": 0,
+        "source_label": "unavailable",
+        "warnings": warnings or [],
+    }
+
+
+async def get_strategy_performance_summary(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    window_days: int = 365,
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Compute the strategy-detail KPI strip from canonical backend data."""
+    detail, warning = await get_strategy_detail(
+        db, node_id, engine, strategy_name, window_days=window_days,
+    )
+    warnings: List[str] = []
+    if warning:
+        warnings.append(warning)
+    if detail is None:
+        warnings.append("strategy detail is unavailable")
+        return _empty_performance_summary(warnings), warning
+
+    curve = detail.get("curve") or []
+    series = _build_equity_series(curve)
+    values = [value for _, value in series]
+
+    cumulative_return: Optional[float] = None
+    annualized: Optional[float] = None
+    max_dd = _max_drawdown(values)
+    start_ts: Optional[int] = None
+    end_ts: Optional[int] = None
+    if len(series) >= 2 and values[0] > 0:
+        start_ts = series[0][0]
+        end_ts = series[-1][0]
+        cumulative_return = values[-1] / values[0] - 1.0
+        unique_days = {
+            datetime.fromtimestamp(ts / 1000).date()
+            for ts, _ in series
+        }
+        annualized = _annualized_return(cumulative_return, len(unique_days))
+    elif len(series) == 1:
+        start_ts = end_ts = series[0][0]
+        warnings.append("equity curve has only one valid point")
+    else:
+        warnings.append("equity curve has no valid total-equity points")
+
+    latest_curve_value = values[-1] if values else None
+    total_asset = _finite_float(detail.get("account_equity")) or latest_curve_value
+
+    positions = detail.get("positions") or []
+    position_mv = 0.0
+    position_hit = False
+    for p in positions:
+        if _finite_float(p.get("volume")) is not None and float(p.get("volume") or 0) <= 0:
+            continue
+        mv = _finite_float(p.get("market_value"))
+        if mv is None or mv <= 0:
+            continue
+        position_mv += mv
+        position_hit = True
+    position_ratio = (
+        position_mv / total_asset
+        if position_hit and total_asset is not None and total_asset > 0
+        else None
+    )
+
+    available_cash: Optional[float] = None
+    cash_warning: Optional[str] = None
+    if not detail.get("node_offline"):
+        available_cash, cash_warning = await _read_available_cash(
+            node_id, detail.get("gateway_name") or None,
+        )
+    else:
+        cash_warning = "available cash is unavailable while the node is offline"
+    if cash_warning:
+        warnings.append(cash_warning)
+
+    source_label = (
+        (curve[-1].get("source_label") if curve else None)
+        or detail.get("source_label")
+        or "unavailable"
+    )
+
+    return {
+        "cumulative_return": cumulative_return,
+        "annualized_return": annualized,
+        "total_asset": total_asset,
+        "available_cash": available_cash,
+        "position_ratio": position_ratio,
+        "beta": None,
+        "max_drawdown": max_dd,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "sample_count": len(series),
+        "source_label": source_label,
+        "warnings": warnings,
+    }, warning
+
+
+def _normalize_date_string(value: Any) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) == 8 and raw.isdigit():
+        raw = f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
+    try:
+        return datetime.fromisoformat(raw[:10]).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _position_dates_from_snapshots(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    limit: int = 500,
+) -> List[str]:
+    date_expr = sa.func.date(StrategyEquitySnapshot.ts)
+    rows = (
+        db.query(date_expr)
+        .filter(
+            StrategyEquitySnapshot.node_id == node_id,
+            StrategyEquitySnapshot.engine == engine,
+            StrategyEquitySnapshot.strategy_name == strategy_name,
+        )
+        .distinct()
+        .order_by(date_expr.desc())
+        .limit(limit)
+        .all()
+    )
+    dates = {
+        normalized
+        for (raw,) in rows
+        if (normalized := _normalize_date_string(raw))
+    }
+    return sorted(dates)
+
+
+async def _position_dates_via_rpc(
+    node_id: str,
+    strategy_name: str,
+    gateway_name: Optional[str],
+) -> Tuple[Optional[List[str]], Optional[str]]:
+    client = get_vnpy_client()
+    if node_id not in client.node_ids:
+        return None, f"unknown node: {node_id}"
+    if not hasattr(client, "get_strategy_positions_history_dates"):
+        return None, "vnpy client does not expose position history dates"
+    try:
+        raw_dates = await client.get_strategy_positions_history_dates(
+            node_id, strategy_name, gateway_name=gateway_name or "",
+        )
+    except Exception as exc:
+        return None, f"RPC position dates unavailable: {exc}"
+    dates = {
+        normalized
+        for raw in raw_dates or []
+        if (normalized := _normalize_date_string(raw))
+    }
+    return sorted(dates), None
+
+
+async def get_strategy_position_dates(
+    db: Session,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    gateway_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    rpc_dates, rpc_warning = await _position_dates_via_rpc(
+        node_id, strategy_name, gateway_name,
+    )
+    if rpc_dates:
+        return {"items": rpc_dates, "source": "vnpy_rpc", "warning": None}
+
+    snapshot_dates = _position_dates_from_snapshots(db, node_id, engine, strategy_name)
+    if snapshot_dates:
+        return {
+            "items": snapshot_dates,
+            "source": "equity_snapshots",
+            "warning": rpc_warning,
+        }
+    return {
+        "items": [],
+        "source": "none",
+        "warning": rpc_warning or "no local equity snapshot dates found",
+    }
+
+
 # ---------------------------------------------------------------------------
 # List / detail endpoints
 # ---------------------------------------------------------------------------

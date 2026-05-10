@@ -6,10 +6,12 @@ import type {
   HistoricalPosition,
   LiveTradingResponse,
   NodeStatus,
+  PositionDatesResponse,
   StrategyCreatePayload,
   StrategyDetail,
   StrategyEditPayload,
   StrategyEngineInfo,
+  StrategyPerformanceSummary,
   StrategySummary,
   StrategyTrade,
 } from '@/types/liveTrading'
@@ -89,6 +91,34 @@ export const liveTradingService = {
   ): Promise<LiveTradingResponse<StrategyTrade[]>> {
     return apiClient
       .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/trades`)
+      .then((r) => r.data)
+  },
+
+  /** 策略详情指标总览：由后端统一计算收益、回撤、仓位等口径 */
+  getStrategyPerformanceSummary(
+    nodeId: string,
+    engine: string,
+    name: string,
+    windowDays = 365,
+  ): Promise<LiveTradingResponse<StrategyPerformanceSummary>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/performance-summary`, {
+        params: { window_days: windowDays },
+      })
+      .then((r) => r.data)
+  },
+
+  /** 历史持仓日期索引：优先远端 vnpy，失败时由后端回退到本地权益快照日期 */
+  getStrategyPositionDates(
+    nodeId: string,
+    engine: string,
+    name: string,
+    gatewayName?: string,
+  ): Promise<LiveTradingResponse<PositionDatesResponse>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/positions/dates`, {
+        params: gatewayName ? { gateway_name: gatewayName } : {},
+      })
       .then((r) => r.data)
   },
 

@@ -52,6 +52,27 @@ export interface HistoricalPosition {
   weight: number  // 持仓内部 sum=1
 }
 
+export interface PositionDatesResponse {
+  items: string[]
+  source: 'vnpy_rpc' | 'equity_snapshots' | 'none' | string
+  warning?: string | null
+}
+
+export interface StrategyPerformanceSummary {
+  cumulative_return: number | null
+  annualized_return: number | null
+  total_asset: number | null
+  available_cash: number | null
+  position_ratio: number | null
+  beta: number | null
+  max_drawdown: number | null
+  start_ts: number | null
+  end_ts: number | null
+  sample_count: number
+  source_label: SourceLabel | null
+  warnings: string[]
+}
+
 export interface DeleteRecordsStats {
   equity_snapshots: number
   ml_metric_snapshots: number

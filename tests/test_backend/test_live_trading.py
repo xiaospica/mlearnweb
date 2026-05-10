@@ -528,6 +528,90 @@ class TestReadEndpoints:
         positions = data["data"]["positions"]
         assert all(p["vt_symbol"] == "rb2501.SHFE" for p in positions)
 
+    def test_performance_summary_empty_curve_degrades(self, api_client):
+        client, _, _ = api_client
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1/performance-summary")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        summary = data["data"]
+        assert summary["sample_count"] == 0
+        assert summary["cumulative_return"] is None
+        assert summary["max_drawdown"] is None
+        assert summary["total_asset"] is not None
+        assert any("equity curve" in w for w in summary["warnings"])
+
+    def test_performance_summary_calculates_curve_metrics(self, api_client):
+        client, _, db_module = api_client
+        from sqlalchemy.orm import sessionmaker
+
+        SessionLocal = sessionmaker(bind=db_module.engine, autocommit=False, autoflush=False)
+        with SessionLocal() as s:
+            for day, equity in [
+                (1, 100.0),
+                (2, 110.0),
+                (3, 90.0),
+                (4, 120.0),
+            ]:
+                s.add(
+                    db_module.StrategyEquitySnapshot(
+                        node_id="nodeA",
+                        engine="CtaStrategy",
+                        strategy_name="cta2",
+                        ts=datetime(2026, 5, day, 15, 0, 0),
+                        strategy_value=equity,
+                        account_equity=equity,
+                        source_label="account_equity",
+                        positions_count=2,
+                        raw_variables_json="{}",
+                    )
+                )
+            s.commit()
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta2/performance-summary")
+        assert resp.status_code == 200
+        summary = resp.json()["data"]
+        assert summary["sample_count"] == 4
+        assert summary["source_label"] == "account_equity"
+        assert summary["cumulative_return"] == pytest.approx(0.2)
+        assert summary["annualized_return"] is not None
+        assert summary["max_drawdown"] == pytest.approx((110.0 - 90.0) / 110.0)
+        assert summary["available_cash"] == 1_000_000
+        assert 0 < summary["position_ratio"] < 1
+        assert summary["beta"] is None
+
+    def test_position_dates_route_uses_snapshot_fallback(self, api_client):
+        client, _, db_module = api_client
+        from sqlalchemy.orm import sessionmaker
+
+        SessionLocal = sessionmaker(bind=db_module.engine, autocommit=False, autoflush=False)
+        with SessionLocal() as s:
+            for day in [3, 1, 3]:
+                s.add(
+                    db_module.StrategyEquitySnapshot(
+                        node_id="nodeA",
+                        engine="CtaStrategy",
+                        strategy_name="cta2",
+                        ts=datetime(2026, 5, day, 15, 0, 0),
+                        strategy_value=100.0 + day,
+                        account_equity=100.0 + day,
+                        source_label="account_equity",
+                        positions_count=2,
+                        raw_variables_json="{}",
+                    )
+                )
+            s.commit()
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta2/positions/dates")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        assert payload["data"]["source"] == "equity_snapshots"
+        assert payload["data"]["items"] == ["2026-05-01", "2026-05-03"]
+
+        dynamic_resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta2/positions/20260503")
+        assert dynamic_resp.status_code == 200
+
     def test_get_strategy_detail_not_found(self, api_client):
         client, _, _ = api_client
         resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/ghost")

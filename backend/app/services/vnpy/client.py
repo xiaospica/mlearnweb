@@ -161,6 +161,17 @@ class _PerNodeClient:
             params=params,
         ) or []
 
+    async def get_strategy_positions_history_dates(
+        self, strategy_name: str, gateway_name: str = "",
+    ) -> List[str]:
+        """Best-effort remote date index for strategy EOD position history."""
+        params = {"gateway_name": gateway_name} if gateway_name else None
+        return await self._request(
+            "GET",
+            f"/api/v1/position/history/{strategy_name}/dates",
+            params=params,
+        ) or []
+
     async def get_trades(self) -> List[Dict[str, Any]]:
         return await self._request("GET", "/api/v1/trade") or []
 
@@ -391,6 +402,13 @@ class VnpyMultiNodeClient:
 
     async def get_orders(self) -> List[FanoutItem]:
         return await self._fanout("get_orders")
+
+    async def get_strategy_positions_history_dates(
+        self, node_id: str, strategy_name: str, gateway_name: str = "",
+    ) -> List[str]:
+        return await self.get_per_node(node_id).get_strategy_positions_history_dates(
+            strategy_name, gateway_name=gateway_name,
+        )
 
     # --- ML fanout reads (Phase 3.2) ----------------------------------------
 

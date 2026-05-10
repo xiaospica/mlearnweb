@@ -95,14 +95,27 @@ const columns: ResponsiveColumn<HistoricalPosition>[] = [
 ]
 
 const HistoricalPositionsCard: React.FC<Props> = ({
-  nodeId, engine, strategyName, gatewayName, historyDates = [],
+  nodeId, engine, strategyName, gatewayName, historyDates,
 }) => {
+  const shouldFetchDates = historyDates === undefined
+  const { data: datesData, isFetching: isFetchingDates } = useQuery({
+    queryKey: ['historical-position-dates', nodeId, engine, strategyName, gatewayName ?? ''],
+    queryFn: () => liveTradingService.getStrategyPositionDates(nodeId, engine, strategyName, gatewayName),
+    enabled: shouldFetchDates && !!(nodeId && engine && strategyName),
+    staleTime: 300_000,
+    retry: 1,
+  })
+  const effectiveHistoryDates = historyDates ?? (datesData?.success ? (datesData.data?.items || []) : [])
+  const datesWarning = shouldFetchDates
+    ? (datesData?.data?.warning || datesData?.warning || (!datesData?.success ? datesData?.message : null))
+    : null
+
   // 默认最近一个有数据的日期；historyDates 为空则 fallback 昨日
   const normalizedHistoryDates = useMemo(
     () =>
-      Array.from(new Set(historyDates.map(normalizeHistoryDate).filter((d): d is string => Boolean(d))))
+      Array.from(new Set(effectiveHistoryDates.map(normalizeHistoryDate).filter((d): d is string => Boolean(d))))
         .sort(),
-    [historyDates],
+    [effectiveHistoryDates],
   )
   const latestDate = normalizedHistoryDates.length > 0
     ? normalizedHistoryDates[normalizedHistoryDates.length - 1]
@@ -133,6 +146,7 @@ const HistoricalPositionsCard: React.FC<Props> = ({
 
   const rows = data?.success ? (data.data || []) : []
   const warning = data ? (data.warning || (!data.success ? data.message : null)) : null
+  const warnings = Array.from(new Set([datesWarning, warning].filter(Boolean) as string[]))
   const totalMV = rows.reduce((s, r) => s + (r.market_value || 0), 0)
 
   return (
@@ -150,8 +164,9 @@ const HistoricalPositionsCard: React.FC<Props> = ({
               availableDatesSet.size > 0
                 ? (d) => !availableDatesSet.has(d.format('YYYY-MM-DD'))
                 : undefined
-            }
+              }
           />
+          {isFetchingDates && <Spin size="small" />}
           {totalMV > 0 && (
             <span style={{ fontSize: 12, color: 'var(--ap-text-muted)' }}>
               EOD 总市值 ≈ {totalMV.toLocaleString(undefined, { maximumFractionDigits: 0 })}
@@ -162,8 +177,8 @@ const HistoricalPositionsCard: React.FC<Props> = ({
       style={{ marginTop: 16 }}
       styles={{ body: { padding: 0 } }}
     >
-      {warning && (
-        <Alert type="warning" showIcon closable message={warning} style={{ margin: 0, borderRadius: 0 }} />
+      {warnings.length > 0 && (
+        <Alert type="warning" showIcon closable message={warnings.join(' / ')} style={{ margin: 0, borderRadius: 0 }} />
       )}
       {isLoading ? (
         <div style={{ padding: 24, textAlign: 'center' }}>

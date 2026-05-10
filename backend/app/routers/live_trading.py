@@ -77,6 +77,23 @@ async def get_strategy(
 
 
 @router.get(
+    "/strategies/{node_id}/{engine}/{name}/performance-summary",
+    response_model=LiveTradingListResponse,
+)
+async def get_strategy_performance_summary(
+    node_id: str,
+    engine: str,
+    name: str,
+    window_days: int = Query(365, ge=1, le=3650),
+    db: Session = Depends(get_db_session),
+) -> LiveTradingListResponse:
+    summary, warning = await svc.get_strategy_performance_summary(
+        db, node_id, engine, name, window_days=window_days,
+    )
+    return _ok(summary, warning=warning)
+
+
+@router.get(
     "/strategies/{node_id}/{engine}/{name}/trades",
     response_model=LiveTradingListResponse,
 )
@@ -88,6 +105,23 @@ async def list_strategy_trades(
     """指定策略的成交记录（当前会话内，按 datetime 倒序）。"""
     rows, warning = await svc.list_strategy_trades(node_id, engine, name)
     return _ok(rows, warning=warning)
+
+
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/positions/dates",
+    response_model=LiveTradingListResponse,
+)
+async def get_strategy_position_dates(
+    node_id: str,
+    engine: str,
+    name: str,
+    gateway_name: Optional[str] = Query(None, description="澶?gateway 娌欑洅涓嬫寚瀹?gateway"),
+    db: Session = Depends(get_db_session),
+) -> LiveTradingListResponse:
+    data = await svc.get_strategy_position_dates(
+        db, node_id, engine, name, gateway_name=gateway_name,
+    )
+    return _ok(data, warning=data.get("warning"))
 
 
 @router.get(
