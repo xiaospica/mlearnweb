@@ -24,7 +24,6 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
 import CorpActionsCard from './components/CorpActionsCard'
-import HistoricalPositionsCard from './components/HistoricalPositionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
@@ -249,12 +248,6 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                   >
                     <PositionsTable rows={detail.positions} />
                   </Card>
-                  <HistoricalPositionsCard
-                    nodeId={nodeId}
-                    engine={engine}
-                    strategyName={name}
-                    gatewayName={detail.gateway_name || undefined}
-                  />
                   {engine === 'MlStrategy' && (
                     <LatestTopkCard nodeId={nodeId} strategyName={name} />
                   )}
