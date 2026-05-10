@@ -1,6 +1,6 @@
 # Windows Server 部署手册
 
-mlearnweb 在干净 Windows Server 2022 上 30 分钟内可用。Phase 4 W4.6 — 配套 [`deploy/install_all.ps1`](../deploy/install_all.ps1) 一站式脚本。
+mlearnweb 的目标是在干净 Windows Server 2022 上 30 分钟内可用。2026-05-10 架构复核结论：当前已具备部署骨架和 [`deploy/install_all.ps1`](../deploy/install_all.ps1) 一站式脚本雏形，适合做服务器试部署；但依赖补齐、配置落点、监听策略和测试全绿等 P0/P1 项完成前，不建议作为正式一键快速部署版本交付。优先级清单见 [`docs/plan/mlearnweb-independent-deploy-roadmap.md`](plan/mlearnweb-independent-deploy-roadmap.md)。
 
 ## 前置依赖
 
@@ -26,7 +26,7 @@ nssm --version    # 期望 NSSM 2.24
 git clone <仓库地址> C:\mlearnweb
 cd C:\mlearnweb\deploy
 
-# 一站式: 11 步幂等
+# 一站式试部署：当前仍需按下文检查并补齐关键配置
 .\install_all.ps1 -DataRoot D:\mlearnweb_data
 ```
 
@@ -47,7 +47,7 @@ cd C:\mlearnweb\deploy
 6. 调 `install_services.ps1` 装两个 NSSM 服务
 7. 启动 + 健康检查 (`Test-NetConnection` + `/health`)
 
-跑完会提示「编辑 `.env` 配置 `FRONTEND_DIST_DIR` / `VNPY_NODES_CONFIG_PATH`」，**这两个字段是单端口生产部署 + vnpy 节点接入的关键，必须配置**。
+当前脚本跑完会提示「编辑 `.env` 配置 `FRONTEND_DIST_DIR` / `VNPY_NODES_CONFIG_PATH`」，**这两个字段是单端口生产部署 + vnpy 节点接入的关键，必须配置**。正式一键部署目标是由脚本自动写入这些绝对路径，并把 `.env`、SQLite、uploads、logs 收敛到 `DataRoot` 或清晰声明为外部路径；该整改项在 roadmap 中标为 P0。
 
 ## 必须的配置项
 
