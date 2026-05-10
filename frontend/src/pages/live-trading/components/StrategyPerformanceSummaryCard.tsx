@@ -4,6 +4,10 @@ import { InfoCircleOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { liveTradingService } from '@/services/liveTradingService'
 import type { SourceLabel, StrategyPerformanceSummary } from '@/types/liveTrading'
+import {
+  LIVE_SUMMARY_REFRESH_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 const { Text } = Typography
 
@@ -52,11 +56,11 @@ function uniqueWarnings(summary?: StrategyPerformanceSummary | null, responseWar
 
 const StrategyPerformanceSummaryCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['live-strategy-performance-summary', nodeId, engine, strategyName],
+    queryKey: liveTradingQueryKeys.strategyPerformanceSummary(nodeId, engine, strategyName),
     queryFn: () => liveTradingService.getStrategyPerformanceSummary(nodeId, engine, strategyName),
     enabled: !!(nodeId && engine && strategyName),
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: LIVE_SUMMARY_REFRESH_MS,
+    refetchInterval: LIVE_SUMMARY_REFRESH_MS,
     retry: 1,
   })
 

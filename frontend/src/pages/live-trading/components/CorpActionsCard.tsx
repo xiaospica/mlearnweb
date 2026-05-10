@@ -15,6 +15,11 @@ import { Card, Empty, Spin, Table, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import liveTradingService from '@/services/liveTradingService'
 import type { CorpActionEvent } from '@/types/liveTrading'
+import {
+  CORP_ACTIONS_REFRESH_MS,
+  CORP_ACTIONS_STALE_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 const { Text } = Typography
 
@@ -104,10 +109,10 @@ const columns: ColumnsType<CorpActionEvent> = [
 const CorpActionsCard: React.FC<Props> = ({ vtSymbols, days = 30 }) => {
   const sortedKey = [...vtSymbols].sort().join(',')
   const { data, isLoading } = useQuery({
-    queryKey: ['live-corp-actions', sortedKey, days],
+    queryKey: liveTradingQueryKeys.corpActions(sortedKey, days),
     queryFn: () => liveTradingService.listCorpActions(vtSymbols, days),
-    refetchInterval: 5 * 60 * 1000,   // 5 分钟（除权事件低频）
-    staleTime: 60 * 1000,
+    refetchInterval: CORP_ACTIONS_REFRESH_MS,
+    staleTime: CORP_ACTIONS_STALE_MS,
     retry: 1,
     enabled: vtSymbols.length > 0,
   })

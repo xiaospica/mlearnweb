@@ -17,6 +17,11 @@ import dayjs from 'dayjs'
 import { liveTradingService } from '@/services/liveTradingService'
 import type { HistoricalPosition } from '@/types/liveTrading'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import {
+  HISTORY_POSITION_DATES_STALE_MS,
+  HISTORY_POSITIONS_STALE_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 interface Props {
   nodeId: string
@@ -99,10 +104,10 @@ const HistoricalPositionsCard: React.FC<Props> = ({
 }) => {
   const shouldFetchDates = historyDates === undefined
   const { data: datesData, isFetching: isFetchingDates } = useQuery({
-    queryKey: ['historical-position-dates', nodeId, engine, strategyName, gatewayName ?? ''],
+    queryKey: liveTradingQueryKeys.historicalPositionDates(nodeId, engine, strategyName, gatewayName),
     queryFn: () => liveTradingService.getStrategyPositionDates(nodeId, engine, strategyName, gatewayName),
     enabled: shouldFetchDates && !!(nodeId && engine && strategyName),
-    staleTime: 300_000,
+    staleTime: HISTORY_POSITION_DATES_STALE_MS,
     retry: 1,
   })
   const effectiveHistoryDates = historyDates ?? (datesData?.success ? (datesData.data?.items || []) : [])
@@ -136,10 +141,10 @@ const HistoricalPositionsCard: React.FC<Props> = ({
   }, [availableDatesSet, latestDate, selected])
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['historical-positions', nodeId, engine, strategyName, yyyymmdd, gatewayName ?? ''],
+    queryKey: liveTradingQueryKeys.historicalPositions(nodeId, engine, strategyName, yyyymmdd, gatewayName),
     queryFn: () =>
       liveTradingService.getStrategyPositionsOnDate(nodeId, engine, strategyName, yyyymmdd, gatewayName),
-    staleTime: 60_000,
+    staleTime: HISTORY_POSITIONS_STALE_MS,
     retry: 1,
     placeholderData: keepPreviousData,
   })

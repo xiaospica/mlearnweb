@@ -32,6 +32,12 @@ import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
 import TradesCard from './components/TradesCard'
 import PageContainer from '@/components/layout/PageContainer'
+import {
+  LIVE_DETAIL_REFRESH_MS,
+  invalidateLiveStrategyDetailQueries,
+  invalidateLiveStrategyMutationQueries,
+  liveTradingQueryKeys,
+} from './liveTradingRefresh'
 
 dayjs.extend(relativeTime)
 
@@ -47,11 +53,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const { message } = AntApp.useApp()
   const { guardWrite } = useOpsPassword()
   const queryClient = useQueryClient()
+  const [manualRefreshing, setManualRefreshing] = useState(false)
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['live-strategy', nodeId, engine, name],
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: liveTradingQueryKeys.strategyDetail(nodeId, engine, name),
     queryFn: () => liveTradingService.getStrategy(nodeId, engine, name),
-    refetchInterval: 3000,
+    refetchInterval: LIVE_DETAIL_REFRESH_MS,
     staleTime: 0,
     enabled: !!(nodeId && engine && name),
     // 离开 ↔ 再回 / 切 tab / 跨页跳转时保留上次数据；vnpy 慢节点 (10s timeout)
@@ -63,6 +70,19 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
   const warning = data?.warning || (!data?.success ? data?.message : null)
   const isOffline = Boolean(detail?.node_offline)
 
+  const refreshDetailPage = async () => {
+    setManualRefreshing(true)
+    try {
+      await invalidateLiveStrategyDetailQueries(queryClient, {
+        nodeId,
+        engine,
+        strategyName: name,
+      })
+    } finally {
+      setManualRefreshing(false)
+    }
+  }
+
   const handleDeleteRecords = async () => {
     const result = await guardWrite(() =>
       liveTradingService.deleteStrategyRecords(nodeId, engine, name),
@@ -72,8 +92,11 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
       message.success(
         `已删除 ${stats?.equity_snapshots ?? 0} 条权益快照、${stats?.ml_metric_snapshots ?? 0} 条 ML 指标`,
       )
-      queryClient.invalidateQueries({ queryKey: ['live-strategy', nodeId, engine, name] })
-      queryClient.invalidateQueries({ queryKey: ['live-strategies'] })
+      await invalidateLiveStrategyMutationQueries(queryClient, {
+        nodeId,
+        engine,
+        strategyName: name,
+      })
       // 历史曲线已清，离线策略此时应跳回列表（节点离线时无法 refetch 出新数据）
       if (isOffline) {
         setTimeout(() => navigate('/live-trading'), 1000)
@@ -104,7 +127,12 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/live-trading')} size="small">
             返回
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} size="small" loading={isFetching && !isLoading}>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={refreshDetailPage}
+            size="small"
+            loading={(isFetching && !isLoading) || manualRefreshing}
+          >
             刷新
           </Button>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

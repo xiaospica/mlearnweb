@@ -28,6 +28,11 @@ import ChartContainer from '@/components/responsive/ChartContainer'
 import BacktestDiffPanel from './BacktestDiffPanel'
 import PredictionHistoryPanel from './PredictionHistoryPanel'
 import HistoricalPositionsCard from './HistoricalPositionsCard'
+import {
+  ML_MONITOR_REFRESH_MS,
+  ML_MONITOR_STALE_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 const { Text } = Typography
 
@@ -209,24 +214,24 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gateway
   // 180 日窗口覆盖实盘积累和 backfill 测试数据. ICIR window 维持 30 日
   // (与原 Phase 3 设计一致). Refetch 60s 匹配 ml_snapshot_loop 节奏.
   const history = useQuery({
-    queryKey: ['ml-metrics-history', nodeId, strategyName],
+    queryKey: liveTradingQueryKeys.mlMetricsHistory(nodeId, strategyName),
     queryFn: () => mlMonitoringService.metricsHistory(nodeId, strategyName, 180),
-    refetchInterval: 60000,
-    staleTime: 30000,
+    refetchInterval: ML_MONITOR_REFRESH_MS,
+    staleTime: ML_MONITOR_STALE_MS,
   })
 
   const rolling = useQuery({
-    queryKey: ['ml-metrics-rolling', nodeId, strategyName],
+    queryKey: liveTradingQueryKeys.mlMetricsRolling(nodeId, strategyName),
     queryFn: () => mlMonitoringService.metricsRolling(nodeId, strategyName, 30),
-    refetchInterval: 60000,
-    staleTime: 30000,
+    refetchInterval: ML_MONITOR_REFRESH_MS,
+    staleTime: ML_MONITOR_STALE_MS,
   })
 
   const latestPrediction = useQuery({
-    queryKey: ['ml-prediction-latest', nodeId, strategyName],
+    queryKey: liveTradingQueryKeys.mlPredictionLatest(nodeId, strategyName),
     queryFn: () => mlMonitoringService.predictionLatestSummary(nodeId, strategyName),
-    refetchInterval: 60000,
-    staleTime: 30000,
+    refetchInterval: ML_MONITOR_REFRESH_MS,
+    staleTime: ML_MONITOR_STALE_MS,
     retry: 1,
   })
 

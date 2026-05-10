@@ -364,6 +364,22 @@ def _first_warning(*fanouts: List[Dict[str, Any]]) -> Optional[str]:
     return None
 
 
+async def _single_node_read(client: Any, node_id: str, method_name: str) -> Dict[str, Any]:
+    """Read one endpoint from the requested node and return a FanoutItem shape."""
+    try:
+        per_node = client.get_per_node(node_id)
+        data = await getattr(per_node, method_name)()
+        return {"node_id": node_id, "ok": True, "data": data or [], "error": None}
+    except Exception as e:
+        logger.warning(
+            "[live_trading] node=%s %s failed in detail read: %s",
+            node_id,
+            method_name,
+            e,
+        )
+        return {"node_id": node_id, "ok": False, "data": [], "error": str(e)}
+
+
 async def _fetch_capabilities_per_node(client, node_ids: List[str]) -> Dict[str, Dict[str, List[str]]]:
     """Return {node_id: {engine_name: capabilities}}. Failures → empty dict.
 
@@ -1041,6 +1057,20 @@ async def get_strategy_detail(
     window_days: int = 365,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     client = get_vnpy_client()
+    start_perf = time.perf_counter()
+
+    def _log_detail_latency(outcome: str) -> None:
+        elapsed_ms = (time.perf_counter() - start_perf) * 1000
+        if elapsed_ms >= 2000:
+            logger.warning(
+                "[live_trading] slow strategy detail node=%s engine=%s strategy=%s outcome=%s elapsed_ms=%.1f",
+                node_id,
+                engine,
+                strategy_name,
+                outcome,
+                elapsed_ms,
+            )
+
     if node_id not in client.node_ids:
         # 未知节点（vnpy_nodes.yaml 没配过）— 仍尝试从历史快照拼出离线视图
         offline = _offline_detail_from_history(
@@ -1052,10 +1082,10 @@ async def get_strategy_detail(
         return None, f"未知节点: {node_id}"
 
     try:
-        strategies_fo, accounts_fo, positions_fo = await asyncio.gather(
-            client.get_strategies(),
-            client.get_accounts(),
-            client.get_positions(),
+        strategies_item, accounts_item, positions_item = await asyncio.gather(
+            _single_node_read(client, node_id, "get_strategies"),
+            _single_node_read(client, node_id, "get_accounts"),
+            _single_node_read(client, node_id, "get_positions"),
         )
     except VnpyClientError as e:
         offline = _offline_detail_from_history(
@@ -1067,7 +1097,22 @@ async def get_strategy_detail(
         return None, f"vnpy 接口不可达: {e}"
     except Exception as e:
         logger.exception("[live_trading] detail fetch failed: %s", e)
+        _log_detail_latency("unexpected_error")
         return None, f"未知错误: {e}"
+
+    strategies_fo = [strategies_item]
+    accounts_fo = [accounts_item]
+    positions_fo = [positions_item]
+    if not strategies_item.get("ok"):
+        offline = _offline_detail_from_history(
+            db, node_id, engine, strategy_name, window_days,
+            offline_reason=f"vnpy strategy endpoint unavailable: {strategies_item.get('error')}",
+        )
+        if offline is not None:
+            _log_detail_latency("strategy_endpoint_error_offline_snapshot")
+            return offline, "vnpy strategy endpoint unavailable, showing local snapshot"
+        _log_detail_latency("strategy_endpoint_error")
+        return None, f"vnpy strategy endpoint unavailable: {strategies_item.get('error')}"
 
     warning = _first_warning(strategies_fo, accounts_fo, positions_fo)
 
@@ -1152,6 +1197,7 @@ async def get_strategy_detail(
         "positions": _render_positions(positions),
         **schedule,
     }
+    _log_detail_latency("ok")
     return detail, warning
 
 

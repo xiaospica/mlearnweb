@@ -5,6 +5,10 @@ import dayjs from 'dayjs'
 import { liveTradingService } from '@/services/liveTradingService'
 import type { StrategyTrade } from '@/types/liveTrading'
 import ResponsiveTable, { type ResponsiveColumn } from '@/components/responsive/ResponsiveTable'
+import {
+  LIVE_TRADES_REFRESH_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 const { Text } = Typography
 
@@ -36,9 +40,9 @@ const TradesCard: React.FC<Props> = ({ nodeId, engine, strategyName }) => {
   const [view, setView] = useState<'daily' | 'detail'>('daily')
 
   const { data, isLoading } = useQuery({
-    queryKey: ['live-trades', nodeId, engine, strategyName],
+    queryKey: liveTradingQueryKeys.trades(nodeId, engine, strategyName),
     queryFn: () => liveTradingService.listStrategyTrades(nodeId, engine, strategyName),
-    refetchInterval: 10000,
+    refetchInterval: LIVE_TRADES_REFRESH_MS,
     staleTime: 0,
     enabled: !!(nodeId && engine && strategyName),
   })

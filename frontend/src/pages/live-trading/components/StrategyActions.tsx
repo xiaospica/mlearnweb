@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { liveTradingService } from '@/services/liveTradingService'
 import { useOpsPassword } from '@/hooks/useOpsPassword'
 import type { StrategyCapability } from '@/types/liveTrading'
+import { invalidateLiveStrategyMutationQueries } from '../liveTradingRefresh'
 
 interface Props {
   nodeId: string
@@ -40,8 +41,11 @@ const StrategyActions: React.FC<Props> = ({
   const can = (cap: StrategyCapability) => capabilities.includes(cap)
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['live-strategies'] })
-    queryClient.invalidateQueries({ queryKey: ['live-strategy', nodeId, engine, name] })
+    void invalidateLiveStrategyMutationQueries(queryClient, {
+      nodeId,
+      engine,
+      strategyName: name,
+    })
   }
 
   const handleInit = async (e?: React.MouseEvent) => {

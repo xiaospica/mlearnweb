@@ -29,6 +29,11 @@ import {
   summarizeStrategies,
 } from './utils/groupByNode'
 import { nextRunInMs, parseTimeOfDay } from './utils/scheduleParse'
+import {
+  LIVE_NODES_REFRESH_MS,
+  LIVE_STRATEGIES_REFRESH_MS,
+  liveTradingQueryKeys,
+} from './liveTradingRefresh'
 import dayjs from 'dayjs'
 
 const LiveTradingPage: React.FC = () => {
@@ -79,9 +84,9 @@ const LiveTradingPage: React.FC = () => {
   }, [location.state])
 
   const nodesQuery = useQuery({
-    queryKey: ['live-nodes'],
+    queryKey: liveTradingQueryKeys.nodes(),
     queryFn: () => liveTradingService.listNodes(),
-    refetchInterval: 10000,
+    refetchInterval: LIVE_NODES_REFRESH_MS,
     staleTime: 0,
     // 离开/再回页面时保留上次节点列表，慢节点 (10s timeout) 不再阻塞首屏
     placeholderData: keepPreviousData,
@@ -91,9 +96,9 @@ const LiveTradingPage: React.FC = () => {
   const allOffline = nodes.length > 0 && nodes.every((n) => !n.online)
 
   const strategiesQuery = useQuery({
-    queryKey: ['live-strategies'],
+    queryKey: liveTradingQueryKeys.strategies(),
     queryFn: () => liveTradingService.listStrategies(),
-    refetchInterval: 5000,
+    refetchInterval: LIVE_STRATEGIES_REFRESH_MS,
     staleTime: 0,
     enabled: nodes.length === 0 ? true : !allOffline,  // 全离线时停止策略轮询，nodes 仍轮询以恢复
     // 同 nodesQuery：返回页面时立即渲染上次数据，后台静默刷新

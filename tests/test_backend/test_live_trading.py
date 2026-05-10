@@ -30,6 +30,30 @@ os.chdir(str(MLEARNWEB_DIR))
 # ---------------------------------------------------------------------------
 
 
+class FakePerNodeClient:
+    def __init__(self, parent: "FakeVnpyClient", node_id: str):
+        self.parent = parent
+        self.node_id = node_id
+
+    def _data_or_raise(self, fanout):
+        for item in fanout:
+            if item["node_id"] != self.node_id:
+                continue
+            if item.get("ok"):
+                return item.get("data") or []
+            raise RuntimeError(item.get("error") or "node failed")
+        raise RuntimeError(f"unknown node_id: {self.node_id}")
+
+    async def get_strategies(self):
+        return self._data_or_raise(self.parent.strategies_fanout)
+
+    async def get_accounts(self):
+        return self._data_or_raise(self.parent.accounts_fanout)
+
+    async def get_positions(self):
+        return self._data_or_raise(self.parent.positions_fanout)
+
+
 class FakeVnpyClient:
     """In-memory stand-in for VnpyMultiNodeClient.
 
@@ -149,6 +173,9 @@ class FakeVnpyClient:
 
     async def get_positions(self):
         return self.positions_fanout
+
+    def get_per_node(self, node_id):
+        return FakePerNodeClient(self, node_id)
 
     async def get_engines(self, node_id):
         return self.engines_by_node.get(node_id, [])
@@ -523,10 +550,46 @@ class TestReadEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert data["success"] is True
+        assert data["warning"] is None
         assert data["data"]["vt_symbol"] == "rb2501.SHFE"
         # positions should be filtered by vt_symbol
         positions = data["data"]["positions"]
         assert all(p["vt_symbol"] == "rb2501.SHFE" for p in positions)
+
+    def test_get_strategy_detail_target_node_failure_uses_snapshot(self, api_client, fake_client):
+        client, _, db_module = api_client
+        from sqlalchemy.orm import sessionmaker
+
+        SessionLocal = sessionmaker(bind=db_module.engine, autocommit=False, autoflush=False)
+        with SessionLocal() as s:
+            s.add(
+                db_module.StrategyEquitySnapshot(
+                    node_id="nodeA",
+                    engine="CtaStrategy",
+                    strategy_name="cta1",
+                    ts=datetime(2026, 5, 10, 15, 0, 0),
+                    strategy_value=123.0,
+                    account_equity=123.0,
+                    source_label="account_equity",
+                    positions_count=0,
+                    raw_variables_json="{}",
+                )
+            )
+            s.commit()
+
+        fake_client.strategies_fanout[0] = {
+            "node_id": "nodeA",
+            "ok": False,
+            "data": [],
+            "error": "target node timeout",
+        }
+
+        resp = client.get("/api/live-trading/strategies/nodeA/CtaStrategy/cta1")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["success"] is True
+        assert payload["data"]["node_offline"] is True
+        assert payload["data"]["strategy_value"] == 123.0
 
     def test_performance_summary_empty_curve_degrades(self, api_client):
         client, _, _ = api_client

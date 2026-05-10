@@ -3,6 +3,7 @@ import { Modal, Form, Input, InputNumber, Switch, App } from 'antd'
 import { useQueryClient } from '@tanstack/react-query'
 import { liveTradingService } from '@/services/liveTradingService'
 import { useOpsPassword } from '@/hooks/useOpsPassword'
+import { invalidateLiveStrategyMutationQueries } from '../liveTradingRefresh'
 
 interface Props {
   open: boolean
@@ -64,8 +65,11 @@ const StrategyEditModal: React.FC<Props> = ({
     setSubmitting(false)
     if (result) {
       message.success('参数已更新')
-      queryClient.invalidateQueries({ queryKey: ['live-strategy', nodeId, engine, name] })
-      queryClient.invalidateQueries({ queryKey: ['live-strategies'] })
+      await invalidateLiveStrategyMutationQueries(queryClient, {
+        nodeId,
+        engine,
+        strategyName: name,
+      })
       onClose()
     }
   }

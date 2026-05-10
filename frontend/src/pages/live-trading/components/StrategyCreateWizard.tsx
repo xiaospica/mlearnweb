@@ -16,6 +16,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { liveTradingService } from '@/services/liveTradingService'
 import { useOpsPassword } from '@/hooks/useOpsPassword'
+import { liveTradingQueryKeys } from '../liveTradingRefresh'
 import type {
   NodeStatus,
   StrategyEngineInfo,
@@ -232,7 +233,7 @@ const StrategyCreateWizard: React.FC<Props> = ({ open, onClose, nodes, initialVa
       )
       if (result) {
         message.success(`已创建策略: ${strategy_name}`)
-        queryClient.invalidateQueries({ queryKey: ['live-strategies'] })
+        queryClient.invalidateQueries({ queryKey: liveTradingQueryKeys.strategies() })
         onClose()
       }
     } catch (e: unknown) {

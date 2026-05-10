@@ -34,6 +34,10 @@ import type {
   PredictionSummary,
   TopkEntry,
 } from '@/services/mlMonitoringService'
+import {
+  HISTORY_QUERY_STALE_MS,
+  liveTradingQueryKeys,
+} from '../liveTradingRefresh'
 
 const { Text } = Typography
 
@@ -124,22 +128,22 @@ const PredictionHistoryPanel: React.FC<Props> = ({ nodeId, strategyName, history
 
   // --- TopK summary query (现有 endpoint, SQLite) ---
   const topkQuery = useQuery({
-    queryKey: ['ml-prediction-by-date', nodeId, strategyName, yyyymmdd],
+    queryKey: liveTradingQueryKeys.mlPredictionByDate(nodeId, strategyName, yyyymmdd),
     queryFn: () =>
       mlMonitoringService.predictionByDate(nodeId, strategyName, yyyymmdd as string),
     enabled: !!yyyymmdd,
-    staleTime: 60000,
+    staleTime: HISTORY_QUERY_STALE_MS,
     retry: 1,
     placeholderData: keepPreviousData,
   })
 
   // --- 全部预测 query (新 endpoint, 懒加载: Tab 激活才拉) ---
   const allQuery = useQuery({
-    queryKey: ['ml-prediction-all', nodeId, strategyName, yyyymmdd],
+    queryKey: liveTradingQueryKeys.mlPredictionAll(nodeId, strategyName, yyyymmdd),
     queryFn: () =>
       mlMonitoringService.predictionAllByDate(nodeId, strategyName, yyyymmdd as string),
     enabled: !!yyyymmdd && activeTab === 'all',
-    staleTime: 60000,
+    staleTime: HISTORY_QUERY_STALE_MS,
     retry: 1,
     placeholderData: keepPreviousData,
   })
