@@ -2,6 +2,7 @@ import React from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -60,6 +61,14 @@ const WorkbenchHomePage: React.FC = () => {
   const navigate = useNavigate()
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
+
+  const { data: capabilitiesData } = useQuery({
+    queryKey: ['tuning-capabilities'],
+    queryFn: () => tuningService.capabilities(),
+    staleTime: 60_000,
+  })
+  const capabilities = capabilitiesData?.data
+  const tuningDisabled = capabilities?.enabled === false
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['tuning-jobs'],
@@ -269,6 +278,7 @@ const WorkbenchHomePage: React.FC = () => {
                 size="small"
                 type="link"
                 icon={<ClockCircleOutlined />}
+                disabled={tuningDisabled}
                 onClick={() => enqueueMutation.mutate(record.id)}
                 title="加入队列：scheduler 在 runner 空闲时自动启动"
               >
@@ -331,12 +341,27 @@ const WorkbenchHomePage: React.FC = () => {
           <Button icon={<ReloadOutlined />} loading={isFetching} onClick={() => refetch()}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/workbench/new')}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            disabled={tuningDisabled}
+            onClick={() => navigate('/workbench/new')}
+          >
             新建调参 Job
           </Button>
         </Space>
       }
     >
+      {tuningDisabled && (
+        <Alert
+          type="warning"
+          showIcon
+          message="训练工作台未启用"
+          description={(capabilities?.reasons ?? []).join('；') || '请配置 STRATEGY_DEV_ROOT 后重启后端'}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <MetricCardGrid
         style={{ marginBottom: 16 }}
         items={[
@@ -453,6 +478,7 @@ const WorkbenchHomePage: React.FC = () => {
               type="primary"
               size="large"
               icon={<PlusOutlined />}
+              disabled={tuningDisabled}
               onClick={() => navigate('/workbench/new')}
             >
               立即创建

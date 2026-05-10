@@ -68,6 +68,18 @@ def _get_job_or_404(db: Session, job_id: int) -> TuningJob:
     return job
 
 
+def _ensure_tuning_enabled() -> None:
+    try:
+        tuning_service.ensure_tuning_enabled()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/capabilities", response_model=ApiResponse)
+def get_tuning_capabilities():
+    return ApiResponse(success=True, data=tuning_service.get_tuning_capabilities())
+
+
 # ---------------------------------------------------------------------------
 # Job 生命周期
 # ---------------------------------------------------------------------------
@@ -81,6 +93,7 @@ def create_tuning_job(body: TuningJobCreate, db: Session = Depends(get_db_sessio
     空闲时自动启动；start_* 字段同时持久化到 job 行，确保 scheduler 能
     用与手动启动一致的运行参数。
     """
+    _ensure_tuning_enabled()
     study_name = f"workbench_job_{int(time.time() * 1000)}"
     job = TuningJob(
         name=body.name,
@@ -238,12 +251,9 @@ def delete_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
             print(f"[Tuning] WARN: 删 workdir 失败: {exc}")
 
     # ---- 6. 删 mlflow run 物理目录 ----
-    mlruns_root = Path(
-        os.environ.get(
-            "MLRUNS_ROOT",
-            r"F:\Quant\code\qlib_strategy_dev\mlruns",
-        )
-    )
+    from app.core.config import settings
+
+    mlruns_root = Path(os.environ.get("MLRUNS_ROOT", settings.mlruns_dir or "__MLRUNS_DIR_NOT_CONFIGURED__"))
     deleted_mlflow = 0
     for exp_id, run_id in mlflow_runs_to_delete:
         mlrun_dir = mlruns_root / exp_id / run_id
@@ -269,6 +279,7 @@ def start_tuning_job(
     seed: int = Query(42, ge=0),
     db: Session = Depends(get_db_session),
 ):
+    _ensure_tuning_enabled()
     job = _get_job_or_404(db, job_id)
     if job.status not in ("created", "cancelled", "failed", "zombie", "done"):
         raise HTTPException(
@@ -318,6 +329,7 @@ def get_queue(db: Session = Depends(get_db_session)):
 @router.post("/jobs/{job_id}/enqueue", response_model=ApiResponse)
 def enqueue_tuning_job(job_id: int, db: Session = Depends(get_db_session)):
     """把指定 job 加入队尾。"""
+    _ensure_tuning_enabled()
     job = _get_job_or_404(db, job_id)
     try:
         job = tuning_service.enqueue_job(db, job)
@@ -492,6 +504,7 @@ def start_walk_forward(
     返回 new_job_id；前端跳转到 /workbench/jobs/<new_job_id> 查看进度。
     源 job 的"跨期验证"Tab 改为列出所有衍生 job（GET /derived）。
     """
+    _ensure_tuning_enabled()
     source_job = _get_job_or_404(db, job_id)
     if source_job.status not in ("done", "cancelled", "failed", "zombie"):
         raise HTTPException(

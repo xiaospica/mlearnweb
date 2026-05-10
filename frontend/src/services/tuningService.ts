@@ -20,6 +20,16 @@ import type {
 } from '@/types/tuning'
 
 export const tuningService = {
+  capabilities(): Promise<ApiSuccessResponse<{
+    enabled: boolean
+    reasons: string[]
+    strategy_dev_root: string | null
+    tuning_python_exe: string | null
+    tuning_runs_root: string
+  }>> {
+    return apiClient.get('/tuning/capabilities').then((r) => r.data)
+  },
+
   // -------------------------------------------------------------------------
   // Job 生命周期
   // -------------------------------------------------------------------------

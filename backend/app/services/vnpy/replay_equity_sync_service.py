@@ -82,7 +82,7 @@ async def _collect_strategies(
 
 
 def _get_local_max_inserted_at(
-    session, *, node_id: str, engine: str, strategy_name: str,
+    session, *, node_id: str, strategy_name: str, engine: str = ML_ENGINE_NAME,
 ) -> Optional[str]:
     """本地 strategy_equity_snapshots 中 (node, engine, strategy, source_label=replay_settle)
     的最大 ts (用作 vnpy 端 since 增量边界).
@@ -106,9 +106,9 @@ def _upsert_remote_rows(
     session,
     *,
     node_id: str,
-    engine: str,
     strategy_name: str,
     rows: List[Dict[str, Any]],
+    engine: str = ML_ENGINE_NAME,
 ) -> int:
     """UPSERT 一批远端行到本地 strategy_equity_snapshots. 返回本次写入的行数.
 
@@ -159,8 +159,8 @@ async def sync_one_node_strategy(
     client: VnpyMultiNodeClient,
     *,
     node_id: str,
-    engine: str,
     strategy_name: str,
+    engine: str = ML_ENGINE_NAME,
 ) -> int:
     """同步单 (node, engine, strategy) 一次. 返回 UPSERT 行数."""
     session = SessionLocal()

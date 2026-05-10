@@ -4,16 +4,22 @@ from pathlib import Path
 import os
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DEFAULT_DATA_ROOT = Path(_BASE_DIR)
 
-# 默认 mlruns 路径: 假定 mlearnweb 作为 qlib_strategy_dev 的子模块部署, 其
-# `app/core/config.py` 位于 <repo_root>/mlearnweb/backend/app/core/. 从此处上溯
-# 4 层到 qlib_strategy_dev 根, 再进入 mlruns/.  独立部署时用 `.env` 里的
-# MLRUNS_DIR 显式覆盖.
-_DEFAULT_MLRUNS_DIR = str(Path(_BASE_DIR).parent.parent / "mlruns")
+
+def _env_file() -> str:
+    """Return the bootstrap env file path.
+
+    Local development keeps using backend/.env. Windows production deployment
+    sets MLEARNWEB_ENV_FILE to DataRoot/config/.env through NSSM so runtime
+    config is no longer tied to the repository checkout.
+    """
+    return os.getenv("MLEARNWEB_ENV_FILE", ".env")
 
 
 class Settings(BaseSettings):
-    mlruns_dir: str = _DEFAULT_MLRUNS_DIR
+    data_root: Optional[Path] = None
+    mlruns_dir: str = ""
     database_url: str = f"sqlite:///{os.path.join(_BASE_DIR, 'mlearnweb.db')}"
     cors_origins: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 
@@ -27,7 +33,7 @@ class Settings(BaseSettings):
     # 才能拿到 vnpy 节点状态 + 实盘数据.
     live_main_internal_url: str = "http://127.0.0.1:8100"
 
-    upload_dir: Path = Path(_BASE_DIR) / "uploads"
+    upload_dir: Path = _DEFAULT_DATA_ROOT / "uploads"
     max_image_size_mb: int = 10
     allowed_image_exts: Set[str] = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
     orphan_grace_seconds: int = 300
@@ -50,7 +56,7 @@ class Settings(BaseSettings):
     # (同机部署快路径). 跨机部署留 None — 主路径走 vnpy webtrader
     # /api/v1/position/history 接口, fallback 自动 skip.
     # [A2] 默认 D:/vnpy_data/state/ — 与 replay_history.db 同级便于备份.
-    vnpy_sim_db_root: Optional[str] = r"D:\vnpy_data\state"
+    vnpy_sim_db_root: Optional[str] = None
 
     # Phase 3B: deployment 同步周期（秒）。10 分钟扫描一次 vnpy 节点策略并
     # 反查 bundle_dir → run_id → 写 TrainingRecord.deployments。
@@ -76,10 +82,16 @@ class Settings(BaseSettings):
     # 同一文件系统，复用旧 notebook 路径方便老脚本兼容。文件命名
     # ``joinquant_positions_record{record_id}_{ts}.json``，DB 用
     # ``joinquant_exports`` 表索引。env 覆盖：JOINQUANT_EXPORT_DIR。
-    joinquant_export_dir: str = str(Path(_BASE_DIR).parent.parent / "strategy_dev" / "result")
+    joinquant_export_dir: str = str(_DEFAULT_DATA_ROOT / "joinquant_exports")
+
+    # Optional training-side integration. When strategy_dev_root is empty the
+    # tuning workbench is intentionally disabled, while dashboard and
+    # live-trading continue to start normally.
+    strategy_dev_root: Optional[str] = None
+    tuning_python_exe: Optional[str] = None
+    tuning_runs_root: Optional[str] = None
 
     class Config:
-        env_file = ".env"
         env_file_encoding = "utf-8"
         # 容忍 .env 里残留的旧字段 (e.g. Phase 3.3 删除的 DAILY_MERGED_ROOT,
         # 3.4 删的 DAILY_MERGED_ALL_PATH) — 升级时不强制用户改 .env, 进程
@@ -87,6 +99,6 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-settings = Settings()
+settings = Settings(_env_file=_env_file())
 
 (settings.upload_dir / "training_records").mkdir(parents=True, exist_ok=True)

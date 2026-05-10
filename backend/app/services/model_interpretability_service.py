@@ -30,6 +30,12 @@ class ModelInterpretabilityService:
     """模型可解释性分析服务"""
 
     @staticmethod
+    def _mlruns_dir() -> Optional[Path]:
+        if not settings.mlruns_dir:
+            return None
+        return Path(settings.mlruns_dir)
+
+    @staticmethod
     def _detect_provider_uri(run_path: Path) -> Optional[str]:
         """从 MLflow Run 的 params 文件中自动检测 provider_uri
 
@@ -94,7 +100,9 @@ class ModelInterpretabilityService:
         Returns:
             预计算的SHAP结果，不存在则返回 None
         """
-        mlruns_dir = Path(settings.mlruns_dir)
+        mlruns_dir = ModelInterpretabilityService._mlruns_dir()
+        if mlruns_dir is None:
+            return None
         run_path = mlruns_dir / experiment_id / run_id
         shap_path = run_path / "artifacts" / "shap_analysis.pkl"
 
@@ -126,7 +134,9 @@ class ModelInterpretabilityService:
         Returns:
             包含特征重要性数据的字典
         """
-        mlruns_dir = Path(settings.mlruns_dir)
+        mlruns_dir = ModelInterpretabilityService._mlruns_dir()
+        if mlruns_dir is None:
+            return {"available": False, "error": "MLRUNS_DIR is not configured"}
         run_path = mlruns_dir / experiment_id / run_id
 
         if not run_path.exists():
@@ -272,7 +282,9 @@ class ModelInterpretabilityService:
             print(f"[SHAP] Error: shap library not installed: {e}", file=__import__('sys').stderr)
             return {"available": False, "error": "shap 库未安装，请运行: pip install shap"}
 
-        mlruns_dir = Path(settings.mlruns_dir)
+        mlruns_dir = ModelInterpretabilityService._mlruns_dir()
+        if mlruns_dir is None:
+            return {"available": False, "error": "MLRUNS_DIR is not configured"}
         run_path = mlruns_dir / experiment_id / run_id
 
         if not run_path.exists():
@@ -515,7 +527,9 @@ class ModelInterpretabilityService:
         Returns:
             {"features": [...], "periods": [...], "matrix": [[float, ...]]}
         """
-        mlruns_dir = Path(settings.mlruns_dir)
+        mlruns_dir = ModelInterpretabilityService._mlruns_dir()
+        if mlruns_dir is None:
+            return {"available": False, "error": "MLRUNS_DIR is not configured"}
         exp_dir = mlruns_dir / experiment_id
 
         if not exp_dir.exists():

@@ -77,6 +77,8 @@ def _resolve_sim_db_path(strategy_name: str, gateway_name: Optional[str]) -> Opt
     传入 gateway_name 优先；若空则尝试用 strategy_name 兜底（不严谨，但 vnpy 默认
     QMT_SIM_<sandbox_id> 形式 gateway 名也包含 strategy 信息）。
     """
+    if not settings.vnpy_sim_db_root:
+        return None
     root = Path(settings.vnpy_sim_db_root)
     if not root.exists():
         return None

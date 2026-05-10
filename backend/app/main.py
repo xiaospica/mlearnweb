@@ -39,11 +39,14 @@ async def lifespan(app: FastAPI):
     # 2) 队列 scheduler（V3.3）：每 30s 检查一次，runner 空闲且有队首时自动启动
     scheduler_task: "asyncio.Task | None" = None
     try:
-        from app.services.tuning_service import queue_scheduler_loop
-        scheduler_task = asyncio.create_task(
-            queue_scheduler_loop(get_db_session, interval_sec=30.0)
-        )
-        print("[Startup] tuning queue scheduler started")
+        from app.services import tuning_service
+        if tuning_service.is_tuning_enabled():
+            scheduler_task = asyncio.create_task(
+                tuning_service.queue_scheduler_loop(get_db_session, interval_sec=30.0)
+            )
+            print("[Startup] tuning queue scheduler started")
+        else:
+            print("[Startup] tuning disabled; queue scheduler not started")
     except Exception as exc:
         print(f"[Startup] tuning queue scheduler failed to start (non-fatal): {exc}")
 
@@ -131,7 +134,9 @@ def root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok"}
+    from app.services.health_service import deployment_health
+
+    return deployment_health()
 
 
 # W4.1 — 单端口生产部署: 把前端 dist mount 在 / (api 路由 + 反代之后).

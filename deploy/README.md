@@ -87,20 +87,21 @@ nodes:
 ## 一键装
 
 ```powershell
-# 默认配置
-.\deploy\install_services.ps1
+# 推荐：一站式安装会生成 DataRoot 配置并安装服务
+.\deploy\install_all.ps1 -DataRoot D:\mlearnweb_data
 
-# 自定义路径
+# 仅安装/重装 NSSM 服务（已有 DataRoot config\.env 时使用）
 .\deploy\install_services.ps1 `
-    -MLearnwebRoot "F:\Quant\code\qlib_strategy_dev\mlearnweb" `
-    -PythonExe "E:\ssd_backup\Pycharm_project\python-3.11.0-amd64\python.exe" `
-    -LogRoot "D:\mlearnweb_logs"
+    -MLearnwebRoot "D:\apps\mlearnweb" `
+    -PythonExe "D:\mlearnweb_data\venv\Scripts\python.exe" `
+    -LogRoot "D:\mlearnweb_data\logs" `
+    -EnvFile "D:\mlearnweb_data\config\.env"
 ```
 
 ## NSSM 配置详情
 
 每个服务都设了:
-- `AppStdout` / `AppStderr` → `D:\mlearnweb_logs\<service>.{log,err}`
+- `AppStdout` / `AppStderr` → `D:\mlearnweb_data\logs\<service>.{log,err}`
 - `AppRotateFiles=1 AppRotateBytes=10MB` → 日志滚动
 - `AppRestartDelay=10s` → 崩溃自动重启
 - `Start=SERVICE_AUTO_START` → 开机自启

@@ -93,7 +93,7 @@ const BacktestDiffPanel: React.FC<Props> = ({ nodeId, strategyName, defaultMlflo
       <Row gutter={8} style={{ marginBottom: 12 }}>
         <Col flex="auto">
           <Input
-            placeholder="MLflow run artifacts dir (含 pred.pkl), 如 F:\Quant\code\qlib_strategy_dev\mlruns\374089520733232109\ab2711178313491f9900b5695b47fa98\artifacts"
+            placeholder="MLflow run artifacts dir (含 pred.pkl), 如 D:\mlruns\374089520733232109\ab2711178313491f9900b5695b47fa98\artifacts"
             value={mlflowRunDir}
             onChange={(e) => setMlflowRunDir(e.target.value)}
           />

@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,102 @@ def _to_event(d: dict) -> Optional[CorpActionEvent]:
         )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _vt_symbol_to_ts_code(vt_symbol: str) -> Optional[str]:
+    if "." not in vt_symbol:
+        return None
+    code, exchange = vt_symbol.rsplit(".", 1)
+    suffix = {"SZSE": "SZ", "SSE": "SH", "SZ": "SZ", "SH": "SH"}.get(exchange.upper())
+    if not code or suffix is None:
+        return None
+    return f"{code}.{suffix}"
+
+
+def _latest_snapshot_path(merged_root: Path, as_of: Optional[date]) -> Optional[Path]:
+    candidates = sorted(merged_root.glob("daily_merged_*.parquet"))
+    if not candidates:
+        return None
+    if as_of is None:
+        return candidates[-1]
+    as_of_key = as_of.strftime("%Y%m%d")
+    eligible = [p for p in candidates if p.stem.replace("daily_merged_", "") <= as_of_key]
+    return eligible[-1] if eligible else None
+
+
+def _detect_corp_actions_from_snapshot(
+    vt_symbols: Iterable[str],
+    *,
+    lookback_days: int,
+    threshold_pct: float,
+    as_of: Optional[date],
+    merged_root: str | Path,
+) -> List[CorpActionEvent]:
+    """Explicit local parquet path used by tests and same-host diagnostics.
+
+    Production callers use the HTTP fanout path. This branch only runs when a
+    caller supplies merged_root, so normal deployment remains decoupled from
+    vnpy_strategy_dev local files.
+    """
+    import pandas as pd
+
+    root = Path(merged_root)
+    snap = _latest_snapshot_path(root, as_of)
+    if snap is None:
+        return []
+    try:
+        df = pd.read_parquet(snap)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[corp_actions] failed to read %s: %s", snap, exc)
+        return []
+
+    required = {"ts_code", "trade_date", "close", "pre_close", "pct_chg"}
+    if not required.issubset(df.columns):
+        return []
+
+    df = df.copy()
+    df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+    if as_of is None and not df.empty:
+        as_of = max(df["trade_date"])
+    start_date = as_of - timedelta(days=lookback_days) if as_of else None
+
+    events: List[CorpActionEvent] = []
+    for vt_symbol in vt_symbols:
+        ts_code = _vt_symbol_to_ts_code(vt_symbol.strip()) if vt_symbol else None
+        if not ts_code:
+            continue
+        sdf = df[df["ts_code"] == ts_code].sort_values("trade_date")
+        if sdf.empty:
+            continue
+        prev_close: Optional[float] = None
+        for _, row in sdf.iterrows():
+            trade_date = row["trade_date"]
+            close = float(row["close"])
+            pre_close = float(row["pre_close"])
+            pct_chg = float(row["pct_chg"])
+            if prev_close and prev_close > 0:
+                if start_date is not None and trade_date < start_date:
+                    prev_close = close
+                    continue
+                if as_of is not None and trade_date > as_of:
+                    prev_close = close
+                    continue
+                raw_change_pct = (close / prev_close - 1.0) * 100.0
+                magnitude_pct = abs(pct_chg - raw_change_pct)
+                if magnitude_pct >= threshold_pct:
+                    events.append(CorpActionEvent(
+                        vt_symbol=vt_symbol,
+                        name=str(row.get("name") or ""),
+                        trade_date=trade_date.isoformat(),
+                        pct_chg=pct_chg,
+                        raw_change_pct=raw_change_pct,
+                        magnitude_pct=magnitude_pct,
+                        pre_close=pre_close,
+                        close=close,
+                    ))
+            prev_close = close
+
+    return sorted(events, key=lambda e: e.trade_date, reverse=True)
 
 
 async def detect_corp_actions_async(
@@ -98,13 +195,16 @@ def detect_corp_actions(
     """同步包装 — router 当前 ``async def`` 不直接 await 我们, 但保留同步入口
     给可能的命令行 / 单测 caller.
 
-    ``merged_root`` kwarg 保留是签名兼容 (老 caller 传了不会报), Phase 3.3
-    后**不再使用** — 数据源由 vnpy 侧决定. 不发 deprecation warning,
-    走 ``feedback_no_legacy_compat`` 风格: 下个 sprint 直接清掉这个 kwarg.
+    ``merged_root`` kwarg 保留是签名兼容. 默认生产路径不使用它；只有显式传入
+    时才走本地 parquet 检测，用于单测与同机诊断。
     """
     if merged_root is not None:
-        logger.debug(
-            "[corp_actions] merged_root kwarg 已忽略 (Phase 3.3 HTTP 化, 数据由 vnpy 侧决定)",
+        return _detect_corp_actions_from_snapshot(
+            vt_symbols,
+            lookback_days=lookback_days,
+            threshold_pct=threshold_pct,
+            as_of=as_of,
+            merged_root=merged_root,
         )
     return asyncio.run(detect_corp_actions_async(
         vt_symbols,

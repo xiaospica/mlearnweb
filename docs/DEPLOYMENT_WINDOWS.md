@@ -1,6 +1,6 @@
 # Windows Server 部署手册
 
-mlearnweb 的目标是在干净 Windows Server 2022 上 30 分钟内可用。2026-05-10 架构复核结论：当前已具备部署骨架和 [`deploy/install_all.ps1`](../deploy/install_all.ps1) 一站式脚本雏形，适合做服务器试部署；但依赖补齐、配置落点、监听策略和测试全绿等 P0/P1 项完成前，不建议作为正式一键快速部署版本交付。优先级清单见 [`docs/plan/mlearnweb-independent-deploy-roadmap.md`](plan/mlearnweb-independent-deploy-roadmap.md)。
+mlearnweb 的目标是在干净 Windows Server 2022 上 30 分钟内可用。2026-05-10 后的整改把 P0 配置落点、依赖补齐、监听策略和 smoke/health 骨架纳入脚本；正式交付前仍需以干净 Windows Server smoke 部署作为验收门槛。优先级清单见 [`docs/plan/mlearnweb-independent-deploy-roadmap.md`](plan/mlearnweb-independent-deploy-roadmap.md)。
 
 ## 前置依赖
 
@@ -26,39 +26,44 @@ nssm --version    # 期望 NSSM 2.24
 git clone <仓库地址> C:\mlearnweb
 cd C:\mlearnweb\deploy
 
-# 一站式试部署：当前仍需按下文检查并补齐关键配置
+# 一站式部署：生成 DataRoot config\.env，安装依赖，构建前端，安装双服务
 .\install_all.ps1 -DataRoot D:\mlearnweb_data
 ```
 
 `-DataRoot` 是运行时数据 + 配置 + 日志根目录，建议独立盘符防 C: 满。脚本会创建：
 
-- `D:\mlearnweb_data\config\` — 用户配置 (链接到 `backend\.env`)
+- `D:\mlearnweb_data\config\` — 用户配置 (`config\.env` 由 NSSM 注入 `MLEARNWEB_ENV_FILE`)
 - `D:\mlearnweb_data\logs\` — NSSM 日志输出
-- `D:\mlearnweb_data\db\` — SQLite WAL 文件 (可选,目前 `mlearnweb.db` 仍在 backend 目录)
+- `D:\mlearnweb_data\db\` — SQLite WAL 文件
+- `D:\mlearnweb_data\uploads\` — memo / training 上传文件
 - `D:\mlearnweb_data\venv\` — Python 虚拟环境
 
 ## 脚本执行步骤
 
 1. 前置依赖检查 (python / node / npm / nssm)
 2. 创建 DataRoot 子目录
-3. 创建 venv → `pip install -r requirements.txt`
+3. 创建 venv → `pip install -r requirements.txt`，并安装 `vendor\qlib_strategy_core`
 4. `npm install + npm run build` (dist 比 src 新会跳过)
-5. 复制 `.env.example` → `.env` (已存在不覆盖)
-6. 调 `install_services.ps1` 装两个 NSSM 服务
+5. 写入 `DataRoot\config\.env`：`DATABASE_URL` / `UPLOAD_DIR` / `FRONTEND_DIST_DIR` / `VNPY_NODES_CONFIG_PATH`
+6. 调 `install_services.ps1` 装两个 NSSM 服务，研究侧监听 `0.0.0.0:8000`，实盘侧仅监听 `127.0.0.1:8100`
 7. 启动 + 健康检查 (`Test-NetConnection` + `/health`)
-
-当前脚本跑完会提示「编辑 `.env` 配置 `FRONTEND_DIST_DIR` / `VNPY_NODES_CONFIG_PATH`」，**这两个字段是单端口生产部署 + vnpy 节点接入的关键，必须配置**。正式一键部署目标是由脚本自动写入这些绝对路径，并把 `.env`、SQLite、uploads、logs 收敛到 `DataRoot` 或清晰声明为外部路径；该整改项在 roadmap 中标为 P0。
 
 ## 必须的配置项
 
-部署完成后编辑 `<MLearnwebRoot>\backend\.env`：
+部署完成后检查 `D:\mlearnweb_data\config\.env`：
 
 ```ini
-# 必填 — 前端 dist 路径 (W4.1 单端口模式, 浏览器只认 8000)
+# 脚本自动写入
+DATABASE_URL=sqlite:///D:/mlearnweb_data/db/mlearnweb.db
+UPLOAD_DIR=D:\mlearnweb_data\uploads
 FRONTEND_DIST_DIR=C:\mlearnweb\frontend\dist
+VNPY_NODES_CONFIG_PATH=D:\mlearnweb_data\config\vnpy_nodes.yaml
 
-# 必填 — vnpy 推理节点配置文件 (yaml)
-VNPY_NODES_CONFIG_PATH=C:\mlearnweb\backend\vnpy_nodes.yaml
+# 可选 — 研究侧外部只读挂载；未配置时实验/研究页降级为空
+MLRUNS_DIR=D:\readonly_mount\mlruns
+
+# 可选 — 训练工作台；未配置时禁用调参入口，不影响 dashboard/live-trading
+STRATEGY_DEV_ROOT=D:\apps\qlib_strategy_dev
 
 # 推荐 — 实盘写鉴权口令 (留空则关闭鉴权, 任何人都能 init/start/stop 策略!)
 LIVE_TRADING_OPS_PASSWORD=<强口令>

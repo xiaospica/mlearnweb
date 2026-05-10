@@ -37,26 +37,54 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.config import settings
 from app.models.database import TuningJob, TuningTrial
 
 
-# 配置：可通过环境变量覆盖（mlearnweb 与 strategy_dev 在同主机时默认即可）
-TUNING_PYTHON_EXE = os.environ.get(
-    "TUNING_PYTHON_EXE",
-    r"E:\ssd_backup\Pycharm_project\python-3.11.0-amd64\python.exe",
+def _path_from_setting(value: Optional[str]) -> Optional[Path]:
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    return Path(value)
+
+
+TUNING_PYTHON_EXE = settings.tuning_python_exe or sys.executable
+STRATEGY_DEV_ROOT = _path_from_setting(settings.strategy_dev_root)
+_default_tuning_root = (
+    Path(settings.data_root) / "tuning" / "runs"
+    if settings.data_root
+    else Path(__file__).resolve().parents[3] / "tuning_runs"
 )
-STRATEGY_DEV_ROOT = Path(
-    os.environ.get(
-        "STRATEGY_DEV_ROOT",
-        r"F:\Quant\code\qlib_strategy_dev",
-    )
-)
-TUNING_RUNS_ROOT = Path(
-    os.environ.get(
-        "TUNING_RUNS_ROOT",
-        r"F:\Quant\code\qlib_strategy_dev\strategy_dev\auto_tune\runs",
-    )
-)
+TUNING_RUNS_ROOT = _path_from_setting(settings.tuning_runs_root) or _default_tuning_root
+
+
+def get_tuning_capabilities() -> Dict[str, Any]:
+    reasons: List[str] = []
+    if STRATEGY_DEV_ROOT is None:
+        reasons.append("STRATEGY_DEV_ROOT is not configured")
+    elif not STRATEGY_DEV_ROOT.exists():
+        reasons.append(f"STRATEGY_DEV_ROOT does not exist: {STRATEGY_DEV_ROOT}")
+    if TUNING_PYTHON_EXE and not Path(TUNING_PYTHON_EXE).exists():
+        reasons.append(f"TUNING_PYTHON_EXE does not exist: {TUNING_PYTHON_EXE}")
+    return {
+        "enabled": not reasons,
+        "reasons": reasons,
+        "strategy_dev_root": str(STRATEGY_DEV_ROOT) if STRATEGY_DEV_ROOT else None,
+        "tuning_python_exe": TUNING_PYTHON_EXE,
+        "tuning_runs_root": str(TUNING_RUNS_ROOT),
+    }
+
+
+def is_tuning_enabled() -> bool:
+    return bool(get_tuning_capabilities()["enabled"])
+
+
+def ensure_tuning_enabled() -> None:
+    caps = get_tuning_capabilities()
+    if not caps["enabled"]:
+        raise RuntimeError("; ".join(caps["reasons"]))
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +113,19 @@ def is_pid_alive(pid: Optional[int], started_at: Optional[float]) -> bool:
         return False
 
 
+def _expand_strategy_dev_placeholders(value: Any) -> Any:
+    """Replace frontend placeholders with the configured strategy repo path."""
+    if isinstance(value, str):
+        if STRATEGY_DEV_ROOT is None:
+            return value
+        return value.replace("<STRATEGY_DEV_ROOT>", str(STRATEGY_DEV_ROOT))
+    if isinstance(value, list):
+        return [_expand_strategy_dev_placeholders(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _expand_strategy_dev_placeholders(v) for k, v in value.items()}
+    return value
+
+
 def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
     """V2: 把 job.config_snapshot 的 4 类参数写出到 per-job 目录的 4 个 JSON 文件，
     供 run_optuna_search → train script 通过 --*-json 参数读取并 override。
@@ -94,7 +135,7 @@ def _write_config_overrides(job: TuningJob, workdir: Path) -> Dict[str, Any]:
         - single_segment: bool（search_mode='single_segment' 时为 True，
                           train script 据此忽略默认 CUSTOM_SEGMENTS）
     """
-    cfg = job.config_snapshot or {}
+    cfg = _expand_strategy_dev_placeholders(job.config_snapshot or {})
     overrides_dir = workdir / "config_overrides"
     overrides_dir.mkdir(parents=True, exist_ok=True)
 
@@ -190,6 +231,7 @@ def start_job_subprocess(
     用户已强调"不影响现有功能"——subprocess 调用与命令行模式 100% 同链路：
     都是启 run_optuna_search.py，区别仅在 --workdir 指向 per-job 目录。
     """
+    ensure_tuning_enabled()
     if job.status == "running" and is_pid_alive(job.pid, job.pid_started_at):
         return job  # 幂等：已在跑，直接返回
 
@@ -663,7 +705,7 @@ LIVE_BACKEND_URL = os.environ.get(
 MLRUNS_ROOT = Path(
     os.environ.get(
         "MLRUNS_ROOT",
-        r"F:\Quant\code\qlib_strategy_dev\mlruns",
+        settings.mlruns_dir or "__MLRUNS_DIR_NOT_CONFIGURED__",
     )
 )
 
@@ -1161,12 +1203,13 @@ def start_verification_subprocess(
           文件，透传给 train script
         - 用 job.pid 而不是内存 registry（与正常搜索 job 一致，复用 reconcile_orphans）
     """
+    ensure_tuning_enabled()
     if not job.workdir:
         raise ValueError(f"verification job {job.id} 缺 workdir")
     workdir = Path(job.workdir)
 
     # 写出 task_config / custom_segments / record_config JSON（透传给 train script）
-    cfg = job.config_snapshot or {}
+    cfg = _expand_strategy_dev_placeholders(job.config_snapshot or {})
     overrides_dir = workdir / "config_overrides"
     overrides_dir.mkdir(parents=True, exist_ok=True)
     config_args: List[str] = []

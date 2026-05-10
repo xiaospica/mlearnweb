@@ -17,7 +17,17 @@ class MLFlowReader:
     STATUS_MAP = {0: "RUNNING", 1: "SCHEDULED", 2: "FINISHED", 3: "FAILED", 4: "KILLED"}
 
     def __init__(self, mlruns_dir: Optional[str] = None):
-        self.mlruns_dir = Path(mlruns_dir or settings.mlruns_dir)
+        raw_dir = mlruns_dir or settings.mlruns_dir
+        self._configured = bool(raw_dir)
+        self.mlruns_dir = Path(raw_dir) if raw_dir else Path("__MLRUNS_DIR_NOT_CONFIGURED__")
+
+    def is_configured(self) -> bool:
+        return self._configured
+
+    def _missing_dir_message(self) -> str:
+        if not self._configured:
+            return "MLRUNS_DIR is not configured"
+        return f"MLRUNS_DIR does not exist: {self.mlruns_dir}"
 
     def _determine_status(self, status_code: int, metrics: Dict[str, Any], tags: Dict[str, str]) -> str:
         if status_code == 2:
@@ -84,6 +94,8 @@ class MLFlowReader:
 
     def list_experiments(self) -> List[Dict[str, Any]]:
         experiments = []
+        if not self._configured:
+            return experiments
         if not self.mlruns_dir.exists():
             return experiments
         for item in self.mlruns_dir.iterdir():
@@ -111,7 +123,7 @@ class MLFlowReader:
 
         前端「实验浏览」的「按 run_id 跳转报告」功能消费此接口。
         """
-        if not self.mlruns_dir.exists():
+        if not self._configured or not self.mlruns_dir.exists():
             return None
         for exp_dir in self.mlruns_dir.iterdir():
             if not exp_dir.is_dir():
@@ -138,6 +150,8 @@ class MLFlowReader:
         return None
 
     def get_experiment(self, experiment_id: str) -> Optional[Dict[str, Any]]:
+        if not self._configured:
+            return None
         exp_dir = self.mlruns_dir / experiment_id
         meta_path = exp_dir / "meta.yaml"
         if not meta_path.exists():

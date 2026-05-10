@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Alert,
   App,
@@ -175,13 +175,13 @@ const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
         class: 'Alpha158Custom',
         module_path: 'factor_factory.alphas.alpha_158_custom_qlib',
         kwargs: {
-          cache_root: 'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\.cache\\factor_store',
+          cache_root: '<STRATEGY_DEV_ROOT>\\factor_factory\\.cache\\factor_store',
           end_time: '2026-01-23 00:00:00',
           filter_instruments_dir:
-            'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\qlib_data_bin\\instruments',
+            '<STRATEGY_DEV_ROOT>\\factor_factory\\qlib_data_bin\\instruments',
           filter_market: null,
           filter_parquet:
-            'F:\\Quant\\code\\qlib_strategy_dev\\factor_factory\\all_ma20_vol_filtered.parquet',
+            '<STRATEGY_DEV_ROOT>\\factor_factory\\all_ma20_vol_filtered.parquet',
           filter_parquet_date_col: 'trade_date',
           filter_parquet_inst_col: 'ts_code',
           fit_end_time: '2021-12-31 00:00:00',
@@ -216,6 +216,14 @@ const DEFAULT_TASK_CONFIG: Record<string, unknown> = {
 const WorkbenchCreatePage: React.FC = () => {
   const navigate = useNavigate()
   const { message } = App.useApp()
+
+  const { data: capabilitiesData } = useQuery({
+    queryKey: ['tuning-capabilities'],
+    queryFn: () => tuningService.capabilities(),
+    staleTime: 60_000,
+  })
+  const capabilities = capabilitiesData?.data
+  const tuningDisabled = capabilities?.enabled === false
 
   const [step, setStep] = useState(0)
   const [advancedJsonMode, setAdvancedJsonMode] = useState(false)
@@ -327,6 +335,10 @@ const WorkbenchCreatePage: React.FC = () => {
   type SubmitMode = 'draft' | 'start' | 'queue'
 
   const handleSubmit = async (mode: SubmitMode) => {
+    if (tuningDisabled) {
+      message.warning((capabilities?.reasons ?? []).join('；') || '训练工作台未启用')
+      return
+    }
     if (!name.trim()) {
       message.error('请填写 Job 名称')
       setStep(0)
@@ -387,6 +399,16 @@ const WorkbenchCreatePage: React.FC = () => {
         </Button>
       }
     >
+      {tuningDisabled && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="训练工作台未启用"
+          description={(capabilities?.reasons ?? []).join('；') || '请配置 STRATEGY_DEV_ROOT 后重启后端'}
+        />
+      )}
+
       <Alert
         type="success"
         showIcon
@@ -816,6 +838,7 @@ const WorkbenchCreatePage: React.FC = () => {
             <Button
               icon={<SaveOutlined />}
               loading={createMutation.isPending}
+              disabled={tuningDisabled}
               onClick={() => handleSubmit('draft')}
             >
               保存草稿
@@ -823,6 +846,7 @@ const WorkbenchCreatePage: React.FC = () => {
             <Button
               icon={<ClockCircleOutlined />}
               loading={createMutation.isPending}
+              disabled={tuningDisabled}
               onClick={() => handleSubmit('queue')}
               title="加入队列：scheduler 在 runner 空闲时自动启动（适合晚上批量提交无人值守）"
             >
@@ -832,6 +856,7 @@ const WorkbenchCreatePage: React.FC = () => {
               type="primary"
               icon={<RocketOutlined />}
               loading={createMutation.isPending || startMutation.isPending}
+              disabled={tuningDisabled}
               onClick={() => handleSubmit('start')}
             >
               立即启动

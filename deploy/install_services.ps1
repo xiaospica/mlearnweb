@@ -53,7 +53,8 @@ param(
     [string]$MLearnwebRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string]$PythonExe     = $null,
     [Parameter(Mandatory = $true)]
-    [string]$LogRoot
+    [string]$LogRoot,
+    [string]$EnvFile       = $null
 )
 
 # PythonExe 默认: PATH 上的 python. install_all.ps1 应显式传 venv python.
@@ -94,7 +95,11 @@ Test-PathOrFail $MLearnwebRoot "MLearnwebRoot"
 Test-PathOrFail $PythonExe "PythonExe"
 Test-PathOrFail "$MLearnwebRoot\backend\app\main.py" "backend\app\main.py (research 入口)"
 Test-PathOrFail "$MLearnwebRoot\backend\app\live_main.py" "backend\app\live_main.py (live 入口)"
-Test-PathOrFail "$MLearnwebRoot\backend\vnpy_nodes.yaml" "backend\vnpy_nodes.yaml (推理节点配置)"
+if ($EnvFile) {
+    Test-PathOrFail $EnvFile "EnvFile"
+    $EnvFile = (Resolve-Path $EnvFile).Path
+    Write-Host "[OK] env file = $EnvFile"
+}
 
 Write-Host "[OK] 路径 + 配置 检查通过"
 
@@ -137,6 +142,11 @@ function Install-NssmService {
     & $nssmExe.Source set $Name AppRestartDelay 10000 | Out-Null
     & $nssmExe.Source set $Name Start SERVICE_AUTO_START | Out-Null
     & $nssmExe.Source set $Name Description $Description | Out-Null
+    $envLines = @("PYTHONUNBUFFERED=1", "PYTHONIOENCODING=utf-8")
+    if ($EnvFile) {
+        $envLines += "MLEARNWEB_ENV_FILE=$EnvFile"
+    }
+    & $nssmExe.Source set $Name AppEnvironmentExtra ($envLines -join "`r`n") | Out-Null
 
     Write-Host "[OK] $Name 装好 (logs -> $LogRoot\$Name.log)"
 }
@@ -147,7 +157,7 @@ function Install-NssmService {
 Install-NssmService `
     -Name "mlearnweb_research" `
     -Application $PythonExe `
-    -Arguments "-m uvicorn app.main:app --host 127.0.0.1 --port 8000 --log-level info" `
+    -Arguments "-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info" `
     -WorkingDirectory "$MLearnwebRoot\backend" `
     -Description "mlearnweb 研究侧 (实验/训练记录/SHAP/因子文档)"
 
@@ -205,15 +215,11 @@ Get-Content $LogRoot\mlearnweb_live.log -Wait -Tail 50
 # 4. 拉推理端测试 (确认 vnpy_nodes.yaml 中 base_url 可达)
 Get-Content $MLearnwebRoot\backend\vnpy_nodes.yaml
 
-# 5. 前端 (开发: 另起 npm run dev; 生产: nginx/IIS)
-cd $MLearnwebRoot\frontend
-npm run dev      # 开发 :5173
-# 或:
-npm run build    # 生产 → dist/, 用 nginx 服务
+# 5. 前端 (install_all.ps1 writes FRONTEND_DIST_DIR and app.main serves dist)
+Get-Content $EnvFile
 
 # 6. 浏览器
-# http://localhost:5173/live-trading  (开发)
-# http://<监控机IP>/  (生产 nginx)
+# http://<监控机IP>:8000/
 
 # 7. 卸载
 .\deploy\uninstall_services.ps1

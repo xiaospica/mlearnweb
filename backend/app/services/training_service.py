@@ -572,6 +572,8 @@ class InSampleBacktestService:
     ) -> Dict[str, Any]:
         from app.core.config import settings
 
+        if not settings.mlruns_dir:
+            return {"success": False, "message": "MLRUNS_DIR is not configured", "data": None}
         mlruns_dir = Path(settings.mlruns_dir)
         run_path = mlruns_dir / experiment_id / run_id
 
@@ -699,6 +701,8 @@ class InSampleBacktestService:
         from app.core.config import settings
         import pickle
 
+        if not settings.mlruns_dir:
+            return {"success": False, "message": "MLRUNS_DIR is not configured", "data": None}
         mlruns_dir = Path(settings.mlruns_dir)
         run_path = mlruns_dir / experiment_id / run_id
 
