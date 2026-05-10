@@ -1082,6 +1082,84 @@ class TestLiveTradingEventProducer:
         )
         assert any(event.get("source") == "vnpy_ws" and event.get("reference") == "cta1:WS1" for event in persisted)
 
+    def test_ws_collector_persists_strategy_logs_and_promotes_errors_to_risk(self, api_client, monkeypatch):
+        import asyncio
+        from app.services.vnpy import ws_collector_service as ws_module
+        from app.services.vnpy import live_trading_event_store as store_module
+
+        client, _, _ = api_client
+        ws_module.reset_ws_state_for_tests()
+        captured = []
+
+        async def capture_strategy_event(event_type, **kwargs):
+            captured.append((event_type, kwargs))
+
+        async def capture_event(event):
+            captured.append((event.event_type, event.as_payload()))
+
+        monkeypatch.setattr(ws_module, "publish_strategy_event", capture_strategy_event)
+        monkeypatch.setattr(ws_module, "publish_event", capture_event)
+
+        async def run():
+            await ws_module.handle_ws_message(
+                "nodeA",
+                {
+                    "topic": "log",
+                    "engine": "SignalStrategyPlus",
+                    "node_id": "nodeA",
+                    "ts": 1770000100.0,
+                    "data": {
+                        "strategy_name": "signal1",
+                        "level": "INFO",
+                        "msg": "[signal1] rebalance completed",
+                    },
+                },
+            )
+            await ws_module.handle_ws_message(
+                "nodeA",
+                {
+                    "topic": "log",
+                    "engine": "SignalStrategyPlus",
+                    "node_id": "nodeA",
+                    "ts": 1770000101.0,
+                    "data": {
+                        "strategy_name": "signal1",
+                        "level": "ERROR",
+                        "msg": "[signal1] failed to submit order",
+                    },
+                },
+            )
+
+        asyncio.run(run())
+        event_types = [item[0] for item in captured]
+        assert "strategy.log.changed" in event_types
+        assert "strategy.risk.changed" in event_types
+
+        logs = store_module.list_strategy_logs(
+            node_id="nodeA",
+            engine="SignalStrategyPlus",
+            strategy_name="signal1",
+            limit=10,
+        )
+        assert [row["severity"] for row in logs] == ["error", "info"]
+        assert all(row["category"] == "runtime_log" for row in logs)
+
+        resp = client.get("/api/live-trading/strategies/nodeA/SignalStrategyPlus/signal1/logs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert any(row["message"] == "[signal1] rebalance completed" for row in data["data"])
+
+        risk_rows = store_module.list_risk_events(
+            node_id="nodeA",
+            engine="SignalStrategyPlus",
+            strategy_name="signal1",
+            category="log",
+            include_ack=True,
+        )
+        assert len(risk_rows) == 1
+        assert risk_rows[0]["severity"] == "error"
+
     def test_rest_fingerprint_tick_publishes_only_on_change(self, fake_client, monkeypatch):
         import asyncio
         from app.services.vnpy import rest_fingerprint_service as fingerprint_module

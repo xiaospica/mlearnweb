@@ -315,6 +315,7 @@ nodes:
 - `services/vnpy/live_trading_events.py` 提供 in-memory event bus、SSE payload、query group 映射与 750ms coalesce。
 - `services/vnpy/risk_event_service.py` 将 strategy variables、orders、node/gateway health 归一为实时 `StrategyRiskEvent`。
 - `services/vnpy/ws_collector_service.py` 由 `app.live_main` 连接 vnpy `/api/v1/ws?token=...`，处理 `strategy/order/trade/position/account/log` topic，并统一转成内部事件。
+- `log` topic 中可归因到策略的普通运行日志持久化为 `runtime_log`，由详情页“日志监控”tab 读取；warning/error 日志额外进入风险事件。
 - `services/vnpy/rest_fingerprint_service.py` 保留为 fallback：WS 在线节点跳过热路径，WS 断线节点继续使用 REST 指纹检测策略状态、持仓、订单和风险摘要变化。
 - `services/vnpy/live_trading_event_store.py` 将关键事件写入 `live_trading_events` 表，支持 dedupe、历史过滤和 `ack_at/ack_by`。
 - `/api/live-trading/events` 只推 query invalidation 事件，不推完整业务数据；前端收到后再通过 REST 拉取权威数据。

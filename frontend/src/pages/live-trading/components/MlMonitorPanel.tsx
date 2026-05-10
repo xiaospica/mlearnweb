@@ -27,7 +27,6 @@ import type {
 import ChartContainer from '@/components/responsive/ChartContainer'
 import BacktestDiffPanel from './BacktestDiffPanel'
 import PredictionHistoryPanel from './PredictionHistoryPanel'
-import HistoricalPositionsCard from './HistoricalPositionsCard'
 import {
   ML_MONITOR_FALLBACK_REFRESH_MS,
   ML_MONITOR_STALE_MS,
@@ -39,9 +38,7 @@ const { Text } = Typography
 
 interface Props {
   nodeId: string
-  engine: string
   strategyName: string
-  gatewayName?: string
   eventsConnected: boolean
 }
 
@@ -212,7 +209,7 @@ function buildTopPsiFeaturesOption(psiByFeature: PsiByFeature | null) {
   }
 }
 
-const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gatewayName, eventsConnected }) => {
+const MlMonitorPanel: React.FC<Props> = ({ nodeId, strategyName, eventsConnected }) => {
   // 180 日窗口覆盖实盘积累和 backfill 测试数据. ICIR window 维持 30 日
   // (与原 Phase 3 设计一致). Refetch 60s 匹配 ml_snapshot_loop 节奏.
   const history = useQuery({
@@ -397,14 +394,6 @@ const MlMonitorPanel: React.FC<Props> = ({ nodeId, engine, strategyName, gateway
       <PredictionHistoryPanel
         nodeId={nodeId}
         strategyName={strategyName}
-        historyDates={historyData.map((m) => m.trade_date || '').filter(Boolean)}
-      />
-
-      <HistoricalPositionsCard
-        nodeId={nodeId}
-        engine={engine}
-        strategyName={strategyName}
-        gatewayName={gatewayName}
         historyDates={historyData.map((m) => m.trade_date || '').filter(Boolean)}
       />
 

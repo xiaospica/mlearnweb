@@ -50,6 +50,9 @@ QUERY_GROUPS_BY_EVENT_TYPE: Dict[str, List[str]] = {
         "strategy_detail",
         "strategy_list",
     ],
+    "strategy.log.changed": [
+        "logs",
+    ],
     "strategy.ml.changed": [
         "ml_latest",
         "ml_metrics",

@@ -98,6 +98,7 @@ export type LiveTradingQueryGroup =
   | 'performance_summary'
   | 'trades'
   | 'risk_events'
+  | 'logs'
   | 'ml_latest'
   | 'ml_metrics'
   | 'history_dates'
@@ -140,6 +141,22 @@ export interface StrategyRiskEvent {
   reason?: string | null
   ack_at?: number | null
   ack_by?: string | null
+}
+
+export interface StrategyLogEvent {
+  event_id: string
+  event_type: string
+  node_id: string
+  engine: string | null
+  strategy_name: string | null
+  severity: RiskSeverity
+  category: 'runtime_log' | string
+  title: string
+  message: string
+  status: string | null
+  event_ts: number
+  source: 'vnpy_ws' | string
+  reason?: string | null
 }
 
 export interface LiveTradingEvent {

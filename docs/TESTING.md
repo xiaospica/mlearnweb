@@ -241,7 +241,7 @@ async def test_ml_snapshot_tick(tmp_path, monkeypatch):
 - risk normalization：`REJECTED`、`ORDER_JUNK`、撤单再报 `R`、普通 `CANCELLED`、长时间 `PARTTRADED`、`last_status=failed`、`replay_status=error`。
 - API degradation：orders/risk-events 空数据不 500；节点不可达返回 node-level critical risk event。
 - event bus：多 SSE client fanout、client unsubscribe、heartbeat、普通事件 coalesce、`error/critical` 不被 coalesce 延迟。
-- WS collector：`strategy/order/trade/position/account/log` topic 能发布对应 invalidation；拒单/log 异常写入 `live_trading_events`。
+- WS collector：`strategy/order/trade/position/account/log` topic 能发布对应 invalidation；普通策略日志进入 `runtime_log`，拒单/log 异常写入风险事件。
 - P3 event store：风险事件 dedupe、历史过滤、`ack_at/ack_by`、默认隐藏已确认事件，`include_ack=true` 可回看。
 - REST fallback：WS connected 的 node 跳过 REST fingerprint 热路径；WS disconnected 后 fingerprint 继续发布事件。
 - production proxy：`/api/live-trading/events` 在 `app.main` 单端口代理下必须保持 streaming，不允许读成 `upstream.content` 后返回。

@@ -7,6 +7,7 @@ export const LIVE_DETAIL_FALLBACK_REFRESH_MS = 30_000
 export const LIVE_SUMMARY_FALLBACK_REFRESH_MS = 30_000
 export const LIVE_TRADES_FALLBACK_REFRESH_MS = 30_000
 export const LIVE_RISK_FALLBACK_REFRESH_MS = 30_000
+export const LIVE_LOGS_FALLBACK_REFRESH_MS = 30_000
 export const ML_MONITOR_FALLBACK_REFRESH_MS = 180_000
 export const ML_MONITOR_STALE_MS = 30_000
 export const HISTORY_POSITION_DATES_STALE_MS = 300_000
@@ -28,6 +29,8 @@ export const liveTradingQueryKeys = {
     ['live-orders', nodeId, engine, strategyName] as const,
   riskEvents: (nodeId: string, engine: string, strategyName: string) =>
     ['live-risk-events', nodeId, engine, strategyName] as const,
+  strategyLogs: (nodeId: string, engine: string, strategyName: string) =>
+    ['live-strategy-logs', nodeId, engine, strategyName] as const,
   mlTopkLatest: (nodeId: string, strategyName: string) =>
     ['ml-topk-latest', nodeId, strategyName] as const,
   mlMetricsHistory: (nodeId: string, strategyName: string) =>
@@ -79,6 +82,9 @@ export async function invalidateLiveStrategyDetailQueries(
     }),
     queryClient.invalidateQueries({
       queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.strategyLogs(nodeId, engine, strategyName),
     }),
     queryClient.invalidateQueries({
       queryKey: liveTradingQueryKeys.mlTopkLatest(nodeId, strategyName),
@@ -141,6 +147,10 @@ async function invalidateIdentityGroup(
   } else if (group === 'risk_events') {
     await queryClient.invalidateQueries({
       queryKey: liveTradingQueryKeys.riskEvents(nodeId, engine, strategyName),
+    })
+  } else if (group === 'logs') {
+    await queryClient.invalidateQueries({
+      queryKey: liveTradingQueryKeys.strategyLogs(nodeId, engine, strategyName),
     })
   } else if (group === 'ml_latest') {
     await Promise.all([

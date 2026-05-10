@@ -313,33 +313,31 @@ async def _handle_account(node_id: str) -> int:
     return await _publish_for_identities("strategy.equity.changed", node_id, matches, reason="vnpy_ws_account")
 
 
-def _log_severity(message: str, level: str) -> Optional[str]:
+def _log_severity(message: str, level: str) -> str:
     lower = f"{level} {message}".lower()
     if any(marker in lower for marker in ERROR_MARKERS):
         return "error"
     if any(marker in lower for marker in WARN_MARKERS):
         return "warning"
-    return None
+    return "info"
 
 
 async def _handle_log(node_id: str, engine: str, data: Dict[str, Any], ts: int) -> int:
     message = _text(data.get("msg") or data.get("message"))
     level = _text(data.get("level"))
     severity = _log_severity(message, level)
-    if not severity:
-        return 0
     match = LOG_STRATEGY_RE.search(message)
     name = _text(data.get("strategy_name")) or (match.group(1) if match else "")
     engine = _engine_for(node_id, name, engine)
-    event = {
-        "event_id": f"{node_id}:{engine}:{name}:log:{ts}:{_stable_hash(data)}",
-        "event_type": "strategy.risk.changed" if name and engine else "node.changed",
+    log_event = {
+        "event_id": f"{node_id}:{engine}:{name}:runtime-log:{ts}:{_stable_hash(data)}",
+        "event_type": "strategy.log.changed" if name and engine else "node.log.changed",
         "node_id": node_id,
         "engine": engine or None,
         "strategy_name": name or None,
         "severity": severity,
-        "category": "log",
-        "title": "策略日志异常" if name else "节点日志异常",
+        "category": "runtime_log",
+        "title": "策略运行日志" if name else "节点运行日志",
         "message": message or level or "vnpy log event",
         "status": level or severity,
         "vt_orderid": None,
@@ -348,10 +346,38 @@ async def _handle_log(node_id: str, engine: str, data: Dict[str, Any], ts: int) 
         "is_resubmit": False,
         "source": "vnpy_ws",
         "reason": "vnpy_ws_log",
+        "query_groups": ["logs"] if name and engine else [],
         "event_ts": ts,
         "raw": data,
     }
-    persist_risk_event(event, source="vnpy_ws")
+    persist_event_payload(
+        log_event,
+        dedupe_key=f"{node_id}:{engine}:{name}:runtime_log:{ts}:{_stable_hash(data)}",
+    )
+
+    count = 1
+    if name and engine:
+        await publish_strategy_event(
+            "strategy.log.changed",
+            node_id=node_id,
+            engine=engine,
+            strategy_name=name,
+            severity=severity,
+            reason="vnpy_ws_log",
+        )
+    if severity not in {"warning", "error", "critical"}:
+        return count
+
+    risk_event = {
+        **log_event,
+        "event_id": f"{node_id}:{engine}:{name}:log-risk:{ts}:{_stable_hash(data)}",
+        "event_type": "strategy.risk.changed" if name and engine else "node.changed",
+        "category": "log",
+        "title": "策略日志异常" if name else "节点日志异常",
+        "query_groups": [],
+    }
+    persist_risk_event(risk_event, source="vnpy_ws")
+    count += 1
     if name and engine:
         await publish_strategy_event(
             "strategy.risk.changed",
@@ -363,7 +389,7 @@ async def _handle_log(node_id: str, engine: str, data: Dict[str, Any], ts: int) 
         )
     else:
         await publish_event(make_event("node.changed", node_id=node_id, severity=severity, reason="vnpy_ws_log"))
-    return 1
+    return count
 
 
 async def handle_ws_message(node_id: str, message: str | bytes | Dict[str, Any]) -> int:

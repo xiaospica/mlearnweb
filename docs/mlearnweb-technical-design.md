@@ -1458,6 +1458,7 @@ graph LR
 
 - `LiveTradingEvent` 是后端到前端的 SSE invalidation 事件，只包含 `event_type`、策略身份、`severity`、`reason`、`query_groups` 和时间戳。
 - `StrategyRiskEvent` 是前端展示用风险事件，由 `risk_event_service` 从 strategy variables、orders、node/gateway health 实时计算，并与 `live_trading_events` 表中的历史事件合并返回。
+- `StrategyLogEvent` 是 per-strategy 运行日志视图，由 vnpy WS `log` topic 持久化为 `live_trading_events.category="runtime_log"`，通过 `/strategies/{node_id}/{engine}/{name}/logs` 读取；异常日志会额外升级为 `StrategyRiskEvent(category="log")`。
 - SSE endpoint 为 `/api/live-trading/events`。它不推送收益曲线、成交、持仓、ML 指标等大对象，避免把后端与 React Query key 或前端展示结构耦合。
 - 前端 `useLiveTradingInvalidations()` 将 query group 映射到 `liveTradingRefresh.ts` 中的 query key，并调用 React Query `invalidateQueries`。
 - SSE connected 时，策略详情页卡片关闭独立高频轮询；SSE disconnected 时启用低频 fallback polling，保证最终一致。
@@ -1472,6 +1473,7 @@ Query group 映射：
 | `performance_summary` | 指标总览 |
 | `trades` | 成交与订单相关视图 |
 | `risk_events` | 顶部风险 Alert、风险事件卡片、列表风险角标 |
+| `logs` | 策略运行日志 tab |
 | `ml_latest` | 最新 TopK、最新预测 summary |
 | `ml_metrics` | ML history / rolling 指标 |
 | `history_dates` | 历史持仓日期、历史预测日期 |

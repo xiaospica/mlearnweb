@@ -11,6 +11,7 @@ const LIVE_EVENT_TYPES = [
   'strategy.equity.changed',
   'strategy.order_trade.changed',
   'strategy.risk.changed',
+  'strategy.log.changed',
   'strategy.ml.changed',
   'strategy.history.changed',
 ]

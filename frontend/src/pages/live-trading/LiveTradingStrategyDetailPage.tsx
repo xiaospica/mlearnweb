@@ -24,10 +24,12 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { liveTradingService } from '@/services/liveTradingService'
 import FullEquityChart from './components/FullEquityChart'
 import CorpActionsCard from './components/CorpActionsCard'
+import HistoricalPositionsCard from './components/HistoricalPositionsCard'
 import LatestTopkCard from './components/LatestTopkCard'
 import MlMonitorPanel from './components/MlMonitorPanel'
 import PositionsTable from './components/PositionsTable'
 import RiskEventsCard from './components/RiskEventsCard'
+import StrategyLogsCard from './components/StrategyLogsCard'
 import StrategyPerformanceSummaryCard from './components/StrategyPerformanceSummaryCard'
 import StrategyActions from './components/StrategyActions'
 import StrategyEditModal from './components/StrategyEditModal'
@@ -377,14 +379,30 @@ const LiveTradingStrategyDetailPage: React.FC = () => {
                     strategyName={name}
                     eventsConnected={eventsConnected}
                   />
-                  <MlMonitorPanel
+                  <HistoricalPositionsCard
                     nodeId={nodeId}
                     engine={engine}
                     strategyName={name}
                     gatewayName={detail.gateway_name || undefined}
+                  />
+                  <MlMonitorPanel
+                    nodeId={nodeId}
+                    strategyName={name}
                     eventsConnected={eventsConnected}
                   />
                 </>
+              ),
+            },
+            {
+              key: 'logs',
+              label: '日志监控',
+              children: (
+                <StrategyLogsCard
+                  nodeId={nodeId}
+                  engine={engine}
+                  strategyName={name}
+                  eventsConnected={eventsConnected}
+                />
               ),
             },
           ]}

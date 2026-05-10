@@ -6,6 +6,7 @@ import type {
   HistoricalPosition,
   LiveTradingResponse,
   StrategyOrder,
+  StrategyLogEvent,
   StrategyRiskEvent,
   NodeStatus,
   PositionDatesResponse,
@@ -132,6 +133,23 @@ export const liveTradingService = {
           include_ack: params?.includeAck,
           severity: params?.severity,
           category: params?.category,
+          since_ts: params?.sinceTs,
+          limit: params?.limit,
+        },
+      })
+      .then((r) => r.data)
+  },
+
+  listStrategyLogs(
+    nodeId: string,
+    engine: string,
+    name: string,
+    params?: { severity?: string; sinceTs?: number; limit?: number },
+  ): Promise<LiveTradingResponse<StrategyLogEvent[]>> {
+    return apiClient
+      .get(`/live-trading/strategies/${enc(nodeId)}/${enc(engine)}/${enc(name)}/logs`, {
+        params: {
+          severity: params?.severity,
           since_ts: params?.sinceTs,
           limit: params?.limit,
         },

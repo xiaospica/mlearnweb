@@ -19,6 +19,7 @@ from app.services.app_settings_service import get_runtime_setting
 logger = logging.getLogger(__name__)
 
 RISK_CATEGORIES = {"strategy", "order", "trade", "log", "node", "gateway"}
+LOG_CATEGORIES = {"runtime_log"}
 
 
 def _now_ms() -> int:
@@ -206,6 +207,39 @@ def list_risk_events(
         rows = (
             q.order_by(LiveTradingEventRecord.event_ts.desc(), LiveTradingEventRecord.id.desc())
             .limit(max(1, min(int(limit), 1000)))
+            .all()
+        )
+        return [_record_to_dict(row) for row in rows]
+    finally:
+        session.close()
+
+
+def list_strategy_logs(
+    *,
+    node_id: str,
+    engine: str,
+    strategy_name: str,
+    severity: Optional[str] = None,
+    since_ts: Optional[int] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """List persisted per-strategy runtime logs from the vnpy WS collector."""
+    SessionLocal = _session_factory()
+    session = SessionLocal()
+    try:
+        q = session.query(LiveTradingEventRecord).filter(
+            LiveTradingEventRecord.category.in_(LOG_CATEGORIES),
+            LiveTradingEventRecord.node_id == node_id,
+            LiveTradingEventRecord.engine == engine,
+            LiveTradingEventRecord.strategy_name == strategy_name,
+        )
+        if severity:
+            q = q.filter(LiveTradingEventRecord.severity == severity)
+        if since_ts is not None:
+            q = q.filter(LiveTradingEventRecord.event_ts >= int(since_ts))
+        rows = (
+            q.order_by(LiveTradingEventRecord.event_ts.desc(), LiveTradingEventRecord.id.desc())
+            .limit(max(1, min(int(limit), 2000)))
             .all()
         )
         return [_record_to_dict(row) for row in rows]

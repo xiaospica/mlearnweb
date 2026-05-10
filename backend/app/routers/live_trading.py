@@ -190,6 +190,31 @@ async def list_strategy_risk_events(
     return _ok(rows, warning=warning)
 
 
+@router.get(
+    "/strategies/{node_id}/{engine}/{name}/logs",
+    response_model=LiveTradingListResponse,
+)
+async def list_strategy_logs(
+    node_id: str,
+    engine: str,
+    name: str,
+    severity: Optional[str] = Query(None, description="按 severity 过滤"),
+    since_ts: Optional[int] = Query(None, ge=0, description="毫秒级时间戳下限"),
+    limit: int = Query(500, ge=1, le=2000),
+) -> LiveTradingListResponse:
+    """指定策略的 vnpy 运行日志；SSE 只负责触发刷新，日志正文通过 REST 读取。"""
+    return _ok(
+        live_trading_event_store.list_strategy_logs(
+            node_id=node_id,
+            engine=engine,
+            strategy_name=name,
+            severity=severity,
+            since_ts=since_ts,
+            limit=limit,
+        )
+    )
+
+
 @router.get("/risk-events", response_model=LiveTradingListResponse)
 async def list_live_trading_risk_events(
     node_id: Optional[str] = Query(None),

@@ -275,6 +275,7 @@ LiveTradingQueryGroup = Literal[
     "performance_summary",
     "trades",
     "risk_events",
+    "logs",
     "ml_latest",
     "ml_metrics",
     "history_dates",
